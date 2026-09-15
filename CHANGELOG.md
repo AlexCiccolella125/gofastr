@@ -7,6 +7,19 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
 
 ## [Unreleased]
 
+### Added
+- **`framework/headless`**: the structure half of a design system.
+  Components render tags, roles, labelling relationships, state
+  attributes and `data-hui-*` hooks with no classes at a nil skin; a
+  `Skin` maps parts to classes; the seams (Slots, Overrides, Binds,
+  Words, Island) are typed and sanitised; every component registers a
+  `Spec` that drives the nil-skin sweep, the seam gates and two goldens.
+  An in-page state change is an `Island` at render time (hard rule 1):
+  `Pagination`, `ToolbarSearch` and a dismissible `Tag` or `Alert`
+  refuse the link-only render; every href passes the anchor policy. Ships the vocabulary, the harness and the basic
+  components; no skin or runtime module binds the hooks yet.
+  `gofastr docs ui-headless`.
+
 ### Changed
 - **One home per helper.** A clone survey over the tree found the same
   bodies re-implemented across packages; each now has one canonical

@@ -228,6 +228,15 @@ framework/
 │                    showcase: renders every design-system component
 │                    against an arbitrary theme. Composes framework/ui, so
 │                    like sdkdocs it is deliberately NOT a uihost option.
+├── headless/        The structure half of a design system: components
+│                    that render tags, roles, labelling and data-hui-*
+│                    hooks with no classes, a Skin that maps parts to
+│                    classes, the seams (Slots, Overrides, Binds, Words,
+│                    Island) and the harness that pins every component.
+│                    Imports core-ui/html, core-ui/interactive (the
+│                    signal-attribute allow-list), core/render and
+│                    agentsinv. No skin or runtime module binds its
+│                    hooks yet; framework/ui does not render through it.
 ├── hook/            HookRegistry / HookType + lifecycle constants
 │                    (BeforeCreate, AfterCreate, etc.)
 ├── i18nui/          Translated default strings for framework UI surfaces
@@ -351,7 +360,7 @@ L3  hook, event, file, cron, access, db,    (leaf packages, no framework-
     pagination, filter, owner, agentsinv,    internal imports at all)
     axecov, datexport, fanout, i18nui,
     image, lifecycle, ratelimit, semcov,
-    docs, dev, routegroup
+    docs, dev, routegroup, headless
     dsl, tenant, softdelete, migrate, sdk    (each imports entity)
     slowquery, outbox, embed, imagefield,    (intra-L3 edges, listed
     contracts                                 below)
@@ -376,7 +385,7 @@ The rule is direction: a package may import packages in lower layers,
 never higher, and intra-layer edges should stay rare and deliberate.
 Today's intra-L3 edges: `slowquery → db`, `outbox → event + db`,
 `embed → db + migrate + tenant`, `imagefield → file + image`,
-`contracts → agentsinv`, `contracts/analyzers → access` (the one
+`contracts → agentsinv`, `headless → agentsinv`, `contracts/analyzers → access` (the one
 Levenshtein, `access.EditDistance`, behind both the capability
 suggester and the rendering rule), `dsl → filter` (the LIKE-escape helpers:
 one canonical `EscapeLikePattern`/`LikeEscapeSuffix`, not a per-package
