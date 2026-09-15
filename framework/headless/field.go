@@ -130,7 +130,7 @@ type ConditionalFieldProps struct {
 // the dependent field reachable only after script had run: a page
 // with script disabled, a reader mode, a crawler and a first paint
 // before script arms would all see a field that never arrived. The
-// module that binds data-ds-when hides and shows it as the watched
+// module that binds data-hui-when hides and shows it as the watched
 // field changes; the hiding is the platform's own hidden attribute,
 // restated by a stylesheet at a specificity nothing here can beat.
 //
@@ -143,9 +143,9 @@ func ConditionalField(p ConditionalFieldProps, s Skin, children ...render.HTML) 
 	if p.Value == "" {
 		panic("headless: ConditionalField requires Value — shown on every value is the same as always shown")
 	}
-	own := Merge(Safe(p.ExtraAttrs, "data-ds-when", "data-ds-when-value"),
+	own := Merge(Safe(p.ExtraAttrs, "data-hui-when", "data-hui-when-value"),
 		Attrs(map[string]string{
-			"id": p.ID, "data-ds-when": p.When, "data-ds-when-value": p.Value,
+			"id": p.ID, "data-hui-when": p.When, "data-hui-when-value": p.Value,
 		}))
 	return El("div", s, PartRoot, own, children...)
 }
@@ -202,7 +202,7 @@ func init() {
 	Register(Spec{
 		Name:  "ConditionalField",
 		Parts: []Part{PartRoot},
-		Hooks: []string{"data-ds-when", "data-ds-when-value"},
+		Hooks: []string{"data-hui-when", "data-hui-when-value"},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{

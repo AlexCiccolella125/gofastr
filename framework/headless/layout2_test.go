@@ -9,7 +9,7 @@ import "testing"
 // them.
 func TestSpacerIsHiddenAndEmpty(t *testing.T) {
 	got := Spacer(SpacerProps{Grow: 1}, nil)
-	has(t, got, `<span aria-hidden="true" data-ds-grow="1"></span>`,
+	has(t, got, `<span aria-hidden="true" data-hui-grow="1"></span>`,
 		"a spacer is anything other than an empty, hidden span carrying its grow factor")
 }
 

@@ -106,19 +106,19 @@ func FileUpload(p FileUploadProps, s Skin) render.HTML {
 			Attrs(map[string]string{"id": hintID}), render.Text(p.Hint)))
 	}
 
-	own := Attrs(map[string]string{"data-ds-drop-input": p.ID})
-	own["data-ds-drop"] = ""
+	own := Attrs(map[string]string{"data-hui-drop-input": p.ID})
+	own["data-hui-drop"] = ""
 	return El("div", s, PartRoot, own,
 		El("label", s, PartDropZone, Attrs(map[string]string{"for": p.ID}), zoneKids...),
 		El("input", s, PartDropInput, input),
 		// Populated by the runtime as files are chosen, so the names
 		// are on screen as well as announced.
-		El("ul", s, PartDropList, Mark(Attrs(map[string]string{"role": "list"}), "data-ds-drop-list")),
+		El("ul", s, PartDropList, Mark(Attrs(map[string]string{"role": "list"}), "data-hui-drop-list")),
 		// role=status already means polite; stating it twice can
 		// announce twice.
 		El("span", s, PartStatus, Mark(Attrs(map[string]string{
 			"role": "status",
-		}), "data-ds-drop-status")),
+		}), "data-hui-drop-status")),
 	)
 }
 
@@ -138,7 +138,7 @@ func init() {
 	Register(Spec{
 		Name:  "FileUpload",
 		Parts: []Part{PartRoot, PartDropZone, PartText, PartDropCTA, PartDropHint, PartDropInput, PartDropList, PartStatus},
-		Hooks: []string{"data-ds-drop", "data-ds-drop-input", "data-ds-drop-list", "data-ds-drop-status"},
+		Hooks: []string{"data-hui-drop", "data-hui-drop-input", "data-hui-drop-list", "data-hui-drop-status"},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{

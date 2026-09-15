@@ -467,7 +467,7 @@ type SpacerProps struct {
 	// the stylesheet wires exactly those four factors: a number the
 	// sheet does not carry would be a factor that renders as 1.
 	//
-	// It travels as data-ds-grow rather than a style, because an
+	// It travels as data-hui-grow rather than a style, because an
 	// inline style is a rule the CSP drops and a class per factor is
 	// a class the skin has to enumerate from a number it cannot see.
 	Grow int
@@ -507,8 +507,8 @@ func Spacer(p SpacerProps, s Skin) render.HTML {
 	if p.Leader && p.Rule {
 		panic("headless: Spacer cannot draw a leader and a rule in the same space")
 	}
-	own := Merge(Safe(p.ExtraAttrs, "data-ds-grow"),
-		Attrs(map[string]string{"id": p.ID, "data-ds-grow": strconv.Itoa(p.Grow)}))
+	own := Merge(Safe(p.ExtraAttrs, "data-hui-grow"),
+		Attrs(map[string]string{"id": p.ID, "data-hui-grow": strconv.Itoa(p.Grow)}))
 	own["aria-hidden"] = "true"
 	mods(own, s, "min", p.Min, "max", p.Max)
 	if p.Leader || p.Rule {
@@ -527,7 +527,7 @@ func init() {
 	Register(Spec{
 		Name:  "Spacer",
 		Parts: []Part{PartRoot},
-		Hooks: []string{"data-ds-grow"},
+		Hooks: []string{"data-hui-grow"},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{

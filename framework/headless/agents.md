@@ -3,7 +3,7 @@
 The headless layer renders a component's tags, roles, labelling
 relationships, state attributes and runtime hooks, and nothing else: no
 classes at a nil skin, no CSS, no script. A skin (a flat map from part
-to class) dresses it; a runtime module binds its `data-ds-*` hooks. The
+to class) dresses it; a runtime module binds its `data-hui-*` hooks. The
 harness proves every registered component against the same contract, so
 a skin can be replaced without a single accessibility guarantee moving.
 No skin or runtime module ships in this repository yet; `framework/ui`
@@ -49,7 +49,7 @@ English words, `spec_golden_words.txt` at probe words).
 ## Don't reinvent
 
 - **A class to find an element from script.** The runtime binds to
-  `data-ds-*` hooks only; a skin may rename every class.
+  `data-hui-*` hooks only; a skin may rename every class.
 - **A link that changes in-page state.** `Pagination`, `ToolbarSearch`,
   a `Tag` with a dismiss and an `Alert` with a dismiss require an
   `Island` and refuse to render without one; the same element keeps

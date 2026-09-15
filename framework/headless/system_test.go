@@ -38,7 +38,7 @@ func TestSystemBannerIsQuietUnlessOffline(t *testing.T) {
 	off := SystemBanner(SystemBannerProps{ID: "sys", Title: "Connection lost", Offline: true, Tone: "warning"}, nil)
 	has(t, off, `role="alert"`, "losing the connection is not announced as urgent")
 	has(t, off, `aria-live="assertive"`, "the offline banner does not say how urgent it is")
-	has(t, off, `data-ds-system-offline=""`, "the runtime cannot find the banner it owns")
+	has(t, off, `data-hui-system-offline=""`, "the runtime cannot find the banner it owns")
 }
 
 // The offline banner is the runtime's: it is shown when the framework
@@ -53,12 +53,12 @@ func TestSystemBannerOfflineRefusesShown(t *testing.T) {
 }
 
 // The dismiss is a button, not a link: dismissing needs no navigation,
-// only the module that binds data-ds-system-dismiss. It names what it
+// only the module that binds data-hui-system-dismiss. It names what it
 // dismisses, because three banners each called "Dismiss" say which
 // nothing.
 func TestSystemBannerDismissIsAButtonWithAName(t *testing.T) {
 	got := SystemBanner(SystemBannerProps{ID: "sys", Title: "A new version is ready", Tone: "success"}, nil)
-	has(t, got, "data-ds-system-dismiss", "the dismiss carries no hook for the runtime")
+	has(t, got, "data-hui-system-dismiss", "the dismiss carries no hook for the runtime")
 	has(t, got, `aria-label="Dismiss: A new version is ready"`, "the dismiss does not say what it closes")
 	if !strings.Contains(string(got), "<button") {
 		t.Error("the dismiss is not a button")
@@ -71,9 +71,9 @@ func TestSystemBannerDismissIsAButtonWithAName(t *testing.T) {
 func TestSystemBannerDismissDefaultsToYes(t *testing.T) {
 	no := false
 	got := SystemBanner(SystemBannerProps{ID: "sys", Title: "Deploy in progress", Dismiss: &no}, nil)
-	hasNot(t, got, "data-ds-system-dismiss", "Dismiss: false still rendered a dismiss button")
+	hasNot(t, got, "data-hui-system-dismiss", "Dismiss: false still rendered a dismiss button")
 	defaulted := SystemBanner(SystemBannerProps{ID: "sys", Title: "Deploy in progress"}, nil)
-	has(t, defaulted, "data-ds-system-dismiss", "the default dismissed the banner")
+	has(t, defaulted, "data-hui-system-dismiss", "the default dismissed the banner")
 }
 
 // The id is the message's identity — the runtime remembers it so the

@@ -51,7 +51,7 @@ type Spec struct {
 	// empty set is the correct answer for most components: a seam is
 	// offered where the component's own content carries no guarantee.
 	Fillable []Part
-	// Hooks are the data-ds-* attributes this component publishes for
+	// Hooks are the data-hui-* attributes this component publishes for
 	// the runtime. Naming them here is what lets a test prove the
 	// runtime is not bound to an attribute nothing renders.
 	Hooks []string

@@ -202,24 +202,24 @@ func TestEndpointsRefuseTheBackslashSpelling(t *testing.T) {
 // names are case-insensitive, so a request spelled DATA-FUI-RPC is
 // data-fui-rpc in the DOM; the runtime's privileged unprefixed keys —
 // data-behavior, data-island and their family — carry no data-fui- to
-// match; and this package's own data-ds-* hooks are the contract
+// match; and this package's own data-hui-* hooks are the contract
 // between a component and the module that binds it, so a forged one
 // binds behaviour to an element never built for it. All three were
 // let through by a check on the spelling as written.
 func TestSafeRefusesFoldedAndPrivilegedKeys(t *testing.T) {
 	got := Badge(BadgeProps{Label: "x", ExtraAttrs: html.Attrs{
-		"DATA-FUI-RPC":   "/evil",
-		"Data-Island":    "smuggled",
-		"data-behavior":  "/evil.js",
-		"data-action":    "delete",
-		"data-param-id":  "1",
-		"data-kiln-tool": "t",
-		"STYLE":          "display:none",
-		"data-ds-reveal": "",
-		"DATA-DS-WHEN":   "forged",
-		"data-testid":    "kept",
+		"DATA-FUI-RPC":    "/evil",
+		"Data-Island":     "smuggled",
+		"data-behavior":   "/evil.js",
+		"data-action":     "delete",
+		"data-param-id":   "1",
+		"data-kiln-tool":  "t",
+		"STYLE":           "display:none",
+		"data-hui-reveal": "",
+		"DATA-HUI-WHEN":   "forged",
+		"data-testid":     "kept",
 	}}, nil)
-	for _, bad := range []string{"/evil", "smuggled", "delete", "data-param", "data-kiln", "display:none", "data-ds-", "forged"} {
+	for _, bad := range []string{"/evil", "smuggled", "delete", "data-param", "data-kiln", "display:none", "data-hui-", "forged"} {
 		hasNot(t, got, bad, "a refused attribute arrived through ExtraAttrs")
 	}
 	has(t, got, `data-testid="kept"`, "an ordinary attribute was dropped with the refused ones")

@@ -24,8 +24,8 @@ func TestConditionalFieldIsRenderedVisible(t *testing.T) {
 // is watched, and which of its values shows the region.
 func TestConditionalFieldCarriesItsHooks(t *testing.T) {
 	got := ConditionalField(ConditionalFieldProps{When: "notify", Value: "webhook"}, nil)
-	has(t, got, `data-ds-when="notify"`, "the watched field's name is missing")
-	has(t, got, `data-ds-when-value="webhook"`, "the value that shows the region is missing")
+	has(t, got, `data-hui-when="notify"`, "the watched field's name is missing")
+	has(t, got, `data-hui-when-value="webhook"`, "the value that shows the region is missing")
 }
 
 // A condition that watches nothing, or fires on every value, is a div
@@ -44,8 +44,8 @@ func TestConditionalFieldRefusesIncompleteConditions(t *testing.T) {
 func TestConditionalFieldHooksCannotBeStolen(t *testing.T) {
 	got := ConditionalField(ConditionalFieldProps{
 		When: "notify", Value: "webhook",
-		ExtraAttrs: html.Attrs{"data-ds-when": "evil", "data-ds-when-value": "evil"},
+		ExtraAttrs: html.Attrs{"data-hui-when": "evil", "data-hui-when-value": "evil"},
 	}, nil, render.Text("x"))
-	has(t, got, `data-ds-when="notify"`, "the owned hook was lost")
+	has(t, got, `data-hui-when="notify"`, "the owned hook was lost")
 	hasNot(t, got, `"evil"`, "a caller forged the hook the runtime binds to")
 }

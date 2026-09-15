@@ -35,14 +35,14 @@ both directions.
   valid and renders unstyled. Variants are looked up as
   `<part>--<variant>`, so the headless layer passes a variant name
   through without knowing what any of them mean.
-- A **hook** is a `data-ds-*` attribute a runtime binds to. A component
+- A **hook** is a `data-hui-*` attribute a runtime binds to. A component
   declares the hooks it publishes in its `Spec`; a runtime that binds
   to an undeclared hook is bound to nothing.
 - **Slots** replace the content of the parts a component lists as
   fillable. Most list none: a slot exists only where the component
   composes something no prop can express.
 - **Overrides** add attributes to a part, through a sanitiser that
-  refuses `id`, `style`, every `data-ds-*` hook, every `data-fui-*`
+  refuses `id`, `style`, every `data-hui-*` hook, every `data-fui-*`
   key and the runtime's privileged unprefixed keys (`data-behavior`,
   `data-island`, `data-action` and their family), compares names the
   way the browser folds them, and never beats an attribute the
@@ -159,7 +159,7 @@ Divider, Spacer, Spinner, Skeleton, Alert, SystemBanner, Badge, Tag,
 Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarSearch, Pagination, Steps,
 Timeline, OptimisticAction and ToggleAction.
 
-No skin, stylesheet or runtime module for the `data-ds-*` hooks ships
+No skin, stylesheet or runtime module for the `data-hui-*` hooks ships
 in this repository yet: the hooks are the contract that module will be
 written to, and every component renders markup that is correct and
 usable without it. `framework/ui` is today's styled layer and does not
@@ -169,7 +169,7 @@ module and that adoption follow in their own changes.
 ## Common mistakes
 
 - **Finding an element from script by its class.** The runtime binds to
-  `data-ds-*` hooks only. A skin may rename every class, and a class
+  `data-hui-*` hooks only. A skin may rename every class, and a class
   used as a hook is the one thing it cannot rename.
 - **Rendering a pager or a search form without an Island.** That is a
   route for an in-page state change, and the component refuses it at
@@ -182,7 +182,7 @@ module and that adoption follow in their own changes.
   agreed; a control built from anything else drifts.
 - **Setting an attribute whose presence is the value through `Attrs`.**
   `Attrs` drops empty values on purpose; `hidden`, `popover`, `open`
-  and every `data-ds-*` hook go through `Mark`, and boolean HTML
+  and every `data-hui-*` hook go through `Mark`, and boolean HTML
   attributes through `Flag`.
 - **Adding an English string to a component.** Give it a `Words` field
   with a doc comment saying its shape. The source walk in

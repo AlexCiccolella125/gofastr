@@ -3,7 +3,7 @@ package headless
 // The text-entry family: the single-line input, the multiline
 // textarea, the native select, and the two affix-shell controls
 // (password with its reveal button, colour with its swatch).
-// Structure, labelling and the data-ds-* hooks a runtime module binds
+// Structure, labelling and the data-hui-* hooks a runtime module binds
 // to live here; heights, borders and class structure live in the skin.
 
 import (
@@ -251,7 +251,7 @@ type PasswordProps struct {
 }
 
 // Password renders the affix shell: a div carrying the runtime's
-// data-ds-affix hook, with a borderless input and a reveal button
+// data-hui-affix hook, with a borderless input and a reveal button
 // inside. The shell owns the one border, so nothing stacks a border
 // on a border.
 //
@@ -266,9 +266,9 @@ func Password(p PasswordProps, s Skin) render.HTML {
 		panic("headless: Password requires Name — a control with no name submits nothing")
 	}
 	input := Merge(Safe(p.Extra), html.Attrs{
-		"data-ds-affix-input": "",
-		"type":                "password",
-		"name":                p.Name,
+		"data-hui-affix-input": "",
+		"type":                 "password",
+		"name":                 p.Name,
 	})
 	attrsSet(input, "placeholder", p.Placeholder)
 	attrsSet(input, "id", p.ID)
@@ -279,24 +279,24 @@ func Password(p PasswordProps, s Skin) render.HTML {
 		input["aria-invalid"] = "true"
 	}
 
-	// The module that binds data-ds-reveal retypes the input and swaps
+	// The module that binds data-hui-reveal retypes the input and swaps
 	// these four strings, so both the label and the accessible name
 	// stay true to what the button will do next. They travel as data-*
 	// rather than being hardcoded in that module so a caller can
 	// localise them.
 	reveal := html.Attrs{
-		"type":               "button",
-		"data-ds-reveal":     "",
-		"aria-pressed":       "false",
-		"aria-label":         p.Seams.W().ShowPassword,
-		"data-ds-show-label": p.Seams.W().ShowPassword,
-		"data-ds-hide-label": p.Seams.W().HidePassword,
-		"data-ds-show-text":  p.Seams.W().RevealShow,
-		"data-ds-hide-text":  p.Seams.W().RevealHide,
+		"type":                "button",
+		"data-hui-reveal":     "",
+		"aria-pressed":        "false",
+		"aria-label":          p.Seams.W().ShowPassword,
+		"data-hui-show-label": p.Seams.W().ShowPassword,
+		"data-hui-hide-label": p.Seams.W().HidePassword,
+		"data-hui-show-text":  p.Seams.W().RevealShow,
+		"data-hui-hide-text":  p.Seams.W().RevealHide,
 	}
 	Flag(reveal, "disabled", p.Disabled)
 
-	shell := html.Attrs{"data-ds-affix": ""}
+	shell := html.Attrs{"data-hui-affix": ""}
 	if p.Invalid {
 		// The skin colours the shell's border off data-invalid; the
 		// input inside has no border of its own to colour.
@@ -362,11 +362,11 @@ func Color(p ColorProps, s Skin) render.HTML {
 	// picker can show: "var(--color-primary)" is a legitimate value
 	// and type=color would silently rewrite it to #000000 on submit.
 	swatch := html.Attrs{
-		"data-ds-affix-swatch": "",
-		"type":                 "color",
-		"value":                value,
-		"tabindex":             "-1",
-		"aria-label":           fmt.Sprintf(p.Seams.W().PickColor, p.Name),
+		"data-hui-affix-swatch": "",
+		"type":                  "color",
+		"value":                 value,
+		"tabindex":              "-1",
+		"aria-label":            fmt.Sprintf(p.Seams.W().PickColor, p.Name),
 	}
 	if p.ID != "" {
 		swatch["id"] = p.ID + "-picker"
@@ -374,13 +374,13 @@ func Color(p ColorProps, s Skin) render.HTML {
 	Flag(swatch, "disabled", p.Disabled)
 
 	hex := Merge(Safe(p.Extra), html.Attrs{
-		"data-ds-affix-input": "",
-		"type":                "text",
-		"name":                p.Name,
-		"value":               p.Value,
-		"spellcheck":          "false",
-		"autocapitalize":      "off",
-		"autocomplete":        "off",
+		"data-hui-affix-input": "",
+		"type":                 "text",
+		"name":                 p.Name,
+		"value":                p.Value,
+		"spellcheck":           "false",
+		"autocapitalize":       "off",
+		"autocomplete":         "off",
 	})
 	attrsSet(hex, "id", p.ID)
 	attrsSet(hex, "aria-describedby", p.DescribedBy)
@@ -389,7 +389,7 @@ func Color(p ColorProps, s Skin) render.HTML {
 		hex["aria-invalid"] = "true"
 	}
 
-	shell := html.Attrs{"data-ds-affix": "", "data-ds-color": ""}
+	shell := html.Attrs{"data-hui-affix": "", "data-hui-color": ""}
 	if p.Invalid || (p.Value != "" && !pickable) {
 		shell["data-invalid"] = ""
 	}
@@ -486,8 +486,8 @@ func init() {
 	Register(Spec{
 		Name:  "Password",
 		Parts: []Part{PartRoot, PartControl, PartAffixButton},
-		Hooks: []string{"data-ds-affix", "data-ds-affix-input", "data-ds-reveal",
-			"data-ds-show-label", "data-ds-hide-label", "data-ds-show-text", "data-ds-hide-text"},
+		Hooks: []string{"data-hui-affix", "data-hui-affix-input", "data-hui-reveal",
+			"data-hui-show-label", "data-hui-hide-label", "data-hui-show-text", "data-hui-hide-text"},
 		WithSeams: func(s Skin, seams Seams) render.HTML {
 			return Password(PasswordProps{Name: "token", ID: "token", Seams: seams}, s)
 		},
@@ -507,7 +507,7 @@ func init() {
 	Register(Spec{
 		Name:  "Color",
 		Parts: []Part{PartRoot, PartControl, PartAffixSwatch},
-		Hooks: []string{"data-ds-affix", "data-ds-color", "data-ds-affix-input", "data-ds-affix-swatch"},
+		Hooks: []string{"data-hui-affix", "data-hui-color", "data-hui-affix-input", "data-hui-affix-swatch"},
 		WithSeams: func(s Skin, seams Seams) render.HTML {
 			return Color(ColorProps{Name: "accent", ID: "accent", Value: "#10b981", Seams: seams}, s)
 		},

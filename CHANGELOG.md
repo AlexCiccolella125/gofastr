@@ -10,7 +10,7 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
 ### Added
 - **`framework/headless`**: the structure half of a design system.
   Components render tags, roles, labelling relationships, state
-  attributes and `data-ds-*` hooks with no classes at a nil skin; a
+  attributes and `data-hui-*` hooks with no classes at a nil skin; a
   `Skin` maps parts to classes; the seams (Slots, Overrides, Binds,
   Words, Island) are typed and sanitised; every component registers a
   `Spec` that drives the nil-skin sweep, the seam gates and two goldens.

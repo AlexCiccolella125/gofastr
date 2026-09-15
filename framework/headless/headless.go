@@ -18,7 +18,7 @@
 // Skin renders the same markup with no classes at all, which is what
 // "headless" means and what the goldens pin. Seven things are named in
 // a component's contract, and the harness checks each: its Parts, its
-// runtime hooks (data-ds-*), and the seams a caller reaches in through
+// runtime hooks (data-hui-*), and the seams a caller reaches in through
 // — Slots, Overrides, Binds, Words, and for a component that changes
 // in-page state, an Island. See box.go, words.go and island.go.
 //
@@ -31,7 +31,7 @@
 // attribute allow-list a Bind is checked against), plus the agents
 // inventory registration every framework subpackage carries.
 //
-// No runtime module binds the data-ds-* hooks in this repository yet,
+// No runtime module binds the data-hui-* hooks in this repository yet,
 // and no skin dresses the parts: the hooks are the contract that
 // module will be written to, and every component renders markup that
 // is correct and usable without it. framework/ui is today's styled
@@ -133,7 +133,7 @@ func Attrs(pairs map[string]string) html.Attrs {
 	return out
 }
 
-// Mark sets attributes whose PRESENCE is the value: the data-ds-*
+// Mark sets attributes whose PRESENCE is the value: the data-hui-*
 // hooks a runtime binds to, and the HTML attributes that work the same
 // way — hidden, popover, open, inert.
 //
@@ -179,7 +179,7 @@ func Flag(a html.Attrs, name string, on bool) html.Attrs {
 // state), data-action and data-param-* (a compiled server action and
 // its arguments) and data-kiln-* (the legacy tool delegators). The
 // runtime re-checks some of their values; the seam's job is that they
-// never arrive. And every data-ds-* key, this package's own hooks: a
+// never arrive. And every data-hui-* key, this package's own hooks: a
 // forged one binds behaviour to an element that was never built for
 // it. A component sets its own hooks after the seam, so nothing it
 // renders is refused here.
@@ -189,7 +189,7 @@ func refused(key string) bool {
 	case "style", "data-behavior", "data-island", "data-widget", "data-component", "data-bind", "data-action":
 		return true
 	}
-	for _, prefix := range []string{"data-ds-", "data-fui-", "data-action-", "data-param-", "data-kiln-"} {
+	for _, prefix := range []string{"data-hui-", "data-fui-", "data-action-", "data-param-", "data-kiln-"} {
 		if strings.HasPrefix(k, prefix) {
 			return true
 		}

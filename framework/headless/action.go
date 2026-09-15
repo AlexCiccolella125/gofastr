@@ -22,7 +22,7 @@ import (
 // What the framework's runtime does NOT do is tell anyone: on failure
 // it plays a shake and announces nothing. Both components here render
 // a status span — role="status", polite, visually hidden — and put
-// the failure sentence on the root as data-ds-action-failed, which is
+// the failure sentence on the root as data-hui-action-failed, which is
 // everything a runtime module that binds the hooks needs to turn the
 // framework's bubbled rolled-back event into words.
 
@@ -82,7 +82,7 @@ func checkLabelsDiffer(component, idle, done string) {
 }
 
 // safeActionExtras is Safe with the prefixes the lifecycle owns added:
-// a caller may not forge a data-ds-* hook any more than a data-fui-*
+// a caller may not forge a data-hui-* hook any more than a data-fui-*
 // one, and the names Safe takes exactly — type, disabled, data-state,
 // aria-busy, aria-pressed — are the ones the runtime rewrites as the
 // mutation moves. An extra that won any of them would desynchronise
@@ -338,8 +338,8 @@ func renderAction(a action, s Skin) render.HTML {
 	// finds the button, and the span it writes to is inside it, so
 	// the announcement never has to reach for anything the flip
 	// already moved.
-	own["data-ds-action-failed"] = orDefault(a.failedText, a.seams.W().ActionFailed)
-	Mark(own, "data-ds-action")
+	own["data-hui-action-failed"] = orDefault(a.failedText, a.seams.W().ActionFailed)
+	Mark(own, "data-hui-action")
 	Flag(own, "disabled", a.disabled)
 	if cls := s.Variant(PartRoot, a.variant); cls != "" {
 		own["class"] = cls
@@ -359,7 +359,7 @@ func renderAction(a action, s Skin) render.HTML {
 		// cannot see it.
 		b.El("span", PartVisuallyHidden, Mark(Attrs(map[string]string{
 			"role": "status",
-		}), "data-ds-action-status")),
+		}), "data-hui-action-status")),
 	}
 	return b.El("button", PartRoot, own, kids...)
 }
@@ -386,7 +386,7 @@ func init() {
 	Register(Spec{
 		Name:  "OptimisticAction",
 		Parts: []Part{PartRoot, PartIcon, PartActionIdle, PartActionDone, PartVisuallyHidden},
-		Hooks: []string{"data-ds-action", "data-ds-action-failed", "data-ds-action-status"},
+		Hooks: []string{"data-hui-action", "data-hui-action-failed", "data-hui-action-status"},
 		WithSeams: func(s Skin, seams Seams) render.HTML {
 			return OptimisticAction(OptimisticActionProps{
 				Endpoint: "/follow", IdleLabel: "Follow", SuccessLabel: "Following",
@@ -436,7 +436,7 @@ func init() {
 	Register(Spec{
 		Name:  "ToggleAction",
 		Parts: []Part{PartRoot, PartIcon, PartActionIdle, PartActionDone, PartVisuallyHidden},
-		Hooks: []string{"data-ds-action", "data-ds-action-failed", "data-ds-action-status"},
+		Hooks: []string{"data-hui-action", "data-hui-action-failed", "data-hui-action-status"},
 		WithSeams: func(s Skin, seams Seams) render.HTML {
 			return ToggleAction(ToggleActionProps{
 				Endpoint: "/watch", IdleLabel: "Watch", CommittedLabel: "Watching",

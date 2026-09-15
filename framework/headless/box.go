@@ -28,7 +28,7 @@ package headless
 //   - it cannot set id. Ids are how a label finds its control and how
 //     aria-describedby finds its hint; a caller that renames one
 //     breaks a relationship it cannot see.
-//   - it cannot set or forge a data-ds-* hook. Those are the contract
+//   - it cannot set or forge a data-hui-* hook. Those are the contract
 //     between the markup and the runtime; a forged one binds
 //     behaviour to an element that was never built for it.
 //   - it cannot set style. A host serving default-src 'self' with no

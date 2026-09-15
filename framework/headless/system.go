@@ -73,7 +73,7 @@ type SystemBannerProps struct {
 	// banner ships hidden and something shows it.
 	Shown bool
 	// Offline marks this banner as the built-in connection message.
-	// The root carries data-ds-system-offline for the module that
+	// The root carries data-hui-system-offline for the module that
 	// binds it to show when the framework reports the connection lost
 	// and hide on reconnect — so it always ships hidden, and Shown on
 	// an Offline banner is refused: that module owns it.
@@ -118,13 +118,13 @@ func SystemBanner(p SystemBannerProps, s Skin) render.HTML {
 	}
 
 	own := Merge(Safe(p.ExtraAttrs, "role", "aria-live", "hidden"), Attrs(map[string]string{
-		"data-ds-system-id": p.ID,
+		"data-hui-system-id": p.ID,
 	}))
-	Mark(own, "data-ds-system")
+	Mark(own, "data-hui-system")
 	if p.Offline {
 		own["role"] = "alert"
 		own["aria-live"] = "assertive"
-		Mark(own, "data-ds-system-offline", "hidden")
+		Mark(own, "data-hui-system-offline", "hidden")
 	} else {
 		own["role"] = "status"
 		Flag(own, "hidden", !p.Shown)
@@ -153,7 +153,7 @@ func SystemBanner(p SystemBannerProps, s Skin) render.HTML {
 		dismiss := Mark(Attrs(map[string]string{
 			"type":       "button",
 			"aria-label": orDefault(p.DismissLabel, fmt.Sprintf(p.Seams.W().DismissTitled, p.Title)),
-		}), "data-ds-system-dismiss")
+		}), "data-hui-system-dismiss")
 		kids = append(kids, b.El("button", PartDismiss, dismiss, render.Text("×")))
 	}
 	return b.El("div", PartRoot, own, kids...)
@@ -164,8 +164,8 @@ func init() {
 		Name: "SystemBanner",
 		Parts: []Part{PartRoot, PartTitle, PartText, PartActions,
 			PartDismiss, PartVisuallyHidden},
-		Hooks: []string{"data-ds-system", "data-ds-system-id",
-			"data-ds-system-dismiss", "data-ds-system-offline"},
+		Hooks: []string{"data-hui-system", "data-hui-system-id",
+			"data-hui-system-dismiss", "data-hui-system-offline"},
 		WithSeams: func(s Skin, seams Seams) render.HTML {
 			return SystemBanner(SystemBannerProps{
 				ID: "sys-seams", Title: "Deploy in progress", Shown: true, Seams: seams,

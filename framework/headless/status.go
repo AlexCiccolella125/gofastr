@@ -100,7 +100,7 @@ func Skeleton(p SkeletonProps, s Skin) render.HTML {
 		// The last line of a paragraph is short, and a skeleton that
 		// draws every line full width reads as a block, not as text.
 		if n > 1 && i == n-1 {
-			attrs["data-ds-skeleton-last"] = ""
+			attrs["data-hui-skeleton-last"] = ""
 		}
 		part := PartSkeleton
 		if p.Shape != "" {
@@ -109,7 +109,7 @@ func Skeleton(p SkeletonProps, s Skin) render.HTML {
 		bars = append(bars, El("span", s, part, attrs, render.HTML("")))
 	}
 	own := Merge(Safe(p.ExtraAttrs), Attrs(map[string]string{
-		"id": p.ID, "data-ds-lines": strconv.Itoa(n),
+		"id": p.ID, "data-hui-lines": strconv.Itoa(n),
 	}))
 	own["role"] = "status"
 	return El("div", s, PartRoot, own,
@@ -133,7 +133,7 @@ func init() {
 	Register(Spec{
 		Name:  "Skeleton",
 		Parts: []Part{PartRoot, PartSkeleton, PartVisuallyHidden},
-		Hooks: []string{"data-ds-lines", "data-ds-skeleton-last"},
+		Hooks: []string{"data-hui-lines", "data-hui-skeleton-last"},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{

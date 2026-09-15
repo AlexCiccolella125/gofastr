@@ -56,7 +56,7 @@ type FormProps struct {
 //
 // The interesting part is what happens after a failed submit. The
 // server re-renders with Errors set; the module that binds
-// data-ds-form-errors then moves focus to the summary, which is
+// data-hui-form-errors then moves focus to the summary, which is
 // role="alert" and tabindex="-1". Without that
 // move, a screen reader user is left at the top of an unchanged-looking
 // page with no indication anything happened — the single most common
@@ -90,7 +90,7 @@ func Form(p FormProps, s Skin, fields ...render.HTML) render.HTML {
 	if p.Errors != "" {
 		// The hook says "there are errors in here"; the runtime moves
 		// focus to the summary once, on load.
-		Mark(own, "data-ds-form-errors")
+		Mark(own, "data-hui-form-errors")
 		kids = append(kids, p.Errors)
 	}
 	kids = append(kids, El("div", s, PartFormBody, nil, fields...))
@@ -136,7 +136,7 @@ func init() {
 	Register(Spec{
 		Name:  "Form",
 		Parts: []Part{PartRoot, PartFormBody, PartFormActions},
-		Hooks: []string{"data-ds-form-errors"},
+		Hooks: []string{"data-hui-form-errors"},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			appName := Field(FieldProps{Label: "App name", For: "new-app-name"}, k.For("Field"),

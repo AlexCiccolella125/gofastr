@@ -37,7 +37,7 @@ func TestButtonCarriesARequestOnlyThroughAction(t *testing.T) {
 }
 
 func TestButtonActionAcceptsOnlyRequestAttributes(t *testing.T) {
-	for _, k := range []string{"data-fui-signal", "data-fui-pane-key", "data-fui-comp", "data-fui-optimistic-endpoint", "onclick", "data-ds-copy"} {
+	for _, k := range []string{"data-fui-signal", "data-fui-pane-key", "data-fui-comp", "data-fui-optimistic-endpoint", "onclick", "data-hui-copy"} {
 		func() {
 			defer func() {
 				if r := recover(); r == nil {

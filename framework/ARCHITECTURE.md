@@ -229,7 +229,7 @@ framework/
 │                    against an arbitrary theme. Composes framework/ui, so
 │                    like sdkdocs it is deliberately NOT a uihost option.
 ├── headless/        The structure half of a design system: components
-│                    that render tags, roles, labelling and data-ds-*
+│                    that render tags, roles, labelling and data-hui-*
 │                    hooks with no classes, a Skin that maps parts to
 │                    classes, the seams (Slots, Overrides, Binds, Words,
 │                    Island) and the harness that pins every component.

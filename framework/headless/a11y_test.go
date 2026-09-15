@@ -284,7 +284,7 @@ func TestSkeletonBarsAreNeverAnnounced(t *testing.T) {
 	has(t, got, `role="status"`, "the loading message is never announced")
 	// The last line of a paragraph is short; a block of equal bars
 	// reads as a block rather than as text.
-	has(t, got, "data-ds-skeleton-last", "the last bar is full width, so the block does not read as text")
+	has(t, got, "data-hui-skeleton-last", "the last bar is full width, so the block does not read as text")
 }
 
 // A form that fails validation changes nothing a screen reader can
@@ -356,7 +356,7 @@ func TestUploadAnnouncesWhatWasChosen(t *testing.T) {
 	got := FileUpload(FileUploadProps{Name: "backup", ID: "up", Label: "Drag a backup here"}, nil)
 	has(t, got, `role="status"`, "chosen files are never announced")
 	hasNot(t, got, "aria-live", "the live-region policy is stated twice")
-	has(t, got, "data-ds-drop-list", "there is nowhere to show the chosen names")
+	has(t, got, "data-hui-drop-list", "there is nowhere to show the chosen names")
 }
 
 // The hint belongs to the field, not beside it: accepted types and a
@@ -382,10 +382,10 @@ func TestUploadHintIsTiedToTheInput(t *testing.T) {
 func TestFormWithErrorsAsksForFocus(t *testing.T) {
 	withErrors := Form(FormProps{Action: "/apps", Errors: ValidationSummary(ValidationSummaryProps{
 		Errors: []FieldError{{For: "port", Message: "Out of range."}}}, nil)}, nil)
-	has(t, withErrors, "data-ds-form-errors", "nothing tells the runtime a submit failed")
+	has(t, withErrors, "data-hui-form-errors", "nothing tells the runtime a submit failed")
 
 	clean := Form(FormProps{Action: "/apps"}, nil)
-	hasNot(t, clean, "data-ds-form-errors", "a form with no errors asks for focus it should not take")
+	hasNot(t, clean, "data-hui-form-errors", "a form with no errors asks for focus it should not take")
 }
 
 // Without multipart a browser submits file inputs as names with no
@@ -483,14 +483,14 @@ func TestAFailedActionHasSomewhereToSayItAndSomethingToSay(t *testing.T) {
 		Endpoint: "/save", IdleLabel: "Save", SuccessLabel: "Saved"}, nil)
 	has(t, got, `role="status"`, "a failure has nowhere to be announced")
 	hasNot(t, got, "aria-live", "role=status already means polite; stating it twice can announce twice")
-	has(t, got, `data-ds-action-status`, "the runtime has no hook to write the announcement into")
-	has(t, got, `data-ds-action-failed="Could not save. Try again."`,
+	has(t, got, `data-hui-action-status`, "the runtime has no hook to write the announcement into")
+	has(t, got, `data-hui-action-failed="Could not save. Try again."`,
 		"the default failure sentence is not on the root for the runtime to read")
 
 	custom := ToggleAction(ToggleActionProps{
 		Endpoint: "/plan", IdleLabel: "Pro", CommittedLabel: "Pro ✓",
 		FailedText: "Could not change plan. Try again."}, nil)
-	has(t, custom, `data-ds-action-failed="Could not change plan. Try again."`,
+	has(t, custom, `data-hui-action-failed="Could not change plan. Try again."`,
 		"the caller's failure sentence did not reach the root")
 }
 
@@ -499,7 +499,7 @@ func TestAFailedActionHasSomewhereToSayItAndSomethingToSay(t *testing.T) {
 // and an extra that won one would desynchronise the button from its
 // own state machine — type, data-state and aria-busy say things the
 // framework's fetch has not earned, and a forged data-fui-* or
-// data-ds-* binds behaviour to an element never built for it.
+// data-hui-* binds behaviour to an element never built for it.
 func TestActionExtraAttrsCannotStealTheLifecycle(t *testing.T) {
 	hostile := html.Attrs{
 		"type":                         "submit",
@@ -509,8 +509,8 @@ func TestActionExtraAttrsCannotStealTheLifecycle(t *testing.T) {
 		"aria-pressed":                 "true",
 		"data-fui-comp":                "forged",
 		"data-fui-optimistic-endpoint": "//evil.example/x",
-		"data-ds-action":               "forged",
-		"data-ds-toast":                "forged",
+		"data-hui-action":              "forged",
+		"data-hui-toast":               "forged",
 		"class":                        "mine",
 		"id":                           "stolen",
 		"data-testid":                  "keep",

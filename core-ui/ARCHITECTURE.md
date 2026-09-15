@@ -1329,7 +1329,7 @@ The legacy `/__gofastr/catalog.js` endpoint now returns 410 GONE.
 
 A second way to author a component separates what this section joins:
 structure in one function, classes in a skin, behaviour bound by a
-`data-ds-*` hook rather than a class. A headless component renders the
+`data-hui-*` hook rather than a class. A headless component renders the
 same markup at a nil skin with no `class` attribute at all, and the
 harness pins that render in a golden, so restyling cannot move a role,
 a label or a hook. The layer satisfies every hard rule above the same
@@ -1337,7 +1337,7 @@ way `framework/ui` does: an in-page state change is an `Island` (the
 `data-fui-rpc` contract on the element that keeps its href for
 no-script), a request is a typed `Action`, and a signal is a typed
 `Bind`; `ExtraAttrs` cannot carry a `data-fui-*` key. No runtime
-module binds the `data-ds-*` hooks and no skin dresses the parts in
+module binds the `data-hui-*` hooks and no skin dresses the parts in
 this repository yet; `framework/ui` is today's styled layer and does
 not render through this package. Contract and invariants: `gofastr
 docs ui-headless`.
@@ -1525,7 +1525,7 @@ framework/
                  navigation partial-fetch endpoint
   static/      : SSG builder (renders every screen at build time)
   headless/    : the structure half of a design system: components that
-                 render tags, roles, labelling and data-ds-* hooks with
+                 render tags, roles, labelling and data-hui-* hooks with
                  no classes; a Skin maps parts to classes; seams (Slots,
                  Overrides, Binds, Words, Island) are typed and checked;
                  a harness pins every component at the nil skin. See

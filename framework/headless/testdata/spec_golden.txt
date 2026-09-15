@@ -76,11 +76,11 @@ justify-between puts the destructive action at the far end from the safe one —
 
 === Color / swatch ===
 a colour input is useless alone to anyone who cannot see it, so the hex value stays beside it as text that can be read and typed — inside a Field, so the value is a labelled setting and not a bare control
-<div><label for="color-accent">Accent colour</label><div data-ds-affix="" data-ds-color=""><input aria-label="Pick accent" data-ds-affix-swatch="" id="color-accent-picker" tabindex="-1" type="color" value="#10b981"><input autocapitalize="off" autocomplete="off" data-ds-affix-input="" id="color-accent" name="accent" spellcheck="false" type="text" value="#10b981"></div></div>
+<div><label for="color-accent">Accent colour</label><div data-hui-affix="" data-hui-color=""><input aria-label="Pick accent" data-hui-affix-swatch="" id="color-accent-picker" tabindex="-1" type="color" value="#10b981"><input autocapitalize="off" autocomplete="off" data-hui-affix-input="" id="color-accent" name="accent" spellcheck="false" type="text" value="#10b981"></div></div>
 
 === ConditionalField / shown when the watched field matches ===
 rendered visible with no hidden attribute, because a field only script can reveal is a field a scriptless reader never reaches — the runtime hides it when the watched field does not match, and not before
-<label><input name="notify" type="radio" value="webhook"><span>Webhook</span></label><div data-ds-when="notify" data-ds-when-value="webhook"><div><label for="cond-webhook-url">Webhook URL</label><input id="cond-webhook-url" name="webhook-url" type="text"></div></div>
+<label><input name="notify" type="radio" value="webhook"><span>Webhook</span></label><div data-hui-when="notify" data-hui-when-value="webhook"><div><label for="cond-webhook-url">Webhook URL</label><input id="cond-webhook-url" name="webhook-url" type="text"></div></div>
 
 === Container / reading measure ===
 the default is the measure a page of prose reads at — line length is readability, decided here once so no page has to remember to ask for it
@@ -132,7 +132,7 @@ two fields side by side are still two fields: the row adds layout and no semanti
 
 === FileUpload / with a hint ===
 the zone is a label around a real input, so the whole target opens the picker — and the call to action is styled text, because a button inside a label swallows the label's click
-<div data-ds-drop="" data-ds-drop-input="backup"><label for="backup"><span>Drag an archive here, or </span><span>choose a file</span><span id="backup-accept">.tar.gz up to 2 GB</span></label><input accept=".tar.gz" aria-describedby="backup-accept" id="backup" name="backup" type="file"><ul data-ds-drop-list="" role="list"></ul><span data-ds-drop-status="" role="status"></span></div>
+<div data-hui-drop="" data-hui-drop-input="backup"><label for="backup"><span>Drag an archive here, or </span><span>choose a file</span><span id="backup-accept">.tar.gz up to 2 GB</span></label><input accept=".tar.gz" aria-describedby="backup-accept" id="backup" name="backup" type="file"><ul data-hui-drop-list="" role="list"></ul><span data-hui-drop-status="" role="status"></span></div>
 
 === Form / a create form ===
 the fields land in the body and the submits in the actions row, and the method defaults to post so a create never rides a GET a browser may repeat on its own
@@ -140,11 +140,11 @@ the fields land in the body and the submits in the actions row, and the method d
 
 === Form / after a failed submit ===
 errors set the hook that moves focus to the summary, so a screen reader hears what went wrong instead of sitting on an unchanged-looking page
-<form action="/apps" data-ds-form-errors="" method="post" novalidate=""><div aria-labelledby="form-dup-errors-title" id="form-dup-errors" role="alert" tabindex="-1"><h2 id="form-dup-errors-title">There is a problem</h2><ul><li><a href="#dup-app-name">That name is taken.</a></li></ul></div><div><div><label for="dup-app-name">App name</label><input aria-describedby="dup-app-name-error" aria-invalid="true" id="dup-app-name" name="app-name" type="text"><p id="dup-app-name-error" role="alert">That name is taken.</p></div></div><div><button type="submit">Create app</button></div></form>
+<form action="/apps" data-hui-form-errors="" method="post" novalidate=""><div aria-labelledby="form-dup-errors-title" id="form-dup-errors" role="alert" tabindex="-1"><h2 id="form-dup-errors-title">There is a problem</h2><ul><li><a href="#dup-app-name">That name is taken.</a></li></ul></div><div><div><label for="dup-app-name">App name</label><input aria-describedby="dup-app-name-error" aria-invalid="true" id="dup-app-name" name="app-name" type="text"><p id="dup-app-name-error" role="alert">That name is taken.</p></div></div><div><button type="submit">Create app</button></div></form>
 
 === Form / with a file upload ===
 multipart sets the encoding a file input needs, because without it the browser submits the file's name and no contents, which looks like a server bug and is not one
-<form action="/apps/definition" enctype="multipart/form-data" method="post"><div><div data-ds-drop="" data-ds-drop-input="definition-file"><label for="definition-file"><span>Captain definition</span><span>Choose a file</span></label><input id="definition-file" name="definition" type="file"><ul data-ds-drop-list="" role="list"></ul><span data-ds-drop-status="" role="status"></span></div></div><div><button type="submit">Upload</button></div></form>
+<form action="/apps/definition" enctype="multipart/form-data" method="post"><div><div data-hui-drop="" data-hui-drop-input="definition-file"><label for="definition-file"><span>Captain definition</span><span>Choose a file</span></label><input id="definition-file" name="definition" type="file"><ul data-hui-drop-list="" role="list"></ul><span data-hui-drop-status="" role="status"></span></div></div><div><button type="submit">Upload</button></div></form>
 
 === Grid / minimum column and gap ===
 Min is a floor — a column never gets narrower than the named step before the grid gives one up — and the name is what keeps the floor wired: the framework's Grid took a free-form Min that nothing read, so every auto-fit grid was the default width whatever its author asked
@@ -172,19 +172,19 @@ a group holding more than one focusable control takes a role and a name, so it a
 
 === OptimisticAction / default ===
 both labels ship in the SSR so the optimistic flip needs no round-trip, the method is absent because POST is the runtime's default, and the status span exists because the framework's shake announces nothing
-<button data-ds-action="" data-ds-action-failed="Could not save. Try again." data-fui-comp="ui-optimistic-action" data-fui-optimistic-endpoint="/apps/blog/restart" data-state="idle" type="button"><span data-fui-optimistic-idle="">Restart now</span><span data-fui-optimistic-success="" hidden="">Restarting</span><span data-ds-action-status="" role="status"></span></button>
+<button data-fui-comp="ui-optimistic-action" data-fui-optimistic-endpoint="/apps/blog/restart" data-hui-action="" data-hui-action-failed="Could not save. Try again." data-state="idle" type="button"><span data-fui-optimistic-idle="">Restart now</span><span data-fui-optimistic-success="" hidden="">Restarting</span><span data-hui-action-status="" role="status"></span></button>
 
 === OptimisticAction / with icons ===
 each label carries its own icon so the flip swaps glyph and word together, and both are aria-hidden because the words are the meaning — a check mark nobody can hear says nothing
-<button data-ds-action="" data-ds-action-failed="Could not save. Try again." data-fui-comp="ui-optimistic-action" data-fui-optimistic-endpoint="/apps/blog/pin" data-state="idle" type="button"><span data-fui-optimistic-idle=""><span aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M5.5 8.25 7.25 10l3.25-3.5"/></svg></span>Pin</span><span data-fui-optimistic-success="" hidden=""><span aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M5.5 8.25 7.25 10l3.25-3.5"/></svg></span>Pinned</span><span data-ds-action-status="" role="status"></span></button>
+<button data-fui-comp="ui-optimistic-action" data-fui-optimistic-endpoint="/apps/blog/pin" data-hui-action="" data-hui-action-failed="Could not save. Try again." data-state="idle" type="button"><span data-fui-optimistic-idle=""><span aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M5.5 8.25 7.25 10l3.25-3.5"/></svg></span>Pin</span><span data-fui-optimistic-success="" hidden=""><span aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M5.5 8.25 7.25 10l3.25-3.5"/></svg></span>Pinned</span><span data-hui-action-status="" role="status"></span></button>
 
 === OptimisticAction / delete, not post ===
 a method other than POST is published as an attribute, because the runtime defaults to POST and an unstated DELETE would fire the wrong request entirely
-<button data-ds-action="" data-ds-action-failed="Could not save. Try again." data-fui-comp="ui-optimistic-action" data-fui-optimistic-endpoint="/webhooks/9" data-fui-optimistic-method="DELETE" data-state="idle" type="button"><span data-fui-optimistic-idle="">Remove webhook</span><span data-fui-optimistic-success="" hidden="">Removed</span><span data-ds-action-status="" role="status"></span></button>
+<button data-fui-comp="ui-optimistic-action" data-fui-optimistic-endpoint="/webhooks/9" data-fui-optimistic-method="DELETE" data-hui-action="" data-hui-action-failed="Could not save. Try again." data-state="idle" type="button"><span data-fui-optimistic-idle="">Remove webhook</span><span data-fui-optimistic-success="" hidden="">Removed</span><span data-hui-action-status="" role="status"></span></button>
 
 === OptimisticAction / disabled ===
 a disabled optimistic button still ships both labels and its announcement hook — disabling is a state of the click, not of the contract, and the runtime re-enables the button itself while a mutation is in flight
-<button data-ds-action="" data-ds-action-failed="Could not save. Try again." data-fui-comp="ui-optimistic-action" data-fui-optimistic-endpoint="/apps/blog/redeploy" data-state="idle" disabled="" type="button"><span data-fui-optimistic-idle="">Redeploy</span><span data-fui-optimistic-success="" hidden="">Redeploying</span><span data-ds-action-status="" role="status"></span></button>
+<button data-fui-comp="ui-optimistic-action" data-fui-optimistic-endpoint="/apps/blog/redeploy" data-hui-action="" data-hui-action-failed="Could not save. Try again." data-state="idle" disabled="" type="button"><span data-fui-optimistic-idle="">Redeploy</span><span data-fui-optimistic-success="" hidden="">Redeploying</span><span data-hui-action-status="" role="status"></span></button>
 
 === Pagination / middle of a long run ===
 the gap is a span and not a link, the current page says aria-current=page rather than being told apart by weight, and a page change is an island update rather than a route: every anchor keeps its href for no script and carries the RPC contract beside it
@@ -196,7 +196,7 @@ Previous stays visible and named with no href — removing it moves every other 
 
 === Password / revealable ===
 the reveal button says what it will do next rather than what the field is doing now, and the labels it swaps between are published for the runtime instead of built from a class
-<div><label for="password-token">Registry token</label><div data-ds-affix=""><input data-ds-affix-input="" id="password-token" name="token" type="password"><button aria-label="Show password" aria-pressed="false" data-ds-hide-label="Hide password" data-ds-hide-text="Hide" data-ds-reveal="" data-ds-show-label="Show password" data-ds-show-text="Show" type="button">Show</button></div></div>
+<div><label for="password-token">Registry token</label><div data-hui-affix=""><input data-hui-affix-input="" id="password-token" name="token" type="password"><button aria-label="Show password" aria-pressed="false" data-hui-hide-label="Hide password" data-hui-hide-text="Hide" data-hui-reveal="" data-hui-show-label="Show password" data-hui-show-text="Show" type="button">Show</button></div></div>
 
 === Section / named ===
 a name is what makes it a landmark, and the name comes from the heading itself rather than a second string that can drift from it
@@ -216,23 +216,23 @@ a real select, because the platform's own picker is the one thing that already w
 
 === Skeleton / three lines ===
 every bar is hidden from the tree: a screen reader reading out eight empty boxes, or announcing each shimmer, is strictly worse than one polite "Loading apps" and silence
-<div data-ds-lines="3" role="status"><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true" data-ds-skeleton-last=""></span><span>Loading apps</span></div>
+<div data-hui-lines="3" role="status"><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true" data-hui-skeleton-last=""></span><span>Loading apps</span></div>
 
 === Spacer / plain ===
 it renders nothing, says nothing, and is in the markup only because a row needs a thing to grow — the space between two controls is the skin's, not a third control somebody wedged between them
-<div><button type="button">Save</button><span aria-hidden="true" data-ds-grow="1"></span><button type="button">Delete app</button></div>
+<div><button type="button">Save</button><span aria-hidden="true" data-hui-grow="1"></span><button type="button">Delete app</button></div>
 
 === Spacer / bounded ===
 a floor and a ceiling are names from the gap scale, so a spacer that must stay legible at any width says so in the same vocabulary every other gap uses
-<div>Queued builds<span aria-hidden="true" data-ds-grow="2"></span>2</div>
+<div>Queued builds<span aria-hidden="true" data-hui-grow="2"></span>2</div>
 
 === Spacer / leader in a contents list ===
 the dotted line between a term and its value is what ties the pair together once the row is wider than they are — and the spacer is a span so the list can be one paragraph, which a div would silently split
-<p>Restarts<span aria-hidden="true" data-ds-grow="1"></span>263</p>
+<p>Restarts<span aria-hidden="true" data-hui-grow="1"></span>263</p>
 
 === Spacer / rule ===
 a hairline across the space reads as structure rather than as a tie, and the two are one knob each: a line that must be both is a line nobody chose
-<p>Deploys today<span aria-hidden="true" data-ds-grow="1"></span>8</p>
+<p>Deploys today<span aria-hidden="true" data-hui-grow="1"></span>8</p>
 
 === Spinner / inline wait ===
 role=status, not progressbar: a progressbar promises a value and a spinner has none — and the label says what is being waited for, because a moving shape says nothing on its own
@@ -264,19 +264,19 @@ a checkbox that says role=switch: it submits like a checkbox and is announced as
 
 === SystemBanner / deploy in progress ===
 a message about the system, shown by the server's own render: role=status so it waits its turn, one action, and the tone said in words as well as drawn in colour
-<div data-ds-system="" data-ds-system-id="sys-deploy" role="status"><p><span>Information: </span>Deploy in progress</p><p>blog is moving to image 41; the app stays reachable the whole time.</p><div><button type="button">View the deploy</button></div><button aria-label="Dismiss: Deploy in progress" data-ds-system-dismiss="" type="button">×</button></div>
+<div data-hui-system="" data-hui-system-id="sys-deploy" role="status"><p><span>Information: </span>Deploy in progress</p><p>blog is moving to image 41; the app stays reachable the whole time.</p><div><button type="button">View the deploy</button></div><button aria-label="Dismiss: Deploy in progress" data-hui-system-dismiss="" type="button">×</button></div>
 
 === SystemBanner / offline ===
 the built-in connection message, and the one system banner worth interrupting for: assertive, marked as the runtime's, and shipped hidden because the runtime — not the page — shows it
-<div aria-live="assertive" data-ds-system="" data-ds-system-id="sys-offline" data-ds-system-offline="" hidden="" role="alert"><p><span>Warning: </span>Connection lost</p><p>Changes are paused until the connection comes back.</p><button aria-label="Dismiss: Connection lost" data-ds-system-dismiss="" type="button">×</button></div>
+<div aria-live="assertive" data-hui-system="" data-hui-system-id="sys-offline" data-hui-system-offline="" hidden="" role="alert"><p><span>Warning: </span>Connection lost</p><p>Changes are paused until the connection comes back.</p><button aria-label="Dismiss: Connection lost" data-hui-system-dismiss="" type="button">×</button></div>
 
 === SystemBanner / new version ===
 a dismissable message the page did not show: it ships hidden for an island swap or the runtime to reveal, and the id is what keeps it from being shown twice
-<div data-ds-system="" data-ds-system-id="sys-version" hidden="" role="status"><p><span>Success: </span>A new version is ready</p><p>Reload to pick up version 0.4.2.</p><button aria-label="Dismiss: A new version is ready" data-ds-system-dismiss="" type="button">×</button></div>
+<div data-hui-system="" data-hui-system-id="sys-version" hidden="" role="status"><p><span>Success: </span>A new version is ready</p><p>Reload to pick up version 0.4.2.</p><button aria-label="Dismiss: A new version is ready" data-hui-system-dismiss="" type="button">×</button></div>
 
 === SystemBanner / maintenance, and the version is old ===
 the danger tone said as a word before the title, and two banners at once to prove the ids keep them from doubling up
-<div data-ds-system="" data-ds-system-id="sys-maint" role="status"><p><span>Error: </span>Ending in 4 minutes</p><p>This control plane restarts at 20:00 UTC.</p><button aria-label="Dismiss: Ending in 4 minutes" data-ds-system-dismiss="" type="button">×</button></div><div data-ds-system="" data-ds-system-id="sys-old" hidden="" role="status"><p><span>Information: </span>This browser is not supported</p><button aria-label="Dismiss: This browser is not supported" data-ds-system-dismiss="" type="button">×</button></div>
+<div data-hui-system="" data-hui-system-id="sys-maint" role="status"><p><span>Error: </span>Ending in 4 minutes</p><p>This control plane restarts at 20:00 UTC.</p><button aria-label="Dismiss: Ending in 4 minutes" data-hui-system-dismiss="" type="button">×</button></div><div data-hui-system="" data-hui-system-id="sys-old" hidden="" role="status"><p><span>Information: </span>This browser is not supported</p><button aria-label="Dismiss: This browser is not supported" data-hui-system-dismiss="" type="button">×</button></div>
 
 === Tag / removable ===
 the × names what it removes — twelve controls all called Remove tell a screen reader user nothing — and it is an anchor that keeps its href for no script while carrying the island contract, because dropping a filter is an in-page state change and never a route
@@ -296,19 +296,19 @@ an event with no tone is the ordinary case and draws an untinted marker; ordered
 
 === ToggleAction / idle ===
 aria-pressed false and the committed span hidden: first paint matches the server's answer, and the runtime only ever flips what is already there
-<button aria-pressed="false" data-ds-action="" data-ds-action-failed="Could not save. Try again." data-fui-comp="ui-toggle-action" data-fui-toggle-endpoint="/apps/blog/watch" data-state="idle" type="button"><span data-fui-toggle-idle="">Watch</span><span data-fui-toggle-committed="" hidden="">Watching</span><span data-ds-action-status="" role="status"></span></button>
+<button aria-pressed="false" data-fui-comp="ui-toggle-action" data-fui-toggle-endpoint="/apps/blog/watch" data-hui-action="" data-hui-action-failed="Could not save. Try again." data-state="idle" type="button"><span data-fui-toggle-idle="">Watch</span><span data-fui-toggle-committed="" hidden="">Watching</span><span data-hui-action-status="" role="status"></span></button>
 
 === ToggleAction / committed at load ===
 the server knows: aria-pressed is true and it is the idle span that is hidden, so a page that loads already-watching does not flash through the wrong label first — and each label carries its own aria-hidden icon, so the flip swaps glyph and word together
-<button aria-pressed="true" data-ds-action="" data-ds-action-failed="Could not save. Try again." data-fui-comp="ui-toggle-action" data-fui-toggle-endpoint="/apps/blog/watch" data-state="committed" type="button"><span data-fui-toggle-idle="" hidden=""><span aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M5.5 8.25 7.25 10l3.25-3.5"/></svg></span>Watch</span><span data-fui-toggle-committed=""><span aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M5.5 8.25 7.25 10l3.25-3.5"/></svg></span>Watching</span><span data-ds-action-status="" role="status"></span></button>
+<button aria-pressed="true" data-fui-comp="ui-toggle-action" data-fui-toggle-endpoint="/apps/blog/watch" data-hui-action="" data-hui-action-failed="Could not save. Try again." data-state="committed" type="button"><span data-fui-toggle-idle="" hidden=""><span aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M5.5 8.25 7.25 10l3.25-3.5"/></svg></span>Watch</span><span data-fui-toggle-committed=""><span aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M5.5 8.25 7.25 10l3.25-3.5"/></svg></span>Watching</span><span data-hui-action-status="" role="status"></span></button>
 
 === ToggleAction / two in a mutex group ===
 committing one member of a group revokes the other with no second request, so a plan picker reads as one choice rather than three independent buttons that can all be on
-<button aria-pressed="true" data-ds-action="" data-ds-action-failed="Could not save. Try again." data-fui-comp="ui-toggle-action" data-fui-toggle-endpoint="/plan/starter" data-fui-toggle-group="plan" data-state="committed" type="button"><span data-fui-toggle-idle="" hidden="">Starter</span><span data-fui-toggle-committed="">Starter ✓</span><span data-ds-action-status="" role="status"></span></button><button aria-pressed="false" data-ds-action="" data-ds-action-failed="Could not save. Try again." data-fui-comp="ui-toggle-action" data-fui-toggle-endpoint="/plan/pro" data-fui-toggle-group="plan" data-state="idle" type="button"><span data-fui-toggle-idle="">Pro</span><span data-fui-toggle-committed="" hidden="">Pro ✓</span><span data-ds-action-status="" role="status"></span></button>
+<button aria-pressed="true" data-fui-comp="ui-toggle-action" data-fui-toggle-endpoint="/plan/starter" data-fui-toggle-group="plan" data-hui-action="" data-hui-action-failed="Could not save. Try again." data-state="committed" type="button"><span data-fui-toggle-idle="" hidden="">Starter</span><span data-fui-toggle-committed="">Starter ✓</span><span data-hui-action-status="" role="status"></span></button><button aria-pressed="false" data-fui-comp="ui-toggle-action" data-fui-toggle-endpoint="/plan/pro" data-fui-toggle-group="plan" data-hui-action="" data-hui-action-failed="Could not save. Try again." data-state="idle" type="button"><span data-fui-toggle-idle="">Pro</span><span data-fui-toggle-committed="" hidden="">Pro ✓</span><span data-hui-action-status="" role="status"></span></button>
 
 === ToggleAction / untoggle, with its own endpoint ===
 a committed button that can be clicked again publishes the untoggle endpoint and ships committed — the only state from which untoggle is reachable — so the revert is a request the server can refuse, not just a local flip
-<button aria-pressed="true" data-ds-action="" data-ds-action-failed="Could not save. Try again." data-fui-comp="ui-toggle-action" data-fui-toggle-allow-untoggle="true" data-fui-toggle-endpoint="/plan/pro" data-fui-toggle-untoggle-endpoint="/plan/none" data-state="committed" type="button"><span data-fui-toggle-idle="" hidden="">Pro</span><span data-fui-toggle-committed="">Pro ✓</span><span data-ds-action-status="" role="status"></span></button>
+<button aria-pressed="true" data-fui-comp="ui-toggle-action" data-fui-toggle-allow-untoggle="true" data-fui-toggle-endpoint="/plan/pro" data-fui-toggle-untoggle-endpoint="/plan/none" data-hui-action="" data-hui-action-failed="Could not save. Try again." data-state="committed" type="button"><span data-fui-toggle-idle="" hidden="">Pro</span><span data-fui-toggle-committed="">Pro ✓</span><span data-hui-action-status="" role="status"></span></button>
 
 === Toolbar / controls in a row ===
 no role=toolbar: that role promises arrow-key roving with a single tab stop, and a promise a script-free component cannot keep is worse than saying nothing

@@ -179,7 +179,7 @@ func TestEveryDeclaredHookIsRendered(t *testing.T) {
 				t.Errorf("%s declares hook %q and no case renders it as an attribute", sp.Name, h)
 			}
 		}
-		// And the other direction: every data-ds-* attribute a case
+		// And the other direction: every data-hui-* attribute a case
 		// renders is declared, so a hook cannot be published by
 		// accident and bound to by a runtime nobody told.
 		declared := map[string]bool{}
@@ -192,14 +192,14 @@ func TestEveryDeclaredHookIsRendered(t *testing.T) {
 			}
 		}
 		// The namespace rule: a hook this system invents, whether a
-		// runtime module or a skin reads it, is data-ds-*, so it cannot
+		// runtime module or a skin reads it, is data-hui-*, so it cannot
 		// collide with anything the platform or the framework owns. A
 		// cue that restates a native state the platform already names —
 		// data-invalid, data-required, data-state — stays unprefixed
 		// and is not declared as a hook; it is the state, not a hook.
 		for _, h := range sp.Hooks {
-			if !strings.HasPrefix(h, "data-ds-") {
-				t.Errorf("%s declares hook %q — runtime hooks are data-ds-* so they cannot collide with anything the platform owns", sp.Name, h)
+			if !strings.HasPrefix(h, "data-hui-") {
+				t.Errorf("%s declares hook %q — runtime hooks are data-hui-* so they cannot collide with anything the platform owns", sp.Name, h)
 			}
 		}
 	}
@@ -215,7 +215,7 @@ func TestEveryDeclaredHookIsRendered(t *testing.T) {
 // halves in its case, which is also the honest fixture.
 func TestEveryReferenceResolvesInsideItsFixture(t *testing.T) {
 	// The space before the name is load-bearing. Without it, `for=`
-	// matched the tail of `data-ds-toggle-for=` and the check passed
+	// matched the tail of `data-hui-toggle-for=` and the check passed
 	// or failed for a reason it was not claiming to test. The runtime
 	// hooks that DO point at an element are named here deliberately
 	// instead, because a hook pointing at nothing is the same defect
@@ -328,7 +328,7 @@ func TestOverridesCannotBreakAComponent(t *testing.T) {
 	hostile := html.Attrs{
 		"id":            "stolen",
 		"style":         "display:none",
-		"data-ds-copy":  "",
+		"data-hui-copy": "",
 		"data-fui-main": "",
 		"DATA-FUI-RPC":  "/evil",
 		"data-behavior": "/evil.js",
@@ -348,7 +348,7 @@ func TestOverridesCannotBreakAComponent(t *testing.T) {
 			if strings.Contains(string(got), "display:none") {
 				t.Error("a caller set an inline style the CSP will drop — it would work in dev and vanish in production")
 			}
-			if strings.Contains(string(got), "data-ds-copy") {
+			if strings.Contains(string(got), "data-hui-copy") {
 				t.Error("a caller forged a runtime hook: behaviour is now bound to an element never built for it")
 			}
 			if strings.Contains(string(got), "data-fui-main") {
@@ -693,7 +693,7 @@ func embedsSeams(st *ast.StructType) bool {
 	return false
 }
 
-var dsAttr = regexp.MustCompile(`\s(data-ds-[a-z0-9-]+)(=|\s|/|>)`)
+var dsAttr = regexp.MustCompile(`\s(data-hui-[a-z0-9-]+)(=|\s|/|>)`)
 
 // childHook reports whether a hook rendered inside sp's cases belongs
 // to a component the fixture composes: a Form case renders an Input,
