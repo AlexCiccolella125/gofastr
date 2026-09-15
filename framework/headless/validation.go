@@ -1,6 +1,9 @@
 package headless
 
 import (
+	"strconv"
+	"time"
+
 	"github.com/DonaldMurillo/gofastr/core-ui/html"
 	"github.com/DonaldMurillo/gofastr/core/render"
 )
@@ -178,6 +181,9 @@ func Timeline(p TimelineProps, s Skin) render.HTML {
 			// text itself must be a valid date or time, and relative
 			// words are not, so the element becomes a span.
 			if e.Machine != "" {
+				if _, err := time.Parse(time.RFC3339, e.Machine); err != nil {
+					panic("headless: Event Machine must be an RFC 3339 timestamp, not " + strconv.Quote(e.Machine))
+				}
 				body = append(body, El("time", s, PartTimelineTime,
 					Attrs(map[string]string{"datetime": e.Machine}), render.Text(e.When)))
 			} else {

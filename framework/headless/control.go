@@ -85,15 +85,25 @@ func Input(p InputProps, s Skin) render.HTML {
 	if p.Invalid {
 		attrs["aria-invalid"] = "true"
 	}
+	seen := map[string]bool{}
 	for k, v := range p.Owned {
-		switch strings.ToLower(k) {
+		key := strings.ToLower(k)
+		switch key {
 		case "min", "max", "step":
 		default:
 			panic("headless: Input Owned carries " + k + " — Owned is for min, max and step only")
 		}
-		if v != "" {
-			attrs[strings.ToLower(k)] = v
+		if v == "" {
+			continue
 		}
+		// Two spellings of one key are one attribute to the browser
+		// and an order-dependent value here; refused rather than left
+		// to map iteration.
+		if seen[key] {
+			panic("headless: Input Owned repeats " + key + " under two spellings")
+		}
+		seen[key] = true
+		attrs[key] = v
 	}
 	return El("input", s, PartRoot, attrs)
 }

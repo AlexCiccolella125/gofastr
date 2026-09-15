@@ -147,3 +147,19 @@ func TestHrefsGoThroughTheAnchorPolicy(t *testing.T) {
 		Button(ButtonProps{Label: "Go", Type: "button", Action: html.Attrs{"data-fui-rpc": ""}}, nil)
 	})
 }
+
+// Owned's keys are folded, so min and MIN are one attribute; two
+// spellings with values would leave the winner to map order.
+func TestInputOwnedRefusesOneKeyUnderTwoSpellings(t *testing.T) {
+	refuse(t, "repeats", func() {
+		Input(InputProps{Name: "n", AriaLabel: "n", Owned: html.Attrs{"min": "1", "MIN": "2"}}, nil)
+	})
+}
+
+// A <time datetime> promises a machine-readable value; "tomorrow" is
+// not one, and rendering it would be invalid markup nothing notices.
+func TestTimelineRefusesAMachineValueThatIsNotATimestamp(t *testing.T) {
+	refuse(t, "RFC 3339", func() {
+		Timeline(TimelineProps{Events: []Event{{Title: "Deployed", When: "soon", Machine: "tomorrow"}}}, nil)
+	})
+}
