@@ -88,13 +88,7 @@ func checkLabelsDiffer(component, idle, done string) {
 // mutation moves. An extra that won any of them would desynchronise
 // the button from its own lifecycle.
 func safeActionExtras(extra html.Attrs) html.Attrs {
-	out := Safe(extra, "type", "disabled", "data-state", "aria-busy", "aria-pressed")
-	for k := range out {
-		if strings.HasPrefix(strings.ToLower(k), "data-ds-") {
-			delete(out, k)
-		}
-	}
-	return out
+	return Safe(extra, "type", "disabled", "data-state", "aria-busy", "aria-pressed")
 }
 
 // OptimisticActionProps is a button that commits once: the success

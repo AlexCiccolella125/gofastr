@@ -64,30 +64,14 @@ const (
 	PartError   Part = "error"
 	PartIcon    Part = "icon"
 	PartText    Part = "text"
-	PartItem    Part = "item"
-	PartList    Part = "list"
-	PartLink    Part = "link"
-	PartTrigger Part = "trigger"
 	PartFooter  Part = "footer"
 	PartHeader  Part = "header"
 	PartTitle   Part = "title"
 	PartDesc    Part = "desc"
 	PartBody    Part = "body"
-	PartValue   Part = "value"
 	PartMarker  Part = "marker"
-	PartSep     Part = "sep"
-	PartLegend  Part = "legend"
 	PartActions Part = "actions"
 	PartStatus  Part = "status"
-	// PartSwapSlot is the one live tree of a Swap. It is display:
-	// contents in the skin, so the live tree sits exactly where the
-	// swap's parent put it and the runtime has one element to move
-	// children in and out of.
-	PartSwapSlot Part = "swap-slot"
-	// PartSwapInert is the template carrying the other tree. A
-	// template renders as nothing, which is the whole architecture:
-	// one tree in the document at a time.
-	PartSwapInert Part = "swap-inert"
 	// PartVisuallyHidden is text that must be read and must not be
 	// seen. It exists as a shared part because more than one component
 	// needs it and every one of them must hide it the same way —
@@ -195,14 +179,17 @@ func Flag(a html.Attrs, name string, on bool) html.Attrs {
 // state), data-action and data-param-* (a compiled server action and
 // its arguments) and data-kiln-* (the legacy tool delegators). The
 // runtime re-checks some of their values; the seam's job is that they
-// never arrive.
+// never arrive. And every data-ds-* key, this package's own hooks: a
+// forged one binds behaviour to an element that was never built for
+// it. A component sets its own hooks after the seam, so nothing it
+// renders is refused here.
 func refused(key string) bool {
 	k := strings.ToLower(key)
 	switch k {
 	case "style", "data-behavior", "data-island", "data-widget", "data-component", "data-bind", "data-action":
 		return true
 	}
-	for _, prefix := range []string{"data-fui-", "data-action-", "data-param-", "data-kiln-"} {
+	for _, prefix := range []string{"data-ds-", "data-fui-", "data-action-", "data-param-", "data-kiln-"} {
 		if strings.HasPrefix(k, prefix) {
 			return true
 		}
@@ -274,7 +261,7 @@ func joinClasses(parts ...string) string {
 
 func isVoid(tag string) bool {
 	switch tag {
-	case "input", "img", "br", "hr", "meta", "link", "source":
+	case "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr":
 		return true
 	}
 	return false

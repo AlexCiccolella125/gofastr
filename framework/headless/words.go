@@ -4,8 +4,8 @@ package headless
 //
 // The headless layer is the accessibility half of the system, and a
 // surprising amount of what it guarantees is wording: the tone said
-// before an alert's title, "1 star" rather than a shape, the count
-// line a screen reader hears when a table changes underneath it. A
+// before an alert's title, the name of the button that reveals a
+// password, "Previous" on a pager's disabled end. A
 // French reader needs those guarantees in French, and a key map
 // ("dismiss.label" → "Fermer") would put the finding of a missing
 // string on a rendered page. So the words are a typed struct: one
@@ -144,8 +144,7 @@ func DefaultWords() *Words {
 
 // ProbeWords returns a Words whose every field is its own name in
 // angle brackets — formats as the name plus their placeholders, so
-// `<ShowingRange 1–20 137 apps>` renders where "Showing 1–20 of 137
-// apps" would. A render against it shows exactly which words came
+// `<RemoveLabelled env=prod>` renders where "Remove env=prod" would. A render against it shows exactly which words came
 // through the seam; a real English word in one is a word that
 // bypassed it.
 func ProbeWords() *Words {

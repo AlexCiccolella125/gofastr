@@ -106,7 +106,8 @@ func Tag(p TagProps, s Skin) render.HTML {
 	}
 	kids := []render.HTML{}
 	if p.Icon != "" {
-		kids = append(kids, p.Icon)
+		kids = append(kids, b.El("span", PartIcon,
+			Attrs(map[string]string{"aria-hidden": "true"}), p.Icon))
 	}
 	kids = append(kids, render.Text(p.Label))
 	if p.DismissHref != "" {
@@ -416,7 +417,7 @@ func init() {
 
 	Register(Spec{
 		Name:  "Tag",
-		Parts: []Part{PartRoot, PartBadgeDismiss},
+		Parts: []Part{PartRoot, PartIcon, PartBadgeDismiss},
 		WithSeams: func(s Skin, seams Seams) render.HTML {
 			return Tag(TagProps{Label: "env=prod", Seams: seams}, s)
 		},
@@ -429,8 +430,8 @@ func init() {
 					Island: Island{Endpoint: "/island/apps", Signal: "apps"}}, s),
 			}, {
 				Name: "fixed",
-				Why:  "a tag with nothing to navigate to renders no control at all rather than a dead ×",
-				HTML: Tag(TagProps{Label: "leader"}, s),
+				Why:  "a tag with nothing to navigate to renders no control at all rather than a dead ×, and its icon is hidden from assistive technology exactly as a badge's is, because a tag is a badge with a dismiss control and the two must not drift",
+				HTML: Tag(TagProps{Label: "leader", Icon: SpecimenGlyph}, s),
 			}}
 		},
 	})

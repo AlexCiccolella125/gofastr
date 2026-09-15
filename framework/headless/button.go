@@ -67,12 +67,13 @@ func actionAttrs(a html.Attrs) html.Attrs {
 		case k == "data-fui-rpc-signal":
 			checkSignalName(v)
 			out[k] = v
+		case k == "data-fui-signal-set", k == "data-fui-signal-inc", k == "data-fui-signal-toggle":
+			// The value is "signal" or "signal:argument".
+			checkSignalName(strings.SplitN(v, ":", 2)[0])
+			out[k] = v
 		case strings.HasPrefix(k, "data-fui-rpc"),
 			k == "data-fui-confirm",
-			k == "data-fui-push-state",
-			k == "data-fui-signal-set",
-			k == "data-fui-signal-inc",
-			k == "data-fui-signal-toggle":
+			k == "data-fui-push-state":
 			out[k] = v
 		default:
 			panic("headless: Action carries " + k + ", which is not a request attribute")

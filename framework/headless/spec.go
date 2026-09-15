@@ -148,9 +148,3 @@ func SpecOf(name string) (Spec, bool) {
 	sp, ok := registry[name]
 	return sp, ok
 }
-
-// one is the common shape: a component with a single case worth
-// rendering.
-func one(html render.HTML, why string) []Case {
-	return []Case{{Name: "default", Why: why, HTML: html}}
-}

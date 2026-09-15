@@ -183,7 +183,7 @@ func init() {
 			s := k.Skin
 			return []Case{{
 				Name: "minimum column and gap",
-				Why:  "Min is a floor — a column never gets narrower than the named step before the grid gives one up — and the name is what keeps the floor wired: the framework's Grid took a free-form Min that nothing read, so every auto-fit grid was the default width whatever its author asked (fixed on the gofastr branch feat/headless-ui)",
+				Why:  "Min is a floor — a column never gets narrower than the named step before the grid gives one up — and the name is what keeps the floor wired: the framework's Grid took a free-form Min that nothing read, so every auto-fit grid was the default width whatever its author asked",
 				HTML: Grid(GridProps{Min: "md", Gap: "lg"}, s,
 					render.HTML("<p>blog — 2 vCPU</p>"),
 					render.HTML("<p>wiki — 1 vCPU</p>"),

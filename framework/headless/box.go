@@ -209,7 +209,7 @@ func allowedOverride(a html.Attrs) html.Attrs {
 	out := html.Attrs{}
 	for k, v := range a {
 		lk := strings.ToLower(k)
-		if lk == "id" || strings.HasPrefix(lk, "data-ds-") || refused(k) {
+		if lk == "id" || refused(k) {
 			continue
 		}
 		out[k] = v
