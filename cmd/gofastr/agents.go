@@ -30,6 +30,7 @@ import (
 	_ "github.com/DonaldMurillo/gofastr/battery/storage"
 	_ "github.com/DonaldMurillo/gofastr/battery/webhook"
 	_ "github.com/DonaldMurillo/gofastr/framework"
+	_ "github.com/DonaldMurillo/gofastr/framework/headless"
 	_ "github.com/DonaldMurillo/gofastr/framework/ui"
 )
 

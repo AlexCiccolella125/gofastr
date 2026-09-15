@@ -1,0 +1,240 @@
+// Package headless is the structure and accessibility half of a design
+// system: the tags, the roles, the labelling relationships, the state
+// attributes and the hooks a runtime binds to. It renders no classes
+// and ships no CSS.
+//
+// The split exists because structure and styling have different
+// lifetimes and different reviewers. Whether a password field's reveal
+// button announces what it will do next, whether a field's error is
+// tied to its input by aria-describedby, whether a pager says which
+// page is current — none of that changes when the palette does, and
+// all of it is testable without rendering a pixel (a11y_test.go,
+// harness_test.go). A skin is then free to be redrawn, or replaced
+// entirely, without putting a single accessibility guarantee back at
+// risk.
+//
+// A component here is a pure function from its props and a Skin to
+// HTML. The Skin decides what class each named Part carries; a nil
+// Skin renders the same markup with no classes at all, which is what
+// "headless" means and what the goldens pin. Seven things are named in
+// a component's contract, and the harness checks each: its Parts, its
+// runtime hooks (data-ds-*), and the seams a caller reaches in through
+// — Slots, Overrides, Binds, Words, and for a component that changes
+// in-page state, an Island. See box.go, words.go and island.go.
+//
+// The package is SSR-first and hydrates incrementally, the same model
+// as the rest of the framework (core-ui/ARCHITECTURE.md): first paint
+// is the full markup, a runtime module arms behaviour by hook on
+// arrival, and a state change is an island RPC on the element that
+// keeps its href or action for a reader with no script. It imports
+// only core-ui/html and core/render; the skin, the stylesheet and the
+// runtime module that binds the hooks sit above it.
+package headless
+
+import (
+	"sort"
+	"strings"
+
+	"github.com/DonaldMurillo/gofastr/core-ui/html"
+	"github.com/DonaldMurillo/gofastr/core/render"
+)
+
+// Part names an element inside a component. A skin styles parts; the
+// structure names them. Adding a part is a change to both layers, which
+// is the point: a skin cannot invent a hook the markup does not offer,
+// and the markup cannot quietly drop one a skin is using.
+type Part string
+
+// The shared vocabulary. Component-specific parts live beside their
+// component.
+const (
+	PartRoot    Part = "root"
+	PartLabel   Part = "label"
+	PartControl Part = "control"
+	PartHint    Part = "hint"
+	PartError   Part = "error"
+	PartIcon    Part = "icon"
+	PartText    Part = "text"
+	PartItem    Part = "item"
+	PartList    Part = "list"
+	PartLink    Part = "link"
+	PartTrigger Part = "trigger"
+	PartFooter  Part = "footer"
+	PartHeader  Part = "header"
+	PartTitle   Part = "title"
+	PartDesc    Part = "desc"
+	PartBody    Part = "body"
+	PartValue   Part = "value"
+	PartMarker  Part = "marker"
+	PartSep     Part = "sep"
+	PartLegend  Part = "legend"
+	PartActions Part = "actions"
+	PartStatus  Part = "status"
+	// PartSwapSlot is the one live tree of a Swap. It is display:
+	// contents in the skin, so the live tree sits exactly where the
+	// swap's parent put it and the runtime has one element to move
+	// children in and out of.
+	PartSwapSlot Part = "swap-slot"
+	// PartSwapInert is the template carrying the other tree. A
+	// template renders as nothing, which is the whole architecture:
+	// one tree in the document at a time.
+	PartSwapInert Part = "swap-inert"
+	// PartVisuallyHidden is text that must be read and must not be
+	// seen. It exists as a shared part because more than one component
+	// needs it and every one of them must hide it the same way —
+	// clipped, never display: none, which would take it out of the
+	// accessibility tree along with the view.
+	PartVisuallyHidden Part = "visually-hidden"
+)
+
+// Skin maps parts to class names. Nil is valid and renders unstyled.
+type Skin map[Part]string
+
+// Class returns the class for a part, or "" when the skin has none.
+func (s Skin) Class(p Part) string { return s[p] }
+
+// Variant returns the class a skin uses for a named variant of a part,
+// looked up as "<part>--<variant>". Empty when unstyled or unknown.
+func (s Skin) Variant(p Part, variant string) string {
+	if variant == "" {
+		return ""
+	}
+	return s[Part(string(p)+"--"+variant)]
+}
+
+// El builds one element: the part's class, then the caller's attrs,
+// then children. Attrs the component owns always win over ExtraAttrs,
+// which is why they are passed separately.
+func El(tag string, s Skin, p Part, own html.Attrs, children ...render.HTML) render.HTML {
+	attrs := html.Attrs{}
+	for k, v := range own {
+		attrs[k] = v
+	}
+	if cls := joinClasses(s.Class(p), attrs["class"]); cls != "" {
+		attrs["class"] = cls
+	}
+	if isVoid(tag) {
+		return render.VoidTag(tag, attrs)
+	}
+	return render.Tag(tag, attrs, children...)
+}
+
+// Attrs is a small builder: it drops empty values, so a component can
+// declare every attribute it might set in one place and let the zero
+// value mean "absent" rather than "present and empty".
+//
+// Boolean attributes are the exception — an empty string IS the value
+// for disabled, required and friends — so those go through Flag.
+func Attrs(pairs map[string]string) html.Attrs {
+	out := html.Attrs{}
+	keys := make([]string, 0, len(pairs))
+	for k := range pairs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if pairs[k] != "" {
+			out[k] = pairs[k]
+		}
+	}
+	return out
+}
+
+// Mark sets attributes whose PRESENCE is the value: the data-ds-*
+// hooks a runtime binds to, and the HTML attributes that work the same
+// way — hidden, popover, open, inert.
+//
+// It exists because Attrs drops empty values, which is right for
+// "absent means unset" and catastrophic here: the component renders
+// with every option set and the attribute missing, so it is styled,
+// labelled, announced, and either wired to nothing or visible when it
+// should not be. That has now shipped five times in this package —
+// popover on the tooltip, data-ds-copy, the drop list, the repeater
+// rows, and hidden on the combobox's empty message — every one of
+// them built through Attrs.
+//
+// The fifth was written AFTER this helper existed, because the helper
+// was thought of as being for hooks. It is not: it is for any
+// attribute whose empty string is meaningful.
+func Mark(a html.Attrs, names ...string) html.Attrs {
+	for _, n := range names {
+		a[n] = ""
+	}
+	return a
+}
+
+// Flag sets a boolean attribute when on.
+func Flag(a html.Attrs, name string, on bool) html.Attrs {
+	if on {
+		a[name] = ""
+	}
+	return a
+}
+
+// Safe copies caller-supplied extras, dropping the keys a component
+// owns so no caller can break its structure or its labelling.
+func Safe(extra html.Attrs, owned ...string) html.Attrs {
+	blocked := map[string]bool{"class": true, "id": true}
+	for _, k := range owned {
+		blocked[k] = true
+	}
+	out := html.Attrs{}
+	for k, v := range extra {
+		if blocked[k] || strings.HasPrefix(k, "data-fui-") {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// Merge folds b into a, b winning. Used to layer owned attrs over
+// caller extras.
+func Merge(a, b html.Attrs) html.Attrs {
+	out := html.Attrs{}
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
+}
+
+// Describe wires an input to its hint and error by id, returning the
+// aria-describedby value. This is the whole reason a field is a
+// component and not three elements in a row: the relationship has to
+// be built from the same ids the elements are given, in one place, or
+// it silently rots.
+func Describe(id, hint, errText string) (describedBy, hintID, errID string) {
+	if id == "" {
+		return "", "", ""
+	}
+	var ids []string
+	if errText != "" {
+		errID = id + "-error"
+		ids = append(ids, errID)
+	} else if hint != "" {
+		hintID = id + "-hint"
+		ids = append(ids, hintID)
+	}
+	return strings.Join(ids, " "), hintID, errID
+}
+
+func joinClasses(parts ...string) string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, " ")
+}
+
+func isVoid(tag string) bool {
+	switch tag {
+	case "input", "img", "br", "hr", "meta", "link", "source":
+		return true
+	}
+	return false
+}

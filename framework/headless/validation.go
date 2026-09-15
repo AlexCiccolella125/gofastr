@@ -1,0 +1,241 @@
+package headless
+
+import (
+	"github.com/DonaldMurillo/gofastr/core-ui/html"
+	"github.com/DonaldMurillo/gofastr/core/render"
+)
+
+// ValidationSummary parts.
+const (
+	PartErrorList Part = "error-list"
+	PartErrorItem Part = "error-item"
+	PartErrorLink Part = "error-link"
+)
+
+// FieldError is one thing that went wrong.
+type FieldError struct {
+	// For is the id of the control at fault. With it the message
+	// becomes a link that moves focus to the field; without it the
+	// message is text, which is the right fallback and a worse
+	// experience.
+	For string
+	// Message is what is wrong, in words the person can act on.
+	// "Invalid" is not one of them.
+	Message string
+}
+
+// ValidationSummaryProps is the list of everything wrong with a form.
+type ValidationSummaryProps struct {
+	// Title heads the summary. Defaults to "There is a problem".
+	Title string
+	// Level is the title's heading level, 2 by default.
+	Level  int
+	Errors []FieldError
+
+	ID         string
+	ExtraAttrs html.Attrs
+
+	// Seams: overrides only. Words ride here too (the title a failed
+	// submit focuses).
+	Seams
+}
+
+// ValidationSummary renders the summary that goes above a form.
+//
+// This is the single highest-value accessibility component in a form,
+// and the reasoning is worth stating in full.
+//
+// When a form fails validation, a sighted user sees red appear near
+// the fields. A screen reader user, unless told, hears nothing: focus
+// is wherever it was, the page looks the same to the accessibility
+// tree except for text that changed somewhere below. So the summary:
+//
+//   - is role="alert", which interrupts — this DID just happen, it is
+//     the one case where interrupting is correct;
+//   - is tabindex="-1", so the server can send focus to it after a
+//     failed submit. Not focusable-by-tab, focusable-by-script: it
+//     must never become a tab stop for someone filling in the form;
+//   - lists each error as a LINK to the field, because the value of
+//     the summary is getting to the field, not reading the list. The
+//     link moves focus to the control itself, so the next thing the
+//     user types goes in the right box.
+//
+// Rendering it with no errors renders nothing: an empty "there is a
+// problem" box that announces itself is a lie that interrupts.
+func ValidationSummary(p ValidationSummaryProps, s Skin) render.HTML {
+	if len(p.Errors) == 0 {
+		return ""
+	}
+	items := make([]render.HTML, 0, len(p.Errors))
+	for _, e := range p.Errors {
+		if e.Message == "" {
+			panic("headless: FieldError requires Message")
+		}
+		var inner render.HTML
+		if e.For != "" {
+			inner = El("a", s, PartErrorLink,
+				Attrs(map[string]string{"href": "#" + e.For}), render.Text(e.Message))
+		} else {
+			inner = render.Text(e.Message)
+		}
+		items = append(items, El("li", s, PartErrorItem, nil, inner))
+	}
+	own := Merge(Safe(p.ExtraAttrs, "role", "tabindex"), Attrs(map[string]string{
+		"id": p.ID, "aria-labelledby": titleIDFor(p.ID),
+	}))
+	own["role"] = "alert"
+	own["tabindex"] = "-1"
+
+	return El("div", s, PartRoot, own,
+		El(headingTag(p.Level), s, PartTitle,
+			Attrs(map[string]string{"id": titleIDFor(p.ID)}),
+			render.Text(orDefault(p.Title, p.Seams.W().ThereIsAProblem))),
+		El("ul", s, PartErrorList, nil, items...),
+	)
+}
+
+// titleIDFor names the heading the summary is labelled by. The
+// fallback prefix is structural, not the skin's class namespace: this
+// layer does not know what anyone calls their classes.
+func titleIDFor(id string) string {
+	if id == "" {
+		return "validation-summary-title"
+	}
+	return id + "-title"
+}
+
+// ─── Timeline ───────────────────────────────────────────────────────
+
+// Timeline parts.
+const (
+	PartTimelineItem Part = "timeline-item"
+	PartTimelineMark Part = "timeline-mark"
+	PartTimelineTime Part = "timeline-time"
+	PartTimelineBody Part = "timeline-body"
+)
+
+// Event is one thing that happened.
+type Event struct {
+	// Title is what happened. Required.
+	Title string
+	// Detail is the supporting line.
+	Detail string
+	// When is the human-readable time ("3 days ago", "18:22").
+	When string
+	// Machine is the machine-readable timestamp for <time datetime>,
+	// RFC 3339. Without it "3 days ago" is a string no assistive tech,
+	// translation layer or scraper can resolve to a moment.
+	Machine string
+	// Tone lets the skin colour the marker — "success", "danger".
+	Tone string
+	// Body is extra markup under the detail: a log excerpt, actions.
+	Body render.HTML
+}
+
+// TimelineProps is a sequence of events.
+type TimelineProps struct {
+	// Label names the list for assistive tech — "Deploy history".
+	Label  string
+	Events []Event
+
+	ID         string
+	ExtraAttrs html.Attrs
+}
+
+// Timeline renders the events as an ordered list.
+//
+// Ordered, because the order is the content: these things happened in
+// this sequence, and <ol> is what says so — a screen reader announces
+// the count and the position, so "3 of 7" locates you in the history
+// without seeing the line down the left.
+//
+// The dots and the connecting line are aria-hidden. They are a picture
+// of the ordering that the list already states, and announcing them
+// would mean hearing "bullet" before every entry.
+func Timeline(p TimelineProps, s Skin) render.HTML {
+	if len(p.Events) == 0 {
+		panic("headless: Timeline requires at least one event")
+	}
+	items := make([]render.HTML, 0, len(p.Events))
+	for _, e := range p.Events {
+		if e.Title == "" {
+			panic("headless: Event requires Title")
+		}
+		kids := make([]render.HTML, 0, 4)
+		markAttrs := Attrs(map[string]string{"aria-hidden": "true"})
+		part := PartTimelineMark
+		if e.Tone != "" {
+			part = Part(string(PartTimelineMark) + "--" + e.Tone)
+		}
+		kids = append(kids, El("span", s, part, markAttrs, render.HTML("")))
+
+		body := make([]render.HTML, 0, 4)
+		if e.When != "" {
+			timeAttrs := Attrs(map[string]string{"datetime": e.Machine})
+			body = append(body, El("time", s, PartTimelineTime, timeAttrs, render.Text(e.When)))
+		}
+		body = append(body, El("p", s, PartTitle, nil, render.Text(e.Title)))
+		if e.Detail != "" {
+			body = append(body, El("p", s, PartDesc, nil, render.Text(e.Detail)))
+		}
+		if e.Body != "" {
+			body = append(body, e.Body)
+		}
+		kids = append(kids, El("div", s, PartTimelineBody, nil, body...))
+		items = append(items, El("li", s, PartTimelineItem, nil, kids...))
+	}
+	own := Merge(Safe(p.ExtraAttrs), Attrs(map[string]string{
+		"id": p.ID, "aria-label": p.Label,
+	}))
+	return El("ol", s, PartRoot, own, items...)
+}
+
+func init() {
+	Register(Spec{
+		Name:  "ValidationSummary",
+		Parts: []Part{PartRoot, PartTitle, PartErrorList, PartErrorItem, PartErrorLink},
+		Cases: func(k Kit) []Case {
+			s := k.Skin
+			return []Case{{
+				Name: "after a failed submit",
+				Why:  "it interrupts and can take focus, and every error is a link to the field it is about — a list of complaints you cannot navigate to is a list you have to hunt through",
+				HTML: ValidationSummary(ValidationSummaryProps{
+					Title: "This form could not be saved", ID: "errors",
+					Errors: []FieldError{
+						{For: "name", Message: "Enter an app name."},
+						{For: "port", Message: "Port 8080 is already in use."},
+					}}, s),
+			}, {
+				Name: "an error with no field",
+				Why:  "\"the registry rejected the push\" belongs to no input, and dropping it because it has nowhere to link would lose the only message that explains the failure",
+				HTML: ValidationSummary(ValidationSummaryProps{
+					Title: "This form could not be saved", ID: "errors2",
+					Errors: []FieldError{{Message: "The registry rejected the push."}}}, s),
+			}, {
+				Name: "nothing wrong",
+				Why:  "no errors renders nothing at all, so a page can ask for the summary unconditionally and not get an empty red box on first load",
+				HTML: group(ValidationSummary(ValidationSummaryProps{Title: "x"}, s),
+					render.HTML("<p>Nothing to report.</p>")),
+			}}
+		},
+	})
+
+	Register(Spec{
+		Name:  "Timeline",
+		Parts: []Part{PartRoot, PartTimelineItem, PartTimelineMark, PartTimelineTime, PartTimelineBody, PartTitle, PartDesc},
+		Cases: func(k Kit) []Case {
+			s := k.Skin
+			return []Case{{
+				Name: "history",
+				Why:  "an event with no tone is the ordinary case and draws an untinted marker; ordered, because the order is the content: a screen reader announces the count and the position, so \"3 of 7\" locates you in the history without seeing the line down the left",
+				HTML: Timeline(TimelineProps{Label: "Deploy history", Events: []Event{
+					{Title: "Deployed", Detail: "From main, by Donald.", When: "3 days ago",
+						Machine: "2026-09-08T11:04:00Z", Tone: "success"},
+					{Title: "Build failed", Detail: "Exit 1 in the test stage.", When: "4 days ago",
+						Machine: "2026-09-07T09:12:00Z", Tone: "danger"},
+					{Title: "Configuration changed", When: "5 days ago", Machine: "2026-09-06T16:40:00Z"},
+				}}, s),
+			}}
+		},
+	})
+}

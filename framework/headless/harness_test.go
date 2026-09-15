@@ -1,0 +1,587 @@
+package headless
+
+// The harness: what is asserted about EVERY registered component,
+// without anyone writing a test for it.
+//
+// The contract file next door holds the specific promises — a dialog
+// is named by its title, a wizard's Back does not validate. This file
+// holds the ones that are true of everything, and it gets them from
+// the specs rather than from a hand-kept list, so the sweep grows
+// when the system does instead of the day someone remembers.
+
+import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
+	"regexp"
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/DonaldMurillo/gofastr/core-ui/html"
+	"github.com/DonaldMurillo/gofastr/core/render"
+)
+
+// drawsClass reports whether html uses class as a whole class token.
+//
+// strings.Contains is wrong here and was wrong quietly: the probe for
+// the part "head" is a prefix of the probe for "header", so a component
+// that drew a header counted as drawing a head. That made
+// TestEveryDeclaredPartIsActuallyDrawn pass for a part nothing rendered,
+// which is the exact failure it exists to prevent.
+func drawsClass(html, class string) bool {
+	for i := 0; ; {
+		j := strings.Index(html[i:], class)
+		if j < 0 {
+			return false
+		}
+		j += i
+		before := byte(' ')
+		if j > 0 {
+			before = html[j-1]
+		}
+		after := byte(' ')
+		if end := j + len(class); end < len(html) {
+			after = html[end]
+		}
+		isEdge := func(c byte) bool { return c == ' ' || c == '"' || c == '\'' }
+		if isEdge(before) && isEdge(after) {
+			return true
+		}
+		i = j + 1
+	}
+}
+
+// probeKit is a kit where this component and every child it composes
+// resolve to the same probe skin. A kit that only skinned the component
+// itself would let a fixture pass its own skin to a child and look
+// correct, which is the defect these sweeps exist to catch.
+func probeKit(probe Skin) Kit {
+	return NewKit(probe, func(component, variant string) Skin { return probe })
+}
+
+// eachCase runs fn over every case of every spec, at the nil skin.
+func eachCase(t *testing.T, fn func(t *testing.T, sp Spec, c Case)) {
+	t.Helper()
+	for _, sp := range Specs() {
+		for _, c := range sp.Cases(Kit{}) {
+			t.Run(sp.Name+"/"+c.Name, func(t *testing.T) { fn(t, sp, c) })
+		}
+	}
+}
+
+// A case with no reason to exist is a case that will be rewritten to
+// match whatever the code does next, which is the opposite of a test.
+func TestEveryCaseSaysWhyItExists(t *testing.T) {
+	eachCase(t, func(t *testing.T, sp Spec, c Case) {
+		if strings.TrimSpace(c.Why) == "" {
+			t.Error("no Why: a fixture nobody can justify is a fixture that will be updated to match a bug")
+		}
+		if c.HTML == "" {
+			t.Error("renders nothing")
+		}
+	})
+}
+
+var emptyAria = regexp.MustCompile(`aria-[a-z]+=""`)
+
+// The universal contract, asserted against every fixture in the
+// system rather than the ones somebody remembered to add to a list.
+func TestEveryCaseMeetsTheUniversalContract(t *testing.T) {
+	eachCase(t, func(t *testing.T, sp Spec, c Case) {
+		got := c.HTML
+		if strings.Contains(string(got), "class=") {
+			t.Error("renders a class at the nil skin — structure is carrying styling")
+		}
+		if m := emptyAria.FindString(string(got)); m != "" {
+			t.Errorf("emits %s — an aria attribute pointing at nothing", m)
+		}
+		if strings.Contains(string(got), `style="`) {
+			t.Error(`renders a style attribute — the app serves no unsafe-inline, so it is a rule the browser drops`)
+		}
+		for _, b := range strings.Split(string(got), "<button")[1:] {
+			if tag := b[:strings.Index(b, ">")]; !strings.Contains(tag, "type=") {
+				t.Errorf("a button with no type: %q — inside a form the default is submit", tag)
+			}
+		}
+		for id, n := range idsIn(got) {
+			if n > 1 {
+				t.Errorf("id %q rendered %d times — every reference to it now points at the first one", id, n)
+			}
+		}
+	})
+}
+
+// Two renders of the same fixture must be the same bytes. Map
+// iteration order is random in Go, and an attribute set built from a
+// map that escapes into the output makes goldens flap and diffs lie.
+func TestRenderingIsDeterministic(t *testing.T) {
+	for _, sp := range Specs() {
+		for i, c := range sp.Cases(Kit{}) {
+			again := sp.Cases(Kit{})[i]
+			if c.HTML != again.HTML {
+				t.Errorf("%s/%s renders differently each time:\n  %s\n  %s", sp.Name, c.Name, c.HTML, again.HTML)
+			}
+		}
+	}
+}
+
+// A part is a promise to a skin: name it and a stylesheet may target
+// it. A part that no case renders is a class with nothing to land on,
+// and the way to find out is to give every part a class of its own
+// and look for it.
+func TestEveryDeclaredPartIsActuallyDrawn(t *testing.T) {
+	for _, sp := range Specs() {
+		t.Run(sp.Name, func(t *testing.T) {
+			probe := Skin{}
+			for _, p := range sp.Parts {
+				probe[p] = "probe-" + string(p)
+			}
+			var all strings.Builder
+			for _, c := range sp.Cases(probeKit(probe)) {
+				all.WriteString(string(c.HTML))
+			}
+			for _, p := range sp.Parts {
+				if !drawsClass(all.String(), "probe-"+string(p)) {
+					t.Errorf("part %q is declared but no case draws it", p)
+				}
+			}
+		})
+	}
+}
+
+// A hook is the contract between the markup and the runtime. One that
+// no case renders is a listener bound to nothing — which is exactly
+// how a behaviour is lost: the attribute is renamed here, the runtime
+// keeps looking for the old one, and nothing fails.
+func TestEveryDeclaredHookIsRendered(t *testing.T) {
+	for _, sp := range Specs() {
+		// At the nil skin AND at a skin where every part has a class,
+		// because some hooks carry a class as their value — the
+		// multi-select tells its runtime which class to give the chips
+		// it builds — and those exist only once something is styled.
+		probe := Skin{}
+		for _, p := range sp.Parts {
+			probe[p] = "probe-" + string(p)
+		}
+		var all strings.Builder
+		for _, k := range []Kit{{}, probeKit(probe)} {
+			for _, c := range sp.Cases(k) {
+				all.WriteString(string(c.HTML))
+			}
+		}
+		for _, h := range sp.Hooks {
+			if !strings.Contains(all.String(), h) {
+				t.Errorf("%s declares hook %q and no case renders it", sp.Name, h)
+			}
+		}
+		for _, h := range sp.Hooks {
+			if !strings.HasPrefix(h, "data-ds-") {
+				t.Errorf("%s declares hook %q — runtime hooks are data-ds-* so they cannot collide with anything the platform owns", sp.Name, h)
+			}
+		}
+	}
+}
+
+// Every id a fixture references must exist in that same fixture.
+//
+// The page audit catches this in the browser, and by then the
+// component is on a page with a hundred others and the finding says
+// which id is dangling, not which component dropped it. Here it says
+// both. A component whose reference legitimately points outside
+// itself — a trigger and its panel are two fragments — renders both
+// halves in its case, which is also the honest fixture.
+func TestEveryReferenceResolvesInsideItsFixture(t *testing.T) {
+	// The space before the name is load-bearing. Without it, `for=`
+	// matched the tail of `data-ds-toggle-for=` and the check passed
+	// or failed for a reason it was not claiming to test. The runtime
+	// hooks that DO point at an element are named here deliberately
+	// instead, because a hook pointing at nothing is the same defect
+	// as an aria attribute pointing at nothing — the difference is
+	// only which layer notices.
+	refs := regexp.MustCompile(`\s(aria-labelledby|aria-describedby|aria-controls|aria-activedescendant|` +
+		`popovertarget|commandfor|for|data-ds-toggle-for|data-ds-copy-from|data-ds-toast-from)="([^"]+)"`)
+	eachCase(t, func(t *testing.T, sp Spec, c Case) {
+		ids := idsIn(c.HTML)
+		for _, m := range refs.FindAllStringSubmatch(string(c.HTML), -1) {
+			for _, want := range strings.Fields(m[2]) {
+				if ids[want] == 0 {
+					t.Errorf("%s=%q points at nothing in this fixture", m[1], want)
+				}
+			}
+		}
+	})
+}
+
+// Every control a fixture renders has an accessible name.
+//
+// A control with no name cannot be operated by anyone who cannot see
+// it, and a placeholder is not a name — which is the whole reason to
+// check rather than to look. Hidden subtrees are skipped: they are
+// out of the tree and out of the tab order, and they are named by the
+// same markup that shows them.
+func TestEveryControlHasAName(t *testing.T) {
+	control := regexp.MustCompile(`(?s)<(button|a|select|textarea)\b([^>]*)>(.*?)</(?:button|a|select|textarea)>`)
+	tags := regexp.MustCompile(`<[^>]+>`)
+	eachCase(t, func(t *testing.T, sp Spec, c Case) {
+		for _, m := range control.FindAllStringSubmatch(string(c.HTML), -1) {
+			attrs, inner := m[2], m[3]
+			if m[1] == "a" && !strings.Contains(attrs, "href=") && !strings.Contains(attrs, "role=") {
+				continue // not a link: an anchor used as a target
+			}
+			if strings.Contains(attrs, `aria-hidden="true"`) || strings.Contains(attrs, "hidden") {
+				continue
+			}
+			named := strings.Contains(attrs, "aria-label=") ||
+				strings.Contains(attrs, "aria-labelledby=") ||
+				strings.Contains(attrs, "title=") ||
+				strings.TrimSpace(tags.ReplaceAllString(inner, "")) != ""
+			if !named {
+				t.Errorf("a <%s> with no accessible name: %s", m[1], strings.TrimSpace(m[0]))
+			}
+		}
+	})
+}
+
+// ─── seams ──────────────────────────────────────────────────────────
+
+// Filling a slot must not cost the component its contract. The slot
+// gets something hostile — a heading, an unnamed control, a duplicate
+// id — and everything universal is asserted again on the result.
+func TestFilledSlotsKeepTheContract(t *testing.T) {
+	hostile := render.HTML(`<h4>slot</h4>`)
+	for _, sp := range Specs() {
+		if len(sp.Fillable) == 0 {
+			continue
+		}
+		if sp.WithSeams == nil {
+			t.Errorf("%s offers %d fillable parts and no WithSeams, so nothing tests them", sp.Name, len(sp.Fillable))
+			continue
+		}
+		for _, p := range sp.Fillable {
+			t.Run(sp.Name+"/"+string(p), func(t *testing.T) {
+				got := sp.WithSeams(nil, Seams{Slots: Slots{p: hostile}})
+				if !strings.Contains(string(got), "<h4>slot</h4>") {
+					t.Errorf("part %q is listed as fillable and the content never arrived:\n%s", p, got)
+				}
+				if strings.Contains(string(got), "class=") {
+					t.Error("a filled slot brought classes into the nil skin")
+				}
+				for id, n := range idsIn(got) {
+					if n > 1 {
+						t.Errorf("filling %q duplicated id %q", p, id)
+					}
+				}
+			})
+		}
+	}
+}
+
+// What a caller may not do, asserted on every component that lets a
+// caller do anything at all. Each of these is a way to break a
+// component from the outside and leave no trace at the call site.
+func TestOverridesCannotBreakAComponent(t *testing.T) {
+	hostile := html.Attrs{
+		"id":            "stolen",
+		"style":         "display:none",
+		"data-ds-copy":  "",
+		"data-fui-main": "",
+		"class":         "mine",
+		"data-testid":   "card",
+	}
+	for _, sp := range Specs() {
+		if sp.WithSeams == nil {
+			continue
+		}
+		t.Run(sp.Name, func(t *testing.T) {
+			got := sp.WithSeams(Skin{PartRoot: "real"}, Seams{Overrides: Overrides{PartRoot: hostile}})
+			if strings.Contains(string(got), `"stolen"`) {
+				t.Error("a caller renamed the root: ids are how a label finds its control")
+			}
+			if strings.Contains(string(got), "display:none") {
+				t.Error("a caller set an inline style the CSP will drop — it would work in dev and vanish in production")
+			}
+			if strings.Contains(string(got), "data-ds-copy") {
+				t.Error("a caller forged a runtime hook: behaviour is now bound to an element never built for it")
+			}
+			if strings.Contains(string(got), "data-fui-main") {
+				t.Error("a caller forged a framework hook")
+			}
+			if !strings.Contains(string(got), `data-testid="card"`) {
+				t.Error("an ordinary attribute was dropped — then the escape hatch is not one and the page forks the component")
+			}
+			if !strings.Contains(string(got), "real") || !strings.Contains(string(got), "mine") {
+				t.Errorf("class must append, never replace — a component that arrives unstyled is worse than one with an extra class:\n%s", got)
+			}
+		})
+	}
+}
+
+// ─── coverage ───────────────────────────────────────────────────────
+
+// unspecified lists the components written before the harness
+// existed. It only goes down: a component here that gains a spec must
+// leave the list, and a NEW component in neither fails outright. That
+// is the whole mechanism — the debt is visible and cannot grow.
+var unspecified = map[string]bool{}
+
+// TestEveryComponentHasASpec reads the package's own source for
+// exported functions that render, which is a component whatever it
+// was called, and insists each one is either specified or admitted to
+// be unspecified.
+func TestEveryComponentHasASpec(t *testing.T) {
+	found := exportedComponents(t)
+	var missing []string
+	for _, name := range found {
+		if _, ok := SpecOf(name); ok {
+			if unspecified[name] {
+				t.Errorf("%s has a spec and is still on the unspecified list — take it off", name)
+			}
+			continue
+		}
+		if !unspecified[name] {
+			missing = append(missing, name)
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Errorf("no spec, and not admitted to the unspecified list: %s\n"+
+			"A component with no fixture is tested by whoever remembers to.", strings.Join(missing, ", "))
+	}
+	for name := range unspecified {
+		if !contains(found, name) {
+			t.Errorf("%s is on the unspecified list and no longer exists", name)
+		}
+	}
+}
+
+// exportedComponents parses this package and returns every exported
+// function that returns rendered HTML — the definition of a component
+// that does not depend on anyone maintaining a list.
+func exportedComponents(t *testing.T) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatalf("parsing the package: %v", err)
+	}
+	helpers := map[string]bool{"El": true}
+	var out []string
+	for _, pkg := range pkgs {
+		for _, f := range pkg.Files {
+			for _, d := range f.Decls {
+				fn, ok := d.(*ast.FuncDecl)
+				if !ok || fn.Recv != nil || !fn.Name.IsExported() || helpers[fn.Name.Name] {
+					continue
+				}
+				if fn.Type.Results == nil {
+					continue
+				}
+				for _, r := range fn.Type.Results.List {
+					if sel, ok := r.Type.(*ast.SelectorExpr); ok && sel.Sel.Name == "HTML" {
+						out = append(out, fn.Name.Name)
+						break
+					}
+				}
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+var idAttr = regexp.MustCompile(`\sid="([^"]+)"`)
+
+func idsIn(h render.HTML) map[string]int {
+	out := map[string]int{}
+	for _, m := range idAttr.FindAllStringSubmatch(string(h), -1) {
+		out[m[1]]++
+	}
+	return out
+}
+
+// probeFor is the probe skin for one named component: a class on every
+// part that component declares, and nothing else. Keying it to the
+// component is the whole point — a skin that styled every part of every
+// component would let a fixture hand a Form's skin to an Input and
+// still look correct.
+func probeFor(name string) Skin {
+	sp, ok := SpecOf(name)
+	if !ok {
+		return nil
+	}
+	s := Skin{}
+	for _, p := range sp.Parts {
+		s[p] = "probe-" + name + "-" + string(p)
+	}
+	return s
+}
+
+// namedProbeKit skins this component and resolves every child to the
+// child's own probe.
+func namedProbeKit(own string) Kit {
+	return NewKit(probeFor(own), func(component, variant string) Skin {
+		return probeFor(component)
+	})
+}
+
+// controlTag finds interactive elements and whether they carry a class.
+var controlTag = regexp.MustCompile(`<(button|input|select|textarea|a)(\s[^>]*)?>`)
+
+// TestEveryControlInAFixtureWearsAClass proves a fixture composes with
+// the design system rather than around it.
+//
+// Two defects look identical on screen and neither was visible to any
+// other check. A fixture that needs a button inside it could hand the
+// child its own parent's skin — an Input wearing .ds-form, which styles
+// none of an input's parts — or give up and write the child as a raw
+// HTML string. Both render a naked browser-default control. A part
+// check does not see it, because the control is not one of the
+// component's parts. A golden does not see it, because the golden
+// records whatever is there. The page audit does not see it, because an
+// unstyled button is still a named button.
+//
+// Thirty-one components did one or the other, and the catalogue page
+// was a third unstyled before anybody noticed.
+func TestEveryControlInAFixtureWearsAClass(t *testing.T) {
+	for _, sp := range Specs() {
+		sp := sp
+		t.Run(sp.Name, func(t *testing.T) {
+			for _, c := range sp.Cases(namedProbeKit(sp.Name)) {
+				for _, m := range controlTag.FindAllStringSubmatch(string(c.HTML), -1) {
+					tag, attrs := m[1], m[2]
+					if strings.Contains(attrs, `class="`) {
+						continue
+					}
+					// A hidden input is never drawn, never focusable and
+					// never reaches an audit. A class on it would style
+					// nothing. Requiring one would push fixtures to add
+					// decoration to prove a point the element cannot make.
+					if strings.Contains(attrs, `type="hidden"`) {
+						continue
+					}
+					t.Errorf("%s/%s: a <%s> with no class — %s\n"+
+						"  either it is raw HTML in the fixture, or it was given a skin "+
+						"that does not style it. Build it with the component and pass "+
+						"k.For(\"…\") for its skin.",
+						sp.Name, c.Name, tag, strings.TrimSpace(m[0]))
+				}
+			}
+		})
+	}
+}
+
+// TestEveryPartDrawnIsDeclared is the other direction of the part
+// contract, and the one that was missing.
+//
+// TestEveryDeclaredPartIsActuallyDrawn catches a part named in a spec
+// that nothing renders — a class in the stylesheet landing on nothing.
+// This catches the reverse: a part the component draws and the spec
+// never mentions. Both sliders called s.Class(PartControl) for their
+// <input type="range"> while declaring only root, row, track, label and
+// value. The skin happened to define it, so the real page was fine and
+// nothing failed — but the spec is what a skin author reads, and by
+// that document the input did not exist. A new skin would have left it
+// unstyled and no test would have said so.
+func TestEveryPartDrawnIsDeclared(t *testing.T) {
+	// Every part any component declares, so a part drawn by one and
+	// declared by none of them still has a class to be caught by.
+	universal := Skin{}
+	for _, sp := range Specs() {
+		for _, p := range sp.Parts {
+			universal[p] = "probe-" + string(p)
+		}
+	}
+	for _, sp := range Specs() {
+		sp := sp
+		t.Run(sp.Name, func(t *testing.T) {
+			declared := map[Part]bool{}
+			for _, p := range sp.Parts {
+				declared[p] = true
+			}
+			// Children resolve to nil, so what is drawn here is this
+			// component's own markup and not a child's.
+			kit := NewKit(universal, func(component, variant string) Skin { return nil })
+			var all strings.Builder
+			for _, c := range sp.Cases(kit) {
+				all.WriteString(string(c.HTML))
+			}
+			out := all.String()
+			for p := range universal {
+				if declared[p] || !drawsClass(out, "probe-"+string(p)) {
+					continue
+				}
+				t.Errorf("%s draws the part %q but does not declare it in Parts.\n"+
+					"  A spec is what a skin author reads. An undeclared part is a "+
+					"part nobody knows to style, and it renders naked in every skin "+
+					"but the one that happened to guess.", sp.Name, p)
+			}
+		})
+	}
+}
+
+// svgTag finds svg elements and captures their attributes.
+var svgTag = regexp.MustCompile(`<svg(\s[^>]*)?>`)
+
+// TestEverySVGInAFixtureDeclaresItsSize is the cheapest test here and
+// it caught the worst-looking defect in the system.
+//
+// An <svg> with no width, no height and no viewBox has no intrinsic
+// size, so CSS gives it the replaced-element default: 300 by 150
+// pixels. Every fixture that needed an icon passed render.HTML("<svg/>")
+// because it type-checks and reads like a placeholder. Eighteen of the
+// nineteen icons on the catalogue page were drawn at 300×150, which
+// turned a badge into a 340px slab, opened a 140px hole in an alert's
+// header and piled the avatar group's initials on top of each other.
+//
+// Every other check passed the whole time. The classes were right, the
+// parts were declared, the controls were named, the audit was clean.
+// Markup tests cannot see a box the size of a postcard, so the rule has
+// to be stated about the markup instead: an icon says how big it is.
+func TestEverySVGInAFixtureDeclaresItsSize(t *testing.T) {
+	eachCase(t, func(t *testing.T, sp Spec, c Case) {
+		for _, m := range svgTag.FindAllStringSubmatch(string(c.HTML), -1) {
+			attrs := m[1]
+			if strings.Contains(attrs, "viewBox=") ||
+				(strings.Contains(attrs, "width=") && strings.Contains(attrs, "height=")) {
+				continue
+			}
+			t.Errorf("%s/%s: an <svg> with no size — %s\n"+
+				"  With no viewBox and no width/height it renders at the CSS "+
+				"default of 300×150 and wrecks whatever lays out around it. "+
+				"Use SpecimenGlyph.", sp.Name, c.Name, strings.TrimSpace(m[0]))
+		}
+	})
+}
+
+// A seam nothing routes is a seam that silently drops what it is
+// given. The override sweep above proves a hostile override cannot
+// break a component; this proves a benign binding on the root ARRIVES,
+// for every component that offers seams — which is the same as
+// proving the root is rendered through the Box rather than around it.
+func TestEveryComponentWithSeamsRoutesABindToItsRoot(t *testing.T) {
+	for _, sp := range Specs() {
+		if sp.WithSeams == nil {
+			continue
+		}
+		t.Run(sp.Name, func(t *testing.T) {
+			got := sp.WithSeams(nil, Seams{Binds: Binds{PartRoot: {Signal: "probe"}}})
+			if !strings.Contains(string(got), `data-fui-signal="probe"`) {
+				t.Errorf("a binding on the root never arrived: the root is rendered around the Box, "+
+					"so overrides on it are dropped the same way:\n%s", got)
+			}
+		})
+	}
+}

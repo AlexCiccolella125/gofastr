@@ -1325,6 +1325,21 @@ at boot, so `loadComponentCSS` can resolve a marker name to a URL.
 This is strict-CSP-clean (no inline JS, no separate script src).
 The legacy `/__gofastr/catalog.js` endpoint now returns 410 GONE.
 
+### The headless layer (`framework/headless`)
+
+A second way to author a component separates what this section joins:
+structure in one function, classes in a skin, behaviour bound by a
+`data-ds-*` hook rather than a class. A headless component renders the
+same markup at a nil skin with no `class` attribute at all, and the
+harness pins that render in a golden, so restyling cannot move a role,
+a label or a hook. The layer satisfies every hard rule above the same
+way `framework/ui` does: an in-page state change is an `Island` (the
+`data-fui-rpc` contract on the element that keeps its href for
+no-script), a request is a typed `Action`, and a signal is a typed
+`Bind`; `ExtraAttrs` cannot carry a `data-fui-*` key. The styled
+`framework/ui` components are the layer above it. Contract and
+invariants: `gofastr docs ui-headless`.
+
 ### Adding a styled component
 
 ```go
@@ -1507,6 +1522,12 @@ framework/
                  paths return 410 Gone); handles SSE; client-side
                  navigation partial-fetch endpoint
   static/      : SSG builder (renders every screen at build time)
+  headless/    : the structure half of a design system: components that
+                 render tags, roles, labelling and data-ds-* hooks with
+                 no classes; a Skin maps parts to classes; seams (Slots,
+                 Overrides, Binds, Words, Island) are typed and checked;
+                 a harness pins every component at the nil skin. See
+                 `gofastr docs ui-headless`.
   ui/          : opinionated semantic components on top of core-ui
                  (see full list in the cheat sheet below)
   ui/theme/    : canonical framework theme tokens
