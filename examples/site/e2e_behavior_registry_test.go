@@ -248,6 +248,15 @@ func TestE2E_BehaviorRegistry_OtherPagesCarryNoMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer res.Body.Close()
+	// A marker-free body proves nothing on its own: a 404 page or a
+	// redirect elsewhere has none either. The page has to be the one
+	// asked for, served.
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET /components/datatable returned %s", res.Status)
+	}
+	if got := res.Request.URL.Path; got != "/components/datatable" {
+		t.Fatalf("GET /components/datatable ended at %s", got)
+	}
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		t.Fatal(err)
