@@ -50,11 +50,7 @@ func checkActionEndpoint(component, what, endpoint string) {
 	if endpoint == "" {
 		panic("headless: " + component + " requires " + what)
 	}
-	// "//host/…" is protocol-relative and therefore cross-origin even
-	// though it starts with a slash.
-	if !strings.HasPrefix(endpoint, "/") || strings.HasPrefix(endpoint, "//") {
-		panic("headless: " + component + " " + what + " must be same-origin and start with /, not " + endpoint)
-	}
+	checkSameOrigin(component, what, endpoint)
 }
 
 // actionMethod canonicalises the method and returns the value to
@@ -94,7 +90,7 @@ func checkLabelsDiffer(component, idle, done string) {
 func safeActionExtras(extra html.Attrs) html.Attrs {
 	out := Safe(extra, "type", "disabled", "data-state", "aria-busy", "aria-pressed")
 	for k := range out {
-		if strings.HasPrefix(k, "data-ds-") {
+		if strings.HasPrefix(strings.ToLower(k), "data-ds-") {
 			delete(out, k)
 		}
 	}

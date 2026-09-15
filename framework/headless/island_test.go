@@ -2,6 +2,8 @@ package headless
 
 import (
 	"testing"
+
+	"github.com/DonaldMurillo/gofastr/core-ui/html"
 )
 
 // fixtureIsland is the island the fixtures name. A fixture render is not
@@ -157,4 +159,60 @@ func TestTagCarriesTheContractOnItsDismiss(t *testing.T) {
 	has(t, got, `data-fui-push-state="/apps?env="`, "the dismiss did not write the URL")
 	fixed := Tag(TagProps{Label: "env=prod", Island: fixtureIsland}, nil)
 	hasNot(t, fixed, "data-fui", "a tag with nothing to dismiss carries the contract anyway")
+}
+
+// The one "wired and is not" failure Island.check exists to catch: a
+// signal the kernel refuses to write. The runtime warns and drops the
+// write, so the RPC fires and the region never updates. Refused at
+// render, on the Island and on a Button's Action alike; the same rule
+// a Bind already enforced.
+func TestIslandRefusesAReservedSignal(t *testing.T) {
+	for _, name := range []string{"__proto__", "constructor", "prototype"} {
+		refuse(t, "reserved", func() {
+			Pagination(PaginationProps{Page: 1, Pages: 2, HrefPattern: "/x?p=%d", AriaLabel: "Pages",
+				Island: Island{Endpoint: "/island/apps", Signal: name}}, nil)
+		})
+		refuse(t, "reserved", func() {
+			Button(ButtonProps{Label: "Go", Type: "button",
+				Action: html.Attrs{"data-fui-rpc": "/x", "data-fui-rpc-signal": name}}, nil)
+		})
+	}
+}
+
+// The same-origin guard covers the whole class it names: "//host" is
+// protocol-relative, and the URL parser reads a backslash the same
+// way, so "/\\host" resolves off-origin and the runtime declines to
+// fetch it — a dead control, which is what the guard exists to
+// prevent.
+func TestEndpointsRefuseTheBackslashSpelling(t *testing.T) {
+	refuse(t, "same-origin", func() {
+		Pagination(PaginationProps{Page: 1, Pages: 2, HrefPattern: "/x?p=%d", AriaLabel: "Pages",
+			Island: Island{Endpoint: "/\\evil.com/x", Signal: "apps"}}, nil)
+	})
+	refuse(t, "same-origin", func() {
+		OptimisticAction(OptimisticActionProps{Endpoint: "/\\evil.com/x", IdleLabel: "Follow", SuccessLabel: "Following"}, nil)
+	})
+}
+
+// ExtraAttrs is sanitised the way the browser reads it. Attribute
+// names are case-insensitive, so a request spelled DATA-FUI-RPC is
+// data-fui-rpc in the DOM; and the runtime's privileged unprefixed
+// keys — data-behavior, data-island and their family — carry no
+// data-fui- to match. Both were let through by a check on the
+// spelling as written.
+func TestSafeRefusesFoldedAndPrivilegedKeys(t *testing.T) {
+	got := Badge(BadgeProps{Label: "x", ExtraAttrs: html.Attrs{
+		"DATA-FUI-RPC":   "/evil",
+		"Data-Island":    "apps",
+		"data-behavior":  "/evil.js",
+		"data-action":    "delete",
+		"data-param-id":  "1",
+		"data-kiln-tool": "t",
+		"STYLE":          "display:none",
+		"data-testid":    "kept",
+	}}, nil)
+	for _, bad := range []string{"/evil", "smuggled", "delete", "data-param", "data-kiln", "display:none"} {
+		hasNot(t, got, bad, "a refused attribute arrived through ExtraAttrs")
+	}
+	has(t, got, `data-testid="kept"`, "an ordinary attribute was dropped with the refused ones")
 }

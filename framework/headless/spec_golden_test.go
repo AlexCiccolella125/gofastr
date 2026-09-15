@@ -11,7 +11,7 @@ package headless
 // as long as it broke none of the named checks.
 //
 // It costs nothing to maintain, because the fixtures already exist and
-// are already justified. Regenerate with DS_UPDATE_GOLDEN=1 after an
+// are already justified. Regenerate with GOFASTR_UPDATE_GOLDEN=1 after an
 // intentional change, and read the diff: every line of it is a change
 // to what a screen reader will be told.
 
@@ -34,7 +34,7 @@ func TestSpecGolden(t *testing.T) {
 	got := b.String()
 
 	const path = "testdata/spec_golden.txt"
-	if os.Getenv("DS_UPDATE_GOLDEN") != "" {
+	if os.Getenv("GOFASTR_UPDATE_GOLDEN") != "" {
 		if err := os.MkdirAll("testdata", 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -45,12 +45,12 @@ func TestSpecGolden(t *testing.T) {
 	}
 	golden, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("reading golden: %v (run with DS_UPDATE_GOLDEN=1 to create)", err)
+		t.Fatalf("reading golden: %v (run with GOFASTR_UPDATE_GOLDEN=1 to create)", err)
 	}
 	if string(golden) != got {
 		t.Fatalf("the structure of one or more components changed.\n"+
 			"Every difference below is a change to what assistive tech is told.\n"+
-			"If it is intended, regenerate with DS_UPDATE_GOLDEN=1 and read the diff.\n\n%s",
+			"If it is intended, regenerate with GOFASTR_UPDATE_GOLDEN=1 and read the diff.\n\n%s",
 			firstDifference(string(golden), got))
 	}
 }

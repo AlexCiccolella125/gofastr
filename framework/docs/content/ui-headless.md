@@ -42,8 +42,11 @@ both directions.
   fillable. Most list none: a slot exists only where the component
   composes something no prop can express.
 - **Overrides** add attributes to a part, through a sanitiser that
-  refuses `id`, `style`, every `data-ds-*` hook and every `data-fui-*`
-  key, and never beats an attribute the component owns.
+  refuses `id`, `style`, every `data-ds-*` hook, every `data-fui-*`
+  key and the runtime's privileged unprefixed keys (`data-behavior`,
+  `data-island`, `data-action` and their family), compares names the
+  way the browser folds them, and never beats an attribute the
+  component owns. `ExtraAttrs` goes through the same refusal.
 - **Binds** keep a part in step with a client signal (text, html or one
   attribute), refusing reserved signal names and attributes outside the
   runtime's own allow-list.
@@ -67,7 +70,7 @@ skin := headless.Skin{
 }
 
 headless.Field(headless.FieldProps{
-    Label: "Port", ID: "port", Hint: "1024 to 65535", Required: true,
+    Label: "Port", For: "port", Hint: "1024 to 65535", Required: true,
 }, skin, func(c headless.FieldControl) render.HTML {
     return headless.Input(headless.InputProps{
         Name: "port", ID: c.ID, Required: c.Required,
@@ -130,11 +133,12 @@ Two goldens pin the corpus: `testdata/spec_golden.txt` at the English
 words and `spec_golden_words.txt` with every word replaced by its own
 probe token, which proves that every string on the page came through
 the `Words` seam. `words_test.go` also walks the source and refuses an
-English phrase outside it.
+English phrase in the sinks it knows: text and HTML literals, format
+strings, defaults, and the attribute values a reader is told.
 
 ```sh
 go test ./framework/headless/                    # every gate
-DS_UPDATE_GOLDEN=1 go test ./framework/headless/ # after an intended markup change
+GOFASTR_UPDATE_GOLDEN=1 go test ./framework/headless/ # after an intended markup change
 ```
 
 Read the golden diff. Every line of it is a change to what assistive

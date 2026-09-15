@@ -102,7 +102,7 @@ func TestEveryWordIsSaidBySomeCase(t *testing.T) {
 // English word in it is a word that bypassed the seam — fixture
 // labels (the English a Case chose on purpose) excepted, and those
 // are the caller's strings, not the component's. Regenerate with
-// DS_UPDATE_GOLDEN=1 after an intended change and read it once,
+// GOFASTR_UPDATE_GOLDEN=1 after an intended change and read it once,
 // end to end.
 func TestSpecGoldenWords(t *testing.T) {
 	prev := wordsProbe
@@ -121,7 +121,7 @@ func TestSpecGoldenWords(t *testing.T) {
 	got := b.String()
 
 	const path = "testdata/spec_golden_words.txt"
-	if os.Getenv("DS_UPDATE_GOLDEN") != "" {
+	if os.Getenv("GOFASTR_UPDATE_GOLDEN") != "" {
 		if err := os.MkdirAll("testdata", 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -132,13 +132,13 @@ func TestSpecGoldenWords(t *testing.T) {
 	}
 	golden, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("reading words golden: %v (run with DS_UPDATE_GOLDEN=1 to create)", err)
+		t.Fatalf("reading words golden: %v (run with GOFASTR_UPDATE_GOLDEN=1 to create)", err)
 	}
 	if string(golden) != got {
 		t.Fatalf("the words of one or more components changed.\n"+
 			"Every difference below is a string that stopped (or started) coming\n"+
 			"through the words seam. If it is intended, regenerate with\n"+
-			"DS_UPDATE_GOLDEN=1 and read the diff.\n\n%s",
+			"GOFASTR_UPDATE_GOLDEN=1 and read the diff.\n\n%s",
 			firstDifference(string(golden), got))
 	}
 }
@@ -193,6 +193,10 @@ func TestHeadlessSaysNothingInEnglishOutsideWords(t *testing.T) {
 				case "render.Text":
 					if len(call.Args) >= 1 {
 						lits, offence = literalOperands(call.Args[0]), "render.Text"
+					}
+				case "render.HTML":
+					if len(call.Args) >= 1 {
+						lits, offence = literalOperands(call.Args[0]), "a render.HTML literal"
 					}
 				case "fmt.Sprintf", "Sprintf":
 					if len(call.Args) >= 1 {

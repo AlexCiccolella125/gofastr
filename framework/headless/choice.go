@@ -6,6 +6,8 @@ package headless
 // group semantics live here; the row's visual shape lives in the skin.
 
 import (
+	"strconv"
+
 	"github.com/DonaldMurillo/gofastr/core-ui/html"
 	"github.com/DonaldMurillo/gofastr/core/render"
 )
@@ -48,6 +50,9 @@ type ChoiceProps struct {
 func Choice(p ChoiceProps, s Skin) render.HTML {
 	if p.Label == "" {
 		panic("headless: Choice requires Label — an unlabelled choice is a bug, not a variant")
+	}
+	if p.Type != "checkbox" && p.Type != "radio" {
+		panic("headless: Choice Type must be checkbox or radio, not " + strconv.Quote(p.Type) + " — any other type is a text input that breaks the group")
 	}
 	input := Merge(Safe(p.Extra), html.Attrs{
 		"type": p.Type,

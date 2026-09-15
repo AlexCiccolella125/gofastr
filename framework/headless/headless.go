@@ -178,16 +178,50 @@ func Flag(a html.Attrs, name string, on bool) html.Attrs {
 	return a
 }
 
+// refused reports whether a caller-supplied attribute may never reach
+// the markup, whatever seam it came through. Attribute names are
+// case-insensitive in HTML — the parser lowercases them, so
+// DATA-FUI-RPC is data-fui-rpc by the time the runtime looks — which
+// is why the key is folded before every check, and why a sanitiser
+// that compared the spelling as written let the request through.
+//
+// Refused, in three families: style, which a host serving no
+// unsafe-inline drops (the framework's default posture), so it is a
+// rule that vanishes in production; every data-fui-* key, the
+// framework runtime's own contract, so decoration can never become a
+// request; and the runtime's privileged unprefixed keys — data-behavior
+// (a script-loading sink), data-island (the SSE swap target),
+// data-widget and data-component (island roots), data-bind (two-way
+// state), data-action and data-param-* (a compiled server action and
+// its arguments) and data-kiln-* (the legacy tool delegators). The
+// runtime re-checks some of their values; the seam's job is that they
+// never arrive.
+func refused(key string) bool {
+	k := strings.ToLower(key)
+	switch k {
+	case "style", "data-behavior", "data-island", "data-widget", "data-component", "data-bind", "data-action":
+		return true
+	}
+	for _, prefix := range []string{"data-fui-", "data-action-", "data-param-", "data-kiln-"} {
+		if strings.HasPrefix(k, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // Safe copies caller-supplied extras, dropping the keys a component
-// owns so no caller can break its structure or its labelling.
+// owns so no caller can break its structure or its labelling, and the
+// keys refused on every seam (see refused). Keys are compared folded,
+// the way the browser will read them.
 func Safe(extra html.Attrs, owned ...string) html.Attrs {
 	blocked := map[string]bool{"class": true, "id": true}
 	for _, k := range owned {
-		blocked[k] = true
+		blocked[strings.ToLower(k)] = true
 	}
 	out := html.Attrs{}
 	for k, v := range extra {
-		if blocked[k] || strings.HasPrefix(k, "data-fui-") {
+		if blocked[strings.ToLower(k)] || refused(k) {
 			continue
 		}
 		out[k] = v

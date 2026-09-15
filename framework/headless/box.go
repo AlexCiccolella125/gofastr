@@ -93,12 +93,7 @@ func (b Bind) attrs() html.Attrs {
 	if b.Signal == "" {
 		panic("headless: a Bind needs a Signal")
 	}
-	// The three names the runtime kernel refuses to write, because as
-	// dynamic property names on the store they re-parent its prototype
-	// chain. Mirrors core-ui/interactive's refuseReservedSignalName.
-	if b.Signal == "__proto__" || b.Signal == "constructor" || b.Signal == "prototype" {
-		panic("headless: signal name " + strconv.Quote(b.Signal) + " is reserved and the runtime never writes it")
-	}
+	checkSignalName(b.Signal)
 	mode := orDefault(b.Mode, "text")
 	out := html.Attrs{"data-fui-signal": b.Signal, "data-fui-signal-mode": mode}
 	switch mode {
@@ -118,6 +113,19 @@ func (b Bind) attrs() html.Attrs {
 		panic("headless: Bind mode must be text, html or attr, not " + mode)
 	}
 	return out
+}
+
+// checkSignalName refuses the three names the runtime kernel never
+// writes, because as dynamic property names on the store they
+// re-parent its prototype chain. It mirrors core-ui/interactive's
+// refuseReservedSignalName, and it is one function because a Bind, an
+// Island and a Button's Action all name a signal, and a region bound
+// to a name the kernel drops is a region that never updates with no
+// error anywhere.
+func checkSignalName(name string) {
+	if name == "__proto__" || name == "constructor" || name == "prototype" {
+		panic("headless: signal name " + strconv.Quote(name) + " is reserved and the runtime never writes it")
+	}
 }
 
 // Box carries the three layers through a component's render. A zero
@@ -201,10 +209,7 @@ func allowedOverride(a html.Attrs) html.Attrs {
 	out := html.Attrs{}
 	for k, v := range a {
 		lk := strings.ToLower(k)
-		switch {
-		case lk == "id", lk == "style":
-			continue
-		case strings.HasPrefix(lk, "data-ds-"), strings.HasPrefix(lk, "data-fui-"):
+		if lk == "id" || strings.HasPrefix(lk, "data-ds-") || refused(k) {
 			continue
 		}
 		out[k] = v

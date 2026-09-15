@@ -64,6 +64,9 @@ func actionAttrs(a html.Attrs) html.Attrs {
 	out := html.Attrs{}
 	for k, v := range a {
 		switch {
+		case k == "data-fui-rpc-signal":
+			checkSignalName(v)
+			out[k] = v
 		case strings.HasPrefix(k, "data-fui-rpc"),
 			k == "data-fui-confirm",
 			k == "data-fui-push-state",

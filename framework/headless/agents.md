@@ -60,7 +60,7 @@ English words, `spec_golden_words.txt` at probe words).
   field each, so a missing translation is a compile error rather than a
   stray word on a French page; `words_test.go` refuses English outside
   the seam.
-- **A golden update without reading it.** `DS_UPDATE_GOLDEN=1 go test`
+- **A golden update without reading it.** `GOFASTR_UPDATE_GOLDEN=1 go test`
   regenerates; every changed line is a change to what assistive
   technology is told.
 

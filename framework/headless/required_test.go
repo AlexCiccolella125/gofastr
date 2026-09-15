@@ -68,6 +68,14 @@ func TestFormRefusesAnActionlessSubmit(t *testing.T) {
 	refuse(t, "Action", func() { Form(FormProps{}, nil) })
 }
 
+// A choice that is not a checkbox or a radio is a text input wearing
+// a label wrap: it submits, it never groups, and nothing looks wrong.
+func TestChoiceRefusesAnUnknownType(t *testing.T) {
+	refuse(t, "Type", func() {
+		Choice(ChoiceProps{Type: "bananna", Name: "n", Label: "L"}, nil)
+	})
+}
+
 // The navigation components refuse in the package's own voice, so a
 // caller reading a panic knows which layer spoke. Pinned because these
 // refusals were the ones a port left in another package's name.

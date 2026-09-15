@@ -177,6 +177,12 @@ func TestEveryDeclaredHookIsRendered(t *testing.T) {
 				t.Errorf("%s declares hook %q and no case renders it", sp.Name, h)
 			}
 		}
+		// The namespace rule: a hook this system invents, whether a
+		// runtime module or a skin reads it, is data-ds-*, so it cannot
+		// collide with anything the platform or the framework owns. A
+		// cue that restates a native state the platform already names —
+		// data-invalid, data-required, data-state — stays unprefixed
+		// and is not declared as a hook; it is the state, not a hook.
 		for _, h := range sp.Hooks {
 			if !strings.HasPrefix(h, "data-ds-") {
 				t.Errorf("%s declares hook %q — runtime hooks are data-ds-* so they cannot collide with anything the platform owns", sp.Name, h)
@@ -224,9 +230,31 @@ func TestEveryReferenceResolvesInsideItsFixture(t *testing.T) {
 // same markup that shows them.
 func TestEveryControlHasAName(t *testing.T) {
 	control := regexp.MustCompile(`(?s)<(button|a|select|textarea)\b([^>]*)>(.*?)</(?:button|a|select|textarea)>`)
+	input := regexp.MustCompile(`<input\b([^>]*)>`)
+	idOf := regexp.MustCompile(`\bid="([^"]+)"`)
 	tags := regexp.MustCompile(`<[^>]+>`)
 	eachCase(t, func(t *testing.T, sp Spec, c Case) {
-		for _, m := range control.FindAllStringSubmatch(string(c.HTML), -1) {
+		html := string(c.HTML)
+		// An input is named by an aria attribute, by a <label for> that
+		// points at its id, or by the <label> it sits inside; a hidden
+		// input is not a control. A placeholder is not a name.
+		for _, m := range input.FindAllStringSubmatchIndex(html, -1) {
+			attrs := html[m[2]:m[3]]
+			if strings.Contains(attrs, `type="hidden"`) || strings.Contains(attrs, `aria-hidden="true"`) {
+				continue
+			}
+			named := strings.Contains(attrs, "aria-label=") || strings.Contains(attrs, "aria-labelledby=")
+			if id := idOf.FindStringSubmatch(attrs); !named && id != nil {
+				named = strings.Contains(html, `for="`+id[1]+`"`)
+			}
+			if before := html[:m[0]]; !named {
+				named = strings.LastIndex(before, "<label") > strings.LastIndex(before, "</label>")
+			}
+			if !named {
+				t.Errorf("an <input> with no accessible name: %s", strings.TrimSpace(html[m[0]:m[1]]))
+			}
+		}
+		for _, m := range control.FindAllStringSubmatch(html, -1) {
 			attrs, inner := m[2], m[3]
 			if m[1] == "a" && !strings.Contains(attrs, "href=") && !strings.Contains(attrs, "role=") {
 				continue // not a link: an anchor used as a target
@@ -288,6 +316,9 @@ func TestOverridesCannotBreakAComponent(t *testing.T) {
 		"style":         "display:none",
 		"data-ds-copy":  "",
 		"data-fui-main": "",
+		"DATA-FUI-RPC":  "/evil",
+		"data-behavior": "/evil.js",
+		"Data-Island":   "smuggled",
 		"class":         "mine",
 		"data-testid":   "card",
 	}
@@ -308,6 +339,9 @@ func TestOverridesCannotBreakAComponent(t *testing.T) {
 			}
 			if strings.Contains(string(got), "data-fui-main") {
 				t.Error("a caller forged a framework hook")
+			}
+			if strings.Contains(string(got), "/evil") || strings.Contains(string(got), "smuggled") {
+				t.Errorf("a caller reached the framework runtime through a spelling the browser folds, or through a privileged unprefixed key:\n%s", got)
 			}
 			if !strings.Contains(string(got), `data-testid="card"`) {
 				t.Error("an ordinary attribute was dropped — then the escape hatch is not one and the page forks the component")

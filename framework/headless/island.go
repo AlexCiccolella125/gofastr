@@ -38,13 +38,23 @@ func (i Island) check() {
 	if i.Endpoint == "" {
 		panic("headless: an Island needs an Endpoint — the path that renders the region again")
 	}
-	// "//host/…" is protocol-relative and therefore cross-origin even
-	// though it starts with a slash.
-	if !strings.HasPrefix(i.Endpoint, "/") || strings.HasPrefix(i.Endpoint, "//") {
-		panic("headless: an Island Endpoint must be same-origin and start with /, not " + i.Endpoint)
-	}
+	checkSameOrigin("an Island", "Endpoint", i.Endpoint)
 	if i.Signal == "" {
 		panic("headless: an Island needs a Signal — the data-fui-signal the region is bound to")
+	}
+	checkSignalName(i.Signal)
+}
+
+// checkSameOrigin refuses an endpoint the runtime would decline to
+// fetch, at render, where the mistake is a panic with a reason rather
+// than a dead control in production. Same-origin means a path: it
+// starts with one slash and not two, because "//host/…" is
+// protocol-relative and therefore cross-origin, and not with a
+// backslash either, because the URL parser reads "/\host/…" as the
+// same thing.
+func checkSameOrigin(component, what, endpoint string) {
+	if !strings.HasPrefix(endpoint, "/") || strings.HasPrefix(endpoint, "//") || strings.HasPrefix(endpoint, "/\\") {
+		panic("headless: " + component + " " + what + " must be same-origin and start with /, not " + endpoint)
 	}
 }
 
