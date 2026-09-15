@@ -279,8 +279,8 @@ the danger tone said as a word before the title, and two banners at once to prov
 <div data-ds-system="" data-ds-system-id="sys-maint" role="status"><p><span>&lt;ToneDanger&gt;: </span>Ending in 4 minutes</p><p>This control plane restarts at 20:00 UTC.</p><button aria-label="&lt;DismissTitled Ending in 4 minutes&gt;" data-ds-system-dismiss="" type="button">×</button></div><div data-ds-system="" data-ds-system-id="sys-old" hidden="" role="status"><p><span>&lt;ToneInfo&gt;: </span>This browser is not supported</p><button aria-label="&lt;DismissTitled This browser is not supported&gt;" data-ds-system-dismiss="" type="button">×</button></div>
 
 === Tag / removable ===
-the × names what it removes — twelve controls all called Remove tell a screen reader user nothing — and it is a link, because dropping a filter is the server's decision and needs no script
-<span>env=prod<a aria-label="&lt;RemoveLabelled env=prod&gt;" href="/apps?env=">×</a></span>
+the × names what it removes — twelve controls all called Remove tell a screen reader user nothing — and it is an anchor that keeps its href for no script while carrying the island contract, because dropping a filter is an in-page state change and never a route
+<span>env=prod<a aria-label="&lt;RemoveLabelled env=prod&gt;" data-fui-push-state="/apps?env=" data-fui-rpc="/island/apps?env=" data-fui-rpc-method="GET" data-fui-rpc-signal="apps" href="/apps?env=">×</a></span>
 
 === Tag / fixed ===
 a tag with nothing to navigate to renders no control at all rather than a dead ×

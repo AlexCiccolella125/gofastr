@@ -233,8 +233,10 @@ framework/
 │                    hooks with no classes, a Skin that maps parts to
 │                    classes, the seams (Slots, Overrides, Binds, Words,
 │                    Island) and the harness that pins every component.
-│                    A leaf on core-ui/html + core/render; framework/ui
-│                    is the styled layer above it.
+│                    Imports core-ui/html, core-ui/interactive (the
+│                    signal-attribute allow-list), core/render and
+│                    agentsinv. No skin or runtime module binds its
+│                    hooks yet; framework/ui does not render through it.
 ├── hook/            HookRegistry / HookType + lifecycle constants
 │                    (BeforeCreate, AfterCreate, etc.)
 ├── i18nui/          Translated default strings for framework UI surfaces

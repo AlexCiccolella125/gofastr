@@ -1,8 +1,7 @@
 package headless
 
-// The conditional-field and empty-value contracts: a region that
-// depends on another field, and the dash a table shows for a value
-// that is not there. Asserted at the nil skin.
+// The conditional-field contract: a region that depends on another
+// field. Asserted at the nil skin.
 import (
 	"testing"
 

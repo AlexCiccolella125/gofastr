@@ -6,6 +6,8 @@ classes at a nil skin, no CSS, no script. A skin (a flat map from part
 to class) dresses it; a runtime module binds its `data-ds-*` hooks. The
 harness proves every registered component against the same contract, so
 a skin can be replaced without a single accessibility guarantee moving.
+No skin or runtime module ships in this repository yet; `framework/ui`
+is today's styled layer and does not render through this package.
 
 **Use this when** the prompt mentions: headless, unstyled, reskin, a
 second design system, parts, slots, overrides, binds, words, translated
@@ -49,8 +51,8 @@ English words, `spec_golden_words.txt` at probe words).
 - **A class to find an element from script.** The runtime binds to
   `data-ds-*` hooks only; a skin may rename every class.
 - **A link that changes in-page state.** `Pagination`, `ToolbarSearch`
-  and their siblings require an `Island` and refuse to render without
-  one; the same element keeps its href for no-script.
+  and a `Tag` with a dismiss require an `Island` and refuse to render
+  without one; the same element keeps its href for no-script.
 - **A request through `ExtraAttrs`.** `Safe` drops every `data-fui-*`
   key. A request is `ButtonProps.Action`; a signal is a `Bind`; a
   region's refresh is an `Island`.

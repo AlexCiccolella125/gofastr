@@ -78,8 +78,7 @@ func TestFileUploadKeepsTheInputInTheTree(t *testing.T) {
 // role="toolbar" promises arrow-key roving between the controls, and
 // this script-free package cannot keep that promise; a toolbar that
 // claims the role and tabs like a div misleads the one reader who
-// relied on it. The same stance as Menu, TabLinks and Tree: no role
-// rather than a hollow one. A caller who ships the keyboard handling
+// relied on it. No role rather than a hollow one. A caller who ships the keyboard handling
 // may add it through ExtraAttrs, and that path is kept open.
 func TestToolbarDoesNotClaimTheToolbarPattern(t *testing.T) {
 	got := Toolbar(ToolbarProps{}, nil,

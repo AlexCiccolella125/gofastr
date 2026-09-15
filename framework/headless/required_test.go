@@ -67,3 +67,12 @@ func TestSwitchRefusesAnUnlabelledControl(t *testing.T) {
 func TestFormRefusesAnActionlessSubmit(t *testing.T) {
 	refuse(t, "Action", func() { Form(FormProps{}, nil) })
 }
+
+// The navigation components refuse in the package's own voice, so a
+// caller reading a panic knows which layer spoke. Pinned because these
+// refusals were the ones a port left in another package's name.
+func TestPaginationRefusesAnUnnamedNav(t *testing.T) {
+	refuse(t, "AriaLabel", func() {
+		Pagination(PaginationProps{Page: 1, Pages: 2, HrefPattern: "/x?p=%d", Island: fixtureIsland}, nil)
+	})
+}

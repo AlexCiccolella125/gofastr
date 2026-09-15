@@ -48,8 +48,9 @@ both directions.
   attribute), refusing reserved signal names and attributes outside the
   runtime's own allow-list.
 - **Words** are the strings a component says: one typed struct, nil for
-  English, resolved once per request by the layer above. A missing
-  field is a compile error, not a stray English word on a French page.
+  English, for a layer above to resolve once per request from the
+  framework's `i18nui` keys. A missing field is a compile error, not a
+  stray English word on a French page.
 
 Two more are not per part. A `Button` takes an **Action**, the
 framework's request contract, on itself; `ExtraAttrs` cannot carry one.
@@ -98,9 +99,9 @@ headless.Pagination(headless.PaginationProps{
 ```
 
 Where the change would otherwise be a route the Island is required:
-`Pagination` and `ToolbarSearch` panic without one, so the link-only
-render cannot be built. On a `Form` it is optional, for a page that is
-the form.
+`Pagination`, `ToolbarSearch` and a `Tag` with a dismiss panic without
+one, so the link-only render cannot be built. On a `Form` it is
+optional, for a page that is the form.
 
 The endpoint keeps the href's query, so the page and the island answer
 the same question. `data-fui-push-state` is rendered only for a GET
@@ -146,9 +147,14 @@ Password, Color, Choice, Switch, Group, Form, InputGroup, FileUpload,
 ValidationSummary, Card, Stack, Cluster, Grid, Container, Section,
 Divider, Spacer, Spinner, Skeleton, Alert, SystemBanner, Badge, Tag,
 Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarSearch, Pagination, Steps,
-Timeline, OptimisticAction and ToggleAction. The skin, the stylesheet
-and the runtime module that binds the hooks are not in this package;
-`framework/ui` is the styled layer above it.
+Timeline, OptimisticAction and ToggleAction.
+
+No skin, stylesheet or runtime module for the `data-ds-*` hooks ships
+in this repository yet: the hooks are the contract that module will be
+written to, and every component renders markup that is correct and
+usable without it. `framework/ui` is today's styled layer and does not
+render through this package; the skin, the stylesheet, the runtime
+module and that adoption follow in their own changes.
 
 ## Common mistakes
 

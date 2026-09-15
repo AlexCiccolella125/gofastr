@@ -33,9 +33,8 @@ type BadgeTone string
 
 // BadgeProps is a badge: a small status chip, not a fill.
 // A badge has no tone of its own and says none: its label IS its
-// meaning ("running", "3 unread", "beta"), and the tone the skin
-// paints it — badgeSkin(tone) at the typed layer — is decoration for
-// the word already there. An Alert prefixes its tone because its title
+// meaning ("running", "3 unread", "beta"), and the tone a skin
+// variant paints it is decoration for the word already there. An Alert prefixes its tone because its title
 // may not say it; a badge whose colour means something its label does
 // not say has the wrong label.
 type BadgeProps struct {
@@ -55,7 +54,7 @@ type BadgeProps struct {
 // Badge renders a badge.
 func Badge(p BadgeProps, s Skin) render.HTML {
 	if p.Label == "" {
-		panic("ds: Badge requires Label")
+		panic("headless: Badge requires Label")
 	}
 	kids := make([]render.HTML, 0, 2)
 	if p.Icon != "" {
@@ -77,10 +76,16 @@ type TagProps struct {
 	Label string
 	// Icon renders before the label.
 	Icon render.HTML
-	// DismissHref adds the dismiss control, an × that navigates.
-	// Removing a filter is the server's decision, and a plain href is
-	// the only dismiss that needs no script.
+	// DismissHref adds the dismiss control, an × that keeps a real
+	// href: removing a filter is the server's decision, and the href
+	// is the dismiss that needs no script.
 	DismissHref string
+	// Island is where the dismiss goes with script: removing a filter
+	// is an in-page state change, so the × carries the RPC contract
+	// beside its href — the page without script, the region update
+	// with it, and the URL written after the swap. Required when
+	// DismissHref is set; ignored otherwise.
+	Island Island
 	// DismissAriaLabel names the × for screen readers. Defaults to
 	// "Remove <Label>".
 	DismissAriaLabel string
@@ -88,15 +93,16 @@ type TagProps struct {
 	ID         string
 	ExtraAttrs html.Attrs
 
-	// Seams: overrides only. Words ride here too (the dismiss
-	// control's name).
+	// Seams: overrides and binds on the root and the dismiss control.
+	// Words ride here too (the dismiss control's name).
 	Seams
 }
 
 // Tag renders a chip, optionally dismissible.
 func Tag(p TagProps, s Skin) render.HTML {
+	b := p.Seams.Box(s)
 	if p.Label == "" {
-		panic("ds: Tag requires Label")
+		panic("headless: Tag requires Label")
 	}
 	kids := []render.HTML{}
 	if p.Icon != "" {
@@ -108,13 +114,19 @@ func Tag(p TagProps, s Skin) render.HTML {
 		if aria == "" {
 			aria = fmt.Sprintf(p.Seams.W().RemoveLabelled, p.Label)
 		}
-		kids = append(kids, El("a", s, PartBadgeDismiss, Attrs(map[string]string{
+		requireIsland("Tag with DismissHref", p.Island)
+		dismiss := Attrs(map[string]string{
 			"href":       p.DismissHref,
 			"aria-label": aria,
-		}), render.Text("×")))
+		})
+		// The same element is both destinations: the href is the page
+		// without script, the island contract is the region update
+		// with it.
+		dismiss = Merge(dismiss, p.Island.attrs(p.DismissHref, "GET"))
+		kids = append(kids, b.El("a", PartBadgeDismiss, dismiss, render.Text("×")))
 	}
 
-	return El("span", s, PartRoot,
+	return b.El("span", PartRoot,
 		Merge(Safe(p.ExtraAttrs), Attrs(map[string]string{"id": p.ID})),
 		kids...)
 }
@@ -207,7 +219,8 @@ type PaginationProps struct {
 	ID         string
 	ExtraAttrs html.Attrs
 
-	// Seams: overrides only. Words ride here too (the two end links).
+	// Seams: overrides and binds on the root, the list and the gaps.
+	// Words ride here too (the two end links).
 	Seams
 }
 
@@ -221,17 +234,18 @@ type PaginationProps struct {
 // inside it is PartPagination, which is where a caller's Class has
 // always landed.
 func Pagination(p PaginationProps, s Skin) render.HTML {
+	b := p.Seams.Box(s)
 	if p.AriaLabel == "" {
-		panic("ds: Pagination requires AriaLabel")
+		panic("headless: Pagination requires AriaLabel")
 	}
 	if p.HrefPattern == "" {
-		panic("ds: Pagination requires HrefPattern")
+		panic("headless: Pagination requires HrefPattern")
 	}
 	if p.Pages < 1 {
-		panic("ds: Pagination requires Pages >= 1")
+		panic("headless: Pagination requires Pages >= 1")
 	}
 	if p.Page < 1 || p.Page > p.Pages {
-		panic("ds: Pagination Page " + strconv.Itoa(p.Page) + " outside 1.." + strconv.Itoa(p.Pages))
+		panic("headless: Pagination Page " + strconv.Itoa(p.Page) + " outside 1.." + strconv.Itoa(p.Pages))
 	}
 	requireIsland("Pagination", p.Island)
 	w := p.Seams.W()
@@ -242,7 +256,7 @@ func Pagination(p PaginationProps, s Skin) render.HTML {
 	links = append(links, paginationLink(s, p.Island, p.Page-1, prev, p.HrefPattern, p.Page == 1, false))
 	for _, n := range pageWindow(p.Page, p.Pages) {
 		if n == 0 {
-			links = append(links, El("span", s, PartPaginationGap,
+			links = append(links, b.El("span", PartPaginationGap,
 				Attrs(map[string]string{"aria-hidden": "true"}),
 				render.Text("…")))
 			continue
@@ -251,12 +265,12 @@ func Pagination(p PaginationProps, s Skin) render.HTML {
 	}
 	links = append(links, paginationLink(s, p.Island, p.Page+1, next, p.HrefPattern, p.Page == p.Pages, false))
 
-	return El("nav", s, PartRoot,
+	return b.El("nav", PartRoot,
 		Merge(Safe(p.ExtraAttrs), Attrs(map[string]string{
 			"aria-label": p.AriaLabel,
 			"id":         p.ID,
 		})),
-		El("div", s, PartPagination, nil, links...))
+		b.El("div", PartPagination, nil, links...))
 }
 
 // paginationLink renders one pagination anchor. Disabled end links
@@ -351,10 +365,10 @@ type StepsProps struct {
 // aria-current="step" for AT.
 func Steps(p StepsProps, s Skin) render.HTML {
 	if len(p.Labels) == 0 {
-		panic("ds: Steps requires Labels")
+		panic("headless: Steps requires Labels")
 	}
 	if p.Current < 0 || p.Current > len(p.Labels) {
-		panic("ds: Steps Current " + strconv.Itoa(p.Current) + " outside 0.." + strconv.Itoa(len(p.Labels)))
+		panic("headless: Steps Current " + strconv.Itoa(p.Current) + " outside 0.." + strconv.Itoa(len(p.Labels)))
 	}
 
 	items := make([]render.HTML, 0, len(p.Labels))
@@ -403,12 +417,16 @@ func init() {
 	Register(Spec{
 		Name:  "Tag",
 		Parts: []Part{PartRoot, PartBadgeDismiss},
+		WithSeams: func(s Skin, seams Seams) render.HTML {
+			return Tag(TagProps{Label: "env=prod", Seams: seams}, s)
+		},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
 				Name: "removable",
-				Why:  "the × names what it removes — twelve controls all called Remove tell a screen reader user nothing — and it is a link, because dropping a filter is the server's decision and needs no script",
-				HTML: Tag(TagProps{Label: "env=prod", DismissHref: "/apps?env="}, s),
+				Why:  "the × names what it removes — twelve controls all called Remove tell a screen reader user nothing — and it is an anchor that keeps its href for no script while carrying the island contract, because dropping a filter is an in-page state change and never a route",
+				HTML: Tag(TagProps{Label: "env=prod", DismissHref: "/apps?env=",
+					Island: Island{Endpoint: "/island/apps", Signal: "apps"}}, s),
 			}, {
 				Name: "fixed",
 				Why:  "a tag with nothing to navigate to renders no control at all rather than a dead ×",
@@ -416,12 +434,15 @@ func init() {
 			}}
 		},
 	})
-}
 
-func init() {
 	Register(Spec{
 		Name:  "Pagination",
 		Parts: []Part{PartRoot, PartPagination, PartPaginationLink, PartPaginationGap},
+		WithSeams: func(s Skin, seams Seams) render.HTML {
+			return Pagination(PaginationProps{Page: 1, Pages: 2, HrefPattern: "/apps?page=%d",
+				AriaLabel: "Pages", Island: Island{Endpoint: "/island/apps", Signal: "apps"},
+				Seams: seams}, s)
+		},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{

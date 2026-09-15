@@ -17,9 +17,10 @@ package headless
 // tested, and one without a spec fails the build.
 //
 // What a Spec deliberately does not carry is the component's own
-// assertions — that a dialog is named by its title, that a wizard's
-// Back does not validate. Those are specific, they read as prose, and
-// they belong in the contract test where a reviewer will find them.
+// assertions — that a field wires its hint to its control, that a
+// pager says which page is current. Those are specific, they read as
+// prose, and they belong in the contract test where a reviewer will
+// find them.
 // The harness is for what must hold for EVERYTHING.
 
 import (
@@ -105,8 +106,9 @@ func (k Kit) Variant(component, variant string) Skin {
 	return k.of(component, variant)
 }
 
-// NewKit builds a Kit with a resolver. The skin package calls this;
-// the contract suite passes nil and gets an unstyled system.
+// NewKit builds a Kit with a resolver. A skin package calls this to
+// render the fixtures dressed; the contract suite passes nil and gets
+// an unstyled system.
 func NewKit(own Skin, of func(component, variant string) Skin) Kit {
 	return Kit{Skin: own, of: of}
 }

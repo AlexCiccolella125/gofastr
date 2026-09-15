@@ -29,8 +29,8 @@ func count(got render.HTML, sub string) int { return strings.Count(string(got), 
 // reader announces the label and stops, so the format rule and the
 // reason the control is red never arrive.
 //
-// This is the regression that shipped once already — six of the eight
-// text controls accepted DescribedBy and dropped it on the floor, so
+// This is the regression that shipped once already — most of the text
+// controls accepted DescribedBy and dropped it on the floor, so
 // the field wired up a relationship to an attribute that was never
 // written.
 func TestEveryTextControlCarriesItsDescription(t *testing.T) {
@@ -118,7 +118,7 @@ func TestChoiceGroupCarriesItsQuestion(t *testing.T) {
 
 func TestPaginationIsNavigationWithACurrentPage(t *testing.T) {
 	got := Pagination(PaginationProps{Page: 2, Pages: 5, HrefPattern: "/x?p=%d", AriaLabel: "Pages",
-		Island: labIsland}, nil)
+		Island: fixtureIsland}, nil)
 	has(t, got, "<nav", "pagination is not a nav landmark")
 	has(t, got, `aria-current="page"`, "pagination does not mark the current page")
 	if n := count(got, `aria-current="page"`); n != 1 {

@@ -4,10 +4,10 @@ import (
 	"testing"
 )
 
-// labIsland is the island the fixtures name. A fixture render is not
+// fixtureIsland is the island the fixtures name. A fixture render is not
 // wired to a handler; it only has to satisfy the required-Island
 // contract with a plausible endpoint and signal.
-var labIsland = Island{Endpoint: "/island/apps", Signal: "apps"}
+var fixtureIsland = Island{Endpoint: "/island/apps", Signal: "apps"}
 
 // The attrs function's shape: the four keys of the RPC contract, the
 // query shared between the href and the endpoint, and push-state only
@@ -78,7 +78,7 @@ func TestIslandRefusesTheUnwired(t *testing.T) {
 // or action is still there for no script.
 func TestPaginationCarriesTheContractOnItsAnchors(t *testing.T) {
 	got := Pagination(PaginationProps{Page: 5, Pages: 5, HrefPattern: "/apps?page=%d",
-		AriaLabel: "Pages", Island: labIsland}, nil)
+		AriaLabel: "Pages", Island: fixtureIsland}, nil)
 	for _, want := range []string{
 		`href="/apps?page=4"`,
 		`data-fui-rpc="/island/apps?page=4"`,
@@ -95,7 +95,7 @@ func TestPaginationCarriesTheContractOnItsAnchors(t *testing.T) {
 }
 
 func TestToolbarSearchIsTheFormThatCarriesTheContract(t *testing.T) {
-	got := ToolbarSearch(ToolbarSearchProps{Island: labIsland}, nil,
+	got := ToolbarSearch(ToolbarSearchProps{Island: fixtureIsland}, nil,
 		Input(InputProps{Type: "search", Name: "q", AriaLabel: "Search apps"}, nil))
 	has(t, got, `<form data-fui-rpc="/island/apps" data-fui-rpc-method="GET" data-fui-rpc-signal="apps" method="get">`,
 		"the search wrapper is not the GET form carrying the contract")
@@ -106,7 +106,7 @@ func TestToolbarSearchIsTheFormThatCarriesTheContract(t *testing.T) {
 // Safe drops every data-fui-* key, so the only way in is the Island.
 func TestTheContractCannotBeSmuggled(t *testing.T) {
 	smuggled := Pagination(PaginationProps{Page: 2, Pages: 5, HrefPattern: "/x?p=%d",
-		AriaLabel: "Pages", Island: labIsland,
+		AriaLabel: "Pages", Island: fixtureIsland,
 		ExtraAttrs: map[string]string{"data-fui-rpc": "/evil"}}, nil)
 	hasNot(t, smuggled, "/evil", "a request arrived through ExtraAttrs, which is for decoration")
 	has(t, smuggled, `data-fui-rpc="/island/apps?p=3"`, "the island's own contract was not rendered")
@@ -124,6 +124,9 @@ func TestRequiredIslandsRefuseTheLinkOnlyRender(t *testing.T) {
 	refuse(t, "Island", func() {
 		ToolbarSearch(ToolbarSearchProps{}, nil, Input(InputProps{Name: "q", AriaLabel: "q"}, nil))
 	})
+	refuse(t, "Island", func() {
+		Tag(TagProps{Label: "env=prod", DismissHref: "/apps?env="}, nil)
+	})
 	refuse(t, "Signal", func() {
 		Pagination(PaginationProps{Page: 2, Pages: 5, HrefPattern: "/x?p=%d", AriaLabel: "Pages",
 			Island: Island{Endpoint: "/island/apps"}}, nil)
@@ -136,8 +139,22 @@ func TestRequiredIslandsRefuseTheLinkOnlyRender(t *testing.T) {
 func TestOptionalIslandsAreOptional(t *testing.T) {
 	plain := Form(FormProps{Action: "/apps"}, nil)
 	hasNot(t, plain, "data-fui", "a form with no Island carries framework attributes")
-	isled := Form(FormProps{Action: "/apps", Island: labIsland}, nil)
+	isled := Form(FormProps{Action: "/apps", Island: fixtureIsland}, nil)
 	has(t, isled, `action="/apps"`, "the form lost its action")
 	has(t, isled, `data-fui-rpc="/island/apps" data-fui-rpc-method="POST" data-fui-rpc-signal="apps"`,
 		"the form did not carry the POST contract")
+}
+
+// A Tag's dismiss removes a filter, which is an in-page state change:
+// the × keeps its href for no script and carries the GET contract
+// beside it, with the href's query shared so the page and the region
+// answer one question. A tag with nothing to dismiss carries nothing.
+func TestTagCarriesTheContractOnItsDismiss(t *testing.T) {
+	got := Tag(TagProps{Label: "env=prod", DismissHref: "/apps?env=", Island: fixtureIsland}, nil)
+	has(t, got, `href="/apps?env="`, "the dismiss lost its href")
+	has(t, got, `data-fui-rpc="/island/apps?env=" data-fui-rpc-method="GET" data-fui-rpc-signal="apps"`,
+		"the dismiss did not carry the GET contract with the href's query")
+	has(t, got, `data-fui-push-state="/apps?env="`, "the dismiss did not write the URL")
+	fixed := Tag(TagProps{Label: "env=prod", Island: fixtureIsland}, nil)
+	hasNot(t, fixed, "data-fui", "a tag with nothing to dismiss carries the contract anyway")
 }

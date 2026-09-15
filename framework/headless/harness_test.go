@@ -3,8 +3,9 @@ package headless
 // The harness: what is asserted about EVERY registered component,
 // without anyone writing a test for it.
 //
-// The contract file next door holds the specific promises — a dialog
-// is named by its title, a wizard's Back does not validate. This file
+// The contract file next door holds the specific promises — a field
+// wires its hint to its control, a pager says which page is current.
+// This file
 // holds the ones that are true of everything, and it gets them from
 // the specs rather than from a hand-kept list, so the sweep grows
 // when the system does instead of the day someone remembers.
@@ -201,7 +202,7 @@ func TestEveryReferenceResolvesInsideItsFixture(t *testing.T) {
 	// as an aria attribute pointing at nothing — the difference is
 	// only which layer notices.
 	refs := regexp.MustCompile(`\s(aria-labelledby|aria-describedby|aria-controls|aria-activedescendant|` +
-		`popovertarget|commandfor|for|data-ds-toggle-for|data-ds-copy-from|data-ds-toast-from)="([^"]+)"`)
+		`popovertarget|commandfor|for)="([^"]+)"`)
 	eachCase(t, func(t *testing.T, sp Spec, c Case) {
 		ids := idsIn(c.HTML)
 		for _, m := range refs.FindAllStringSubmatch(string(c.HTML), -1) {
@@ -453,8 +454,9 @@ var controlTag = regexp.MustCompile(`<(button|input|select|textarea|a)(\s[^>]*)?
 // records whatever is there. The page audit does not see it, because an
 // unstyled button is still a named button.
 //
-// Thirty-one components did one or the other, and the catalogue page
-// was a third unstyled before anybody noticed.
+// Thirty-one components did one or the other before this existed, and
+// a gallery page rendered from the fixtures was a third unstyled
+// before anybody noticed.
 func TestEveryControlInAFixtureWearsAClass(t *testing.T) {
 	for _, sp := range Specs() {
 		sp := sp
@@ -489,11 +491,12 @@ func TestEveryControlInAFixtureWearsAClass(t *testing.T) {
 // TestEveryDeclaredPartIsActuallyDrawn catches a part named in a spec
 // that nothing renders — a class in the stylesheet landing on nothing.
 // This catches the reverse: a part the component draws and the spec
-// never mentions. Both sliders called s.Class(PartControl) for their
-// <input type="range"> while declaring only root, row, track, label and
-// value. The skin happened to define it, so the real page was fine and
-// nothing failed — but the spec is what a skin author reads, and by
-// that document the input did not exist. A new skin would have left it
+// never mentions. A range slider once called s.Class(PartControl) for
+// its <input type="range"> while declaring only root, row, track,
+// label and value. The skin happened to define it, so the real page
+// was fine and nothing failed — but the spec is what a skin author
+// reads, and by that document the input did not exist. A new skin
+// would have left it
 // unstyled and no test would have said so.
 func TestEveryPartDrawnIsDeclared(t *testing.T) {
 	// Every part any component declares, so a part drawn by one and
@@ -542,9 +545,9 @@ var svgTag = regexp.MustCompile(`<svg(\s[^>]*)?>`)
 // size, so CSS gives it the replaced-element default: 300 by 150
 // pixels. Every fixture that needed an icon passed render.HTML("<svg/>")
 // because it type-checks and reads like a placeholder. Eighteen of the
-// nineteen icons on the catalogue page were drawn at 300×150, which
-// turned a badge into a 340px slab, opened a 140px hole in an alert's
-// header and piled the avatar group's initials on top of each other.
+// nineteen icons on a gallery page were drawn at 300×150, which turned
+// a badge into a 340px slab and opened a 140px hole in an alert's
+// header.
 //
 // Every other check passed the whole time. The classes were right, the
 // parts were declared, the controls were named, the audit was clean.
@@ -584,4 +587,60 @@ func TestEveryComponentWithSeamsRoutesABindToItsRoot(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A props type that embeds Seams offers them, and Spec.WithSeams is
+// the only thing that proves they arrive. Five components once carried
+// the embed for Words alone and dropped Overrides and Binds on the
+// floor, with nothing failing, because every seam gate above skips a
+// spec with no WithSeams. This reads the source instead: a struct
+// with an embedded Seams field names a component, and that
+// component's spec must render with seams.
+func TestEveryPropsTypeThatEmbedsSeamsHasAFixture(t *testing.T) {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pkg := range pkgs {
+		for _, f := range pkg.Files {
+			for _, decl := range f.Decls {
+				gd, ok := decl.(*ast.GenDecl)
+				if !ok || gd.Tok != token.TYPE {
+					continue
+				}
+				for _, spec := range gd.Specs {
+					ts := spec.(*ast.TypeSpec)
+					st, ok := ts.Type.(*ast.StructType)
+					if !ok || !embedsSeams(st) {
+						continue
+					}
+					name := strings.TrimSuffix(ts.Name.Name, "Props")
+					sp, ok := SpecOf(name)
+					if !ok {
+						t.Errorf("%s embeds Seams and no spec is named %q", ts.Name.Name, name)
+						continue
+					}
+					if sp.WithSeams == nil {
+						t.Errorf("%s embeds Seams and its spec has no WithSeams: the seam gates skip it, "+
+							"so an override or a bind it drops fails nothing", ts.Name.Name)
+					}
+				}
+			}
+		}
+	}
+}
+
+func embedsSeams(st *ast.StructType) bool {
+	for _, f := range st.Fields.List {
+		if len(f.Names) != 0 {
+			continue
+		}
+		if id, ok := f.Type.(*ast.Ident); ok && id.Name == "Seams" {
+			return true
+		}
+	}
+	return false
 }

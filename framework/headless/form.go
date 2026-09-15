@@ -52,8 +52,9 @@ type FormProps struct {
 // Form renders the form.
 //
 // The interesting part is what happens after a failed submit. The
-// server re-renders with Errors set; the runtime then moves focus to
-// the summary, which is role="alert" and tabindex="-1". Without that
+// server re-renders with Errors set; the module that binds
+// data-ds-form-errors then moves focus to the summary, which is
+// role="alert" and tabindex="-1". Without that
 // move, a screen reader user is left at the top of an unchanged-looking
 // page with no indication anything happened — the single most common
 // way an accessible-looking form is not one.

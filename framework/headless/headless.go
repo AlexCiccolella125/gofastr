@@ -24,11 +24,20 @@
 //
 // The package is SSR-first and hydrates incrementally, the same model
 // as the rest of the framework (core-ui/ARCHITECTURE.md): first paint
-// is the full markup, a runtime module arms behaviour by hook on
-// arrival, and a state change is an island RPC on the element that
-// keeps its href or action for a reader with no script. It imports
-// only core-ui/html and core/render; the skin, the stylesheet and the
-// runtime module that binds the hooks sit above it.
+// is the full markup, behaviour is armed by hook on arrival, and a
+// state change is an island RPC on the element that keeps its href or
+// action for a reader with no script. Its dependencies are
+// core-ui/html, core/render and core-ui/interactive (the signal
+// attribute allow-list a Bind is checked against), plus the agents
+// inventory registration every framework subpackage carries.
+//
+// No runtime module binds the data-ds-* hooks in this repository yet,
+// and no skin dresses the parts: the hooks are the contract that
+// module will be written to, and every component renders markup that
+// is correct and usable without it. framework/ui is today's styled
+// layer and does not render through this package; the skin, the
+// stylesheet, the runtime module and that adoption follow in their
+// own changes.
 package headless
 
 import (
@@ -148,12 +157,10 @@ func Attrs(pairs map[string]string) html.Attrs {
 // "absent means unset" and catastrophic here: the component renders
 // with every option set and the attribute missing, so it is styled,
 // labelled, announced, and either wired to nothing or visible when it
-// should not be. That has now shipped five times in this package —
-// popover on the tooltip, data-ds-copy, the drop list, the repeater
-// rows, and hidden on the combobox's empty message — every one of
-// them built through Attrs.
-//
-// The fifth was written AFTER this helper existed, because the helper
+// should not be. That shipped five times in the package this one grew
+// from — a popover attribute, a copy hook, a drop list, repeater rows,
+// and hidden on an empty message — every one of them built through
+// Attrs, and the fifth AFTER this helper existed, because the helper
 // was thought of as being for hooks. It is not: it is for any
 // attribute whose empty string is meaningful.
 func Mark(a html.Attrs, names ...string) html.Attrs {

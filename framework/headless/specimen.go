@@ -7,9 +7,9 @@ import "github.com/DonaldMurillo/gofastr/core/render"
 // It is a real 16×16 svg, because "<svg/>" is not. An svg with no
 // width, no height and no viewBox has no intrinsic size, so CSS falls
 // back to the replaced-element default of 300×150 — and every fixture
-// in this package used the short form. A badge meant to be a pill drew
-// 340px wide, an alert's header grew a 140px hole between its title and
-// its text, and the avatar group's initials sat on top of each other.
+// in this package once used the short form. A badge meant to be a
+// pill drew 340px wide and an alert's header grew a 140px hole between
+// its title and its text.
 //
 // Nothing in the markup was wrong. The classes were right, the parts
 // were right, the audit was clean, and the page still looked broken —

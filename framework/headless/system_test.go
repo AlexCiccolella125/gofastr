@@ -52,8 +52,8 @@ func TestSystemBannerOfflineRefusesShown(t *testing.T) {
 	})
 }
 
-// The dismiss is a button — it needs no navigation and no script
-// beyond the runtime already on the page — and it names what it
+// The dismiss is a button, not a link: dismissing needs no navigation,
+// only the module that binds data-ds-system-dismiss. It names what it
 // dismisses, because three banners each called "Dismiss" say which
 // nothing.
 func TestSystemBannerDismissIsAButtonWithAName(t *testing.T) {

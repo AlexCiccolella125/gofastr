@@ -1336,9 +1336,11 @@ a label or a hook. The layer satisfies every hard rule above the same
 way `framework/ui` does: an in-page state change is an `Island` (the
 `data-fui-rpc` contract on the element that keeps its href for
 no-script), a request is a typed `Action`, and a signal is a typed
-`Bind`; `ExtraAttrs` cannot carry a `data-fui-*` key. The styled
-`framework/ui` components are the layer above it. Contract and
-invariants: `gofastr docs ui-headless`.
+`Bind`; `ExtraAttrs` cannot carry a `data-fui-*` key. No runtime
+module binds the `data-ds-*` hooks and no skin dresses the parts in
+this repository yet; `framework/ui` is today's styled layer and does
+not render through this package. Contract and invariants: `gofastr
+docs ui-headless`.
 
 ### Adding a styled component
 

@@ -17,8 +17,8 @@ type ButtonProps struct {
 	Icon      render.HTML
 	// Suffix renders after the label — a keyboard hint, a count. It is
 	// the caller's markup, so whether it is announced is the caller's
-	// decision: Kbd hides its glyphs and supplies words, a badge
-	// announces itself.
+	// decision: a keyboard hint hides its glyphs and supplies words, a
+	// badge announces itself.
 	Suffix render.HTML
 	// Variant and Size are skin vocabulary, passed through so the skin
 	// can look up "<part>--<variant>". The structure does not care.
@@ -146,5 +146,3 @@ func orDefault(s, fallback string) string {
 	}
 	return s
 }
-
-var _ = html.Attrs{}

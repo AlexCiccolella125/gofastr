@@ -31,10 +31,10 @@ package headless
 //   - it cannot set or forge a data-ds-* hook. Those are the contract
 //     between the markup and the runtime; a forged one binds
 //     behaviour to an element that was never built for it.
-//   - it cannot set style. The app serves default-src 'self' with no
-//     unsafe-inline, so an inline style is not a style — it is a rule
-//     the browser drops and a component that renders wrong in
-//     production only.
+//   - it cannot set style. A host serving default-src 'self' with no
+//     unsafe-inline (the framework's default posture) drops an inline
+//     style, so it is not a style — it is a rule the browser ignores
+//     and a component that renders wrong in production only.
 //   - it cannot win against an attribute the component owns. A
 //     component that sets role="dialog" means it; an override that
 //     lands on top of it is how a dialog becomes a div.
@@ -226,7 +226,7 @@ type Seams struct {
 	// Binds keep named parts in step with client signals.
 	Binds Binds
 	// Words are the strings the component says. Nil means the English
-	// defaults; the typed layer sets them from the request's language.
+	// defaults; a layer above sets them from the request's language.
 	Words *Words
 }
 

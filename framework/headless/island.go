@@ -49,8 +49,7 @@ func (i Island) check() {
 }
 
 // zero reports whether no island was given at all, so an optional
-// Island (Form's, Wizard's, BulkBar's) can leave the plain render
-// alone.
+// Island (Form's) can leave the plain render alone.
 func (i Island) zero() bool { return i.Endpoint == "" && i.Signal == "" }
 
 // requireIsland is the framework's hard rule 1 enforced at render: a

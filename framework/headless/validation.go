@@ -35,8 +35,9 @@ type ValidationSummaryProps struct {
 	ID         string
 	ExtraAttrs html.Attrs
 
-	// Seams: overrides only. Words ride here too (the title a failed
-	// submit focuses).
+	// Seams: overrides and binds on the root, the title, the list and
+	// its items. Words ride here too (the title a failed submit
+	// focuses).
 	Seams
 }
 
@@ -63,6 +64,7 @@ type ValidationSummaryProps struct {
 // Rendering it with no errors renders nothing: an empty "there is a
 // problem" box that announces itself is a lie that interrupts.
 func ValidationSummary(p ValidationSummaryProps, s Skin) render.HTML {
+	b := p.Seams.Box(s)
 	if len(p.Errors) == 0 {
 		return ""
 	}
@@ -73,12 +75,12 @@ func ValidationSummary(p ValidationSummaryProps, s Skin) render.HTML {
 		}
 		var inner render.HTML
 		if e.For != "" {
-			inner = El("a", s, PartErrorLink,
+			inner = b.El("a", PartErrorLink,
 				Attrs(map[string]string{"href": "#" + e.For}), render.Text(e.Message))
 		} else {
 			inner = render.Text(e.Message)
 		}
-		items = append(items, El("li", s, PartErrorItem, nil, inner))
+		items = append(items, b.El("li", PartErrorItem, nil, inner))
 	}
 	own := Merge(Safe(p.ExtraAttrs, "role", "tabindex"), Attrs(map[string]string{
 		"id": p.ID, "aria-labelledby": titleIDFor(p.ID),
@@ -86,11 +88,11 @@ func ValidationSummary(p ValidationSummaryProps, s Skin) render.HTML {
 	own["role"] = "alert"
 	own["tabindex"] = "-1"
 
-	return El("div", s, PartRoot, own,
-		El(headingTag(p.Level), s, PartTitle,
+	return b.El("div", PartRoot, own,
+		b.El(headingTag(p.Level), PartTitle,
 			Attrs(map[string]string{"id": titleIDFor(p.ID)}),
 			render.Text(orDefault(p.Title, p.Seams.W().ThereIsAProblem))),
-		El("ul", s, PartErrorList, nil, items...),
+		b.El("ul", PartErrorList, nil, items...),
 	)
 }
 
@@ -194,6 +196,11 @@ func init() {
 	Register(Spec{
 		Name:  "ValidationSummary",
 		Parts: []Part{PartRoot, PartTitle, PartErrorList, PartErrorItem, PartErrorLink},
+		WithSeams: func(s Skin, seams Seams) render.HTML {
+			return ValidationSummary(ValidationSummaryProps{ID: "errors",
+				Errors: []FieldError{{For: "name", Message: "Enter an app name."}},
+				Seams:  seams}, s)
+		},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{

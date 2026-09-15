@@ -8,15 +8,16 @@ package headless
 // line a screen reader hears when a table changes underneath it. A
 // French reader needs those guarantees in French, and a key map
 // ("dismiss.label" → "Fermer") would put the finding of a missing
-// string on a rendered page. So the words are a typed struct, on the
-// fastr-docs UIStrings model: one field per string, a doc comment
-// saying its shape, and a missing field a compile error rather than a
-// stray English word on a French page.
+// string on a rendered page. So the words are a typed struct: one
+// field per string, a doc comment saying its shape, and a missing
+// field a compile error rather than a stray English word on a French
+// page. The framework's own translated strings live in
+// framework/i18nui as keys; a layer above this one resolves each
+// field from those keys once per request.
 //
 // The seam is Seams, which already reaches every component: nil Words
-// means the English defaults below, which is what the goldens pin. The
-// typed layer resolves Words once per request from the framework's
-// translator; nothing here fetches, caches or guesses a language.
+// means the English defaults below, which is what the goldens pin.
+// Nothing here fetches, caches or guesses a language.
 //
 // Plurals are two fields, One and Many, chosen by the component and
 // never built by appending "s". Formats keep their verbs: a
@@ -88,8 +89,9 @@ type Words struct {
 	// ─── SystemBanner, Alert ────────────────────────────────────────
 
 	// ToneInfo, ToneSuccess, ToneWarning and ToneDanger are the tone
-	// said before a title — a SystemBanner's, and through the typed
-	// layer an Alert's — because the title says WHAT happened and the
+	// said before a title — a SystemBanner's, and an Alert's when the
+	// caller passes one as ToneWord — because the title says WHAT
+	// happened and the
 	// tone is the only thing saying how serious it is. One word each,
 	// the one a reader understands rather than the stylesheet's name
 	// for the colour ("Error", not "Danger"); the colon and space that

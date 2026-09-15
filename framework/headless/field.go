@@ -129,10 +129,10 @@ type ConditionalFieldProps struct {
 // It carries no hidden attribute, because hiding it here would make
 // the dependent field reachable only after script had run: a page
 // with script disabled, a reader mode, a crawler and a first paint
-// before the runtime arms would all see a field that never arrived.
-// The runtime hides and shows it as the watched field changes; the
-// hiding is the platform's own hidden attribute, restated by the
-// stylesheet at a specificity nothing here can beat.
+// before script arms would all see a field that never arrived. The
+// module that binds data-ds-when hides and shows it as the watched
+// field changes; the hiding is the platform's own hidden attribute,
+// restated by a stylesheet at a specificity nothing here can beat.
 //
 // It is a div and adds no semantics: the fields inside arrive with
 // their own labels, and a region name would be read before each one.

@@ -72,10 +72,10 @@ type SystemBannerProps struct {
 	// banner ships hidden and something shows it.
 	Shown bool
 	// Offline marks this banner as the built-in connection message.
-	// The root carries data-ds-system-offline, the runtime shows it
-	// when the framework reports the connection lost and hides it on
-	// reconnect — so it always ships hidden, and Shown on an Offline
-	// banner is refused: the runtime owns that one.
+	// The root carries data-ds-system-offline for the module that
+	// binds it to show when the framework reports the connection lost
+	// and hide on reconnect — so it always ships hidden, and Shown on
+	// an Offline banner is refused: that module owns it.
 	Offline bool
 
 	ExtraAttrs html.Attrs

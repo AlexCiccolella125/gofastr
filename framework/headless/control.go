@@ -1,11 +1,10 @@
 package headless
 
-// The text-entry family: the single-line input shape shared by Input,
-// SearchInput, NumberInput and DateInput, the multiline textarea, the
-// native select, and the two affix-shell controls (password with its
-// reveal button, colour with its swatch). Structure, labelling and the
-// data-ds-* hooks the runtime binds to live here; heights, borders
-// and class structure live in the skin.
+// The text-entry family: the single-line input, the multiline
+// textarea, the native select, and the two affix-shell controls
+// (password with its reveal button, colour with its swatch).
+// Structure, labelling and the data-ds-* hooks a runtime module binds
+// to live here; heights, borders and class structure live in the skin.
 
 import (
 	"fmt"
@@ -58,8 +57,9 @@ type InputProps struct {
 	Extra html.Attrs
 	// Owned are the type-specific attrs (min, max, step), applied
 	// after the common set and after Extra so a caller cannot widen a
-	// Number's bounds through extra attrs behind the config's back.
-	// Empty values are skipped, leaving Extra's say if it has one.
+	// numeric input's bounds through extra attrs behind the config's
+	// back. Empty values are skipped, leaving Extra's say if it has
+	// one.
 	Owned html.Attrs
 }
 
@@ -227,8 +227,9 @@ type PasswordProps struct {
 	Extra       html.Attrs
 	DescribedBy string
 
-	// Seams: overrides only. Words ride here too (the reveal button's
-	// two names).
+	// Seams: overrides and binds on the shell, the input and the
+	// reveal button. Words ride here too (the reveal button's two
+	// names).
 	Seams
 }
 
@@ -243,6 +244,7 @@ type PasswordProps struct {
 // Nothing is wired on purpose: no inline script, no dead onclick, and
 // no pretending it works before it does.
 func Password(p PasswordProps, s Skin) render.HTML {
+	b := p.Seams.Box(s)
 	if p.Name == "" {
 		panic("headless: Password requires Name — a control with no name submits nothing")
 	}
@@ -260,10 +262,11 @@ func Password(p PasswordProps, s Skin) render.HTML {
 		input["aria-invalid"] = "true"
 	}
 
-	// The runtime retypes the input and swaps these four strings, so
-	// both the label and the accessible name stay true to what the
-	// button will do next. They travel as data-* rather than being
-	// hardcoded in the module so a caller could localize them.
+	// The module that binds data-ds-reveal retypes the input and swaps
+	// these four strings, so both the label and the accessible name
+	// stay true to what the button will do next. They travel as data-*
+	// rather than being hardcoded in that module so a caller can
+	// localise them.
 	reveal := html.Attrs{
 		"type":               "button",
 		"data-ds-reveal":     "",
@@ -283,9 +286,9 @@ func Password(p PasswordProps, s Skin) render.HTML {
 		shell["data-invalid"] = ""
 	}
 
-	return El("div", s, PartRoot, shell,
-		El("input", s, PartControl, input),
-		El("button", s, PartAffixButton, reveal, render.Text(p.Seams.W().RevealShow)),
+	return b.El("div", PartRoot, shell,
+		b.El("input", PartControl, input),
+		b.El("button", PartAffixButton, reveal, render.Text(p.Seams.W().RevealShow)),
 	)
 }
 
@@ -303,7 +306,8 @@ type ColorProps struct {
 	Extra       html.Attrs
 	DescribedBy string
 
-	// Seams: overrides only. Words ride here too (the swatch's name).
+	// Seams: overrides and binds on the shell, the hex input and the
+	// swatch. Words ride here too (the swatch's name).
 	Seams
 }
 
@@ -319,6 +323,7 @@ type ColorProps struct {
 // type=color always has a value; a required field that cannot bite
 // would be a lie.
 func Color(p ColorProps, s Skin) render.HTML {
+	b := p.Seams.Box(s)
 	if p.Name == "" {
 		panic("headless: Color requires Name — the hex field is what submits, and without a name it sends nothing")
 	}
@@ -372,9 +377,9 @@ func Color(p ColorProps, s Skin) render.HTML {
 		shell["data-invalid"] = ""
 	}
 
-	return El("div", s, PartRoot, shell,
-		El("input", s, PartAffixSwatch, swatch),
-		El("input", s, PartControl, hex),
+	return b.El("div", PartRoot, shell,
+		b.El("input", PartAffixSwatch, swatch),
+		b.El("input", PartControl, hex),
 	)
 }
 
@@ -466,6 +471,9 @@ func init() {
 		Parts: []Part{PartRoot, PartControl, PartAffixButton},
 		Hooks: []string{"data-ds-affix", "data-ds-affix-input", "data-ds-reveal",
 			"data-ds-show-label", "data-ds-hide-label", "data-ds-show-text", "data-ds-hide-text"},
+		WithSeams: func(s Skin, seams Seams) render.HTML {
+			return Password(PasswordProps{Name: "token", ID: "token", Seams: seams}, s)
+		},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
@@ -483,6 +491,9 @@ func init() {
 		Name:  "Color",
 		Parts: []Part{PartRoot, PartControl, PartAffixSwatch},
 		Hooks: []string{"data-ds-affix", "data-ds-color", "data-ds-affix-input", "data-ds-affix-swatch"},
+		WithSeams: func(s Skin, seams Seams) render.HTML {
+			return Color(ColorProps{Name: "accent", ID: "accent", Value: "#10b981", Seams: seams}, s)
+		},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
