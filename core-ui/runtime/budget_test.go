@@ -27,7 +27,19 @@ const (
 	// The merged bundle measures 13205 at level 6; the line carries 8
 	// bytes of clearance, the same margin every raise here uses.
 	// Re-measure after a merge, not before.
-	coreGoalGZ = 12*1024 + 925
+	//
+	// 13305, raised 92 bytes from 13213 on 2026-09-15 (the behaviour
+	// registry, docs/spec-behavior-registry.md), same rule: measured,
+	// not skipped. One SOURCE change that cannot be a demand module,
+	// because it is what tells the kernel which demand modules exist:
+	//   - frag/boot.js's _registered (10 lines): reads the registered
+	//     behaviours' markers, window.__gofastr_behaviors from
+	//     manifest.js or the inline #gofastr-behaviors block, and the
+	//     scanner iterates them after its own table. A component's
+	//     package now ships its module (registry.RegisterBehavior) and
+	//     the kernel finds it without a table edit.
+	// The merged bundle measures 13297 at level 6; 8 bytes of clearance.
+	coreGoalGZ = 12*1024 + 1017
 	// 14.7 KB, not the 14 KB initial congestion window it started as.
 	//
 	// The window is still the constraint that matters, and the artifact still
@@ -110,7 +122,13 @@ const (
 	// bundle 15082 → 15242. The line keeps its 4 bytes of clearance;
 	// the bracket was re-verified by running
 	// TestCoreBudgetRejectsCliffOverflow, not by arithmetic.
-	coreCongestionWindowGZ = 14*1024 + 910
+	//
+	// 15349, raised 103 bytes from 15246 on 2026-09-15 (the behaviour
+	// registry, the same _registered block as the level-6 raise above):
+	// the real bundle 15238 → 15341. The line keeps 8 bytes of
+	// clearance; the bracket was re-verified by running
+	// TestCoreBudgetRejectsCliffOverflow, not by arithmetic.
+	coreCongestionWindowGZ = 14*1024 + 1013
 )
 
 func coreBudgetViolation(t *testing.T, src string, budget int) (level, got, limit int) {

@@ -2433,10 +2433,25 @@
     }
   }
 
+  // Registered behaviours (registry.RegisterBehavior): a component's own
+  // package ships its module and declares its markers; the host lists
+  // them beside the manifest, live pages as window.__gofastr_behaviors
+  // from /__gofastr/manifest.js, exports and the embed frame as the
+  // inline #gofastr-behaviors block. Same scan, same loader, same
+  // module contract as the table above.
+  const _registered = (() => {
+    try {
+      const o = window.__gofastr_behaviors ||
+        JSON.parse((document.getElementById('gofastr-behaviors') || {}).textContent || '{}');
+      // Own entries only: the block is JSON from the host, but the
+      // kernel never reads a registry through the prototype chain.
+      return Object.entries(o).map(([n, v]) => ({ name: n, selector: v.s.join(','), idle: !!v.i }));
+    } catch (_) { return []; }
+  })();
   function _scanForModules(root) {
     const scope = root && root.querySelectorAll ? root : document;
     const idleQueue = [];
-    for (const m of _moduleMarkers) {
+    for (const m of _moduleMarkers.concat(_registered)) {
       const { name, selector, idle } = m;
       // rpc-stub owns static-export clicks. The marker table is shared by all
       // compositions, so skip this one entry instead of fetching dead code.

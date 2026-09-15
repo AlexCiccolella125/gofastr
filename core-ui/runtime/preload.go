@@ -92,6 +92,11 @@ func NeededModules(pageHTML string) []string {
 			seen[m.Module] = true
 		}
 	}
+	// Registered behaviours preload by the same rule, from the markers
+	// they declared rather than from the table.
+	for _, name := range neededBehaviors(pageHTML) {
+		seen[name] = true
+	}
 	out := make([]string, 0, len(seen))
 	for k := range seen {
 		out = append(out, k)

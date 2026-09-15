@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/DonaldMurillo/gofastr/core-ui/registry"
 )
 
 // attrPattern matches a full data-fui-* attribute token. It is greedy on
@@ -606,4 +608,49 @@ func goEmittedAttrs(t *testing.T) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// A registered behaviour (registry.RegisterBehavior) owns its own
+// prefix; the seam admits a data-fui-* marker only when the attribute
+// is already in the documented table, so hard rule 5 holds through the
+// registry as well as through the sources. undocumentedBehaviorMarkers
+// is the check; the test exercises it against a fixture in isolation,
+// since this package's own test binary registers nothing.
+func undocumentedBehaviorMarkers(doc map[string]struct{}) []string {
+	var out []string
+	for _, e := range registry.Behaviors() {
+		for _, m := range e.Markers {
+			name := registry.MarkerSubstring(m)
+			if i := strings.Index(name, "="); i >= 0 {
+				name = name[:i]
+			}
+			if strings.HasPrefix(name, "data-fui-") {
+				if _, ok := doc[name]; !ok {
+					out = append(out, e.Name+": "+m)
+				}
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func TestRegisteredBehaviorDataFuiMarkersAreDocumented(t *testing.T) {
+	doc := documentedAttrs(t)
+	// The live registry first, whatever this binary links: nothing may
+	// carry an undocumented data-fui-* marker.
+	if got := undocumentedBehaviorMarkers(doc); len(got) != 0 {
+		t.Fatalf("registered behaviours carry undocumented data-fui-* markers (hard rule 5): %v", got)
+	}
+	registry.IsolateForTest(t)
+	registry.RegisterBehavior("own-prefix", "(()=>{})()", registry.Markers("[data-hui-probe]"))
+	registry.RegisterBehavior("documented", "(()=>{})()", registry.Markers("[data-fui-rpc]"))
+	if got := undocumentedBehaviorMarkers(doc); len(got) != 0 {
+		t.Fatalf("an own-prefix marker and a documented data-fui-* marker were reported: %v", got)
+	}
+	registry.RegisterBehavior("undocumented", "(()=>{})()", registry.Markers("[data-fui-not-in-the-table-probe]"))
+	got := undocumentedBehaviorMarkers(doc)
+	if len(got) != 1 || !strings.HasPrefix(got[0], "undocumented:") {
+		t.Fatalf("the undocumented data-fui-* marker was not reported: %v", got)
+	}
 }
