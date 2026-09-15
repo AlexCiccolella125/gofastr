@@ -31,13 +31,14 @@
 // attribute allow-list a Bind is checked against), plus the agents
 // inventory registration every framework subpackage carries.
 //
-// No runtime module binds the data-hui-* hooks in this repository yet,
-// and no skin dresses the parts: the hooks are the contract that
-// module will be written to, and every component renders markup that
-// is correct and usable without it. framework/ui is today's styled
-// layer and does not render through this package; the skin, the
-// stylesheet, the runtime module and that adoption follow in their
-// own changes.
+// The behaviour module exists: behavior.go registers it under the name
+// "headless" through the same seam a stylesheet uses
+// (registry.RegisterBehavior), the host serves it at
+// /__gofastr/runtime/headless.js, and the kernel loads it when one of
+// its markers is on the page. No skin dresses the parts yet: the skin,
+// the stylesheet and that adoption follow in their own changes, and
+// framework/ui remains today's styled layer, not rendering through
+// this package.
 package headless
 
 import (

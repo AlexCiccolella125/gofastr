@@ -160,15 +160,65 @@ Divider, Spacer, Spinner, Skeleton, Alert, SystemBanner, Badge, Tag,
 Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarSearch, Pagination, Steps,
 Timeline, OptimisticAction and ToggleAction.
 
-No skin, stylesheet or runtime module for the `data-hui-*` hooks ships
-in this repository yet: the hooks are the contract that module will be
-written to, and every component renders markup that is correct and
-usable without it. `framework/ui` is today's styled layer and does not
-render through this package; the skin, the stylesheet, the runtime
-module and that adoption follow in their own changes.
+## The behaviour module
+
+The runtime module that binds the `data-hui-*` hooks ships in this
+package, registered by `behavior.go` through the same seam a
+stylesheet uses (`registry.RegisterBehavior`). The host serves it as
+the module `headless` at `/__gofastr/runtime/headless.js`, and the
+kernel loads it when one of its markers is on the page. The markers
+are `[data-hui-reveal]`, `[data-hui-color]`, `[data-hui-when]`,
+`[data-hui-form-errors]`, `[data-hui-action]`, `[data-hui-drop]` and
+`[data-hui-system]`: one per behaviour, the root hook of each.
+
+What it does, one line per behaviour:
+
+- **reveal** retypes the password input, swaps the button's text and
+  accessible name from the `data-hui-show-*` and `data-hui-hide-*`
+  attributes, and keeps focus and the caret where the reader left
+  them.
+- **color** keeps the swatch and the hex text one value in both
+  directions, and marks the shell `data-invalid` when the text holds a
+  non-empty value that is neither `#rgb` nor `#rrggbb`.
+- **when** hides a `data-hui-when` region whose watched field does not
+  carry `data-hui-when-value`, disabling its controls under the
+  runtime-owned `data-hui-when-off` mark so only those re-enable.
+- **form-errors** moves focus to the summary inside
+  `data-hui-form-errors`, once per form element.
+- **action** answers the framework's `optimistic-action:rolled-back`
+  event by writing the root's `data-hui-action-failed` sentence into
+  the `data-hui-action-status` span.
+- **drop** lists the chosen files and says the sentence, both built
+  from the words the root carries (`data-hui-drop-one` and
+  `data-hui-drop-many`, from `Words.FileSelected` and
+  `Words.FilesSelected`), and takes a real drop on the zone with the
+  runtime-owned `data-hui-drop-over` state.
+- **system** keeps a dismissed banner hidden for the session, and
+  shows the offline one (`data-hui-system-offline`) when the framework
+  reports the connection lost with a retry scheduled.
+
+Two attributes are the module's own, written by it and rendered by no
+component: `data-hui-when-off` and `data-hui-drop-over`.
+
+Arming is the kernel's. The module registers a scanner and the kernel
+calls it on every inserted subtree and over the document after a
+client navigation; a host adds no observer, and the module adds none
+of its own. The skin and the stylesheet follow in their own change,
+and `framework/ui` remains today's styled layer, not rendering
+through this package.
 
 ## Common mistakes
 
+- **Arming the hooks by hand.** A MutationObserver or a
+  `gofastr:navigate` listener in a host, or a second module binding
+  the same hooks, arms everything twice: the kernel already hands
+  every inserted subtree and every post-navigation document to the
+  module's scanner.
+- **Saying a sentence in the module.** Every string the module writes
+  travels as a `data-hui-*` attribute the component rendered from its
+  `Words`, so a translated page announces in its own language; the
+  gate in `behavior_test.go` refuses an English literal the module
+  writes itself.
 - **Finding an element from script by its class.** The runtime binds to
   `data-hui-*` hooks only. A skin may rename every class, and a class
   used as a hook is the one thing it cannot rename.

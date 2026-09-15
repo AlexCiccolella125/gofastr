@@ -25,9 +25,19 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   `Spec` that drives the nil-skin sweep, the seam gates and two goldens.
   An in-page state change is an `Island` at render time (hard rule 1):
   `Pagination`, `ToolbarSearch` and a dismissible `Tag` or `Alert`
-  refuse the link-only render; every href passes the anchor policy. Ships the vocabulary, the harness and the basic
-  components; no skin or runtime module binds the hooks yet.
+  refuse the link-only render; every href passes the anchor policy.
+  Ships the vocabulary, the harness and the basic components.
   `gofastr docs ui-headless`.
+- **`framework/headless` behaviour module**: the `data-hui-*` hooks
+  are bound. `behavior.go` registers the package's JavaScript as the
+  runtime module `headless` through `registry.RegisterBehavior`; the
+  kernel loads it on one of its seven markers (reveal, color, when,
+  form-errors, action, drop, system) and hands it inserted DOM. Every
+  sentence the module writes travels as a `data-hui-*` attribute from
+  `Words` (Upload gains `FileSelected` and `FilesSelected`), and the
+  two attributes it writes back (`data-hui-when-off`,
+  `data-hui-drop-over`) are its own. Source gates in
+  `behavior_test.go`, browser coverage in `behavior_e2e_test.go`.
 
 ### Changed
 - **One home per helper.** A clone survey over the tree found the same

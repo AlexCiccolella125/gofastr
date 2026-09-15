@@ -448,6 +448,12 @@ Registered markers use the package's own `data-` prefix; a
 above. Contract and rules: `core-ui/ARCHITECTURE.md` "Component
 behaviour".
 
+The framework's own `headless` module is registered this way by
+`framework/headless/behavior.go`, binding that package's `data-hui-*`
+hooks with the markers `[data-hui-reveal]`, `[data-hui-color]`,
+`[data-hui-when]`, `[data-hui-form-errors]`, `[data-hui-action]`,
+`[data-hui-drop]` and `[data-hui-system]`.
+
 ## See also
 
 - [UI capability map](ui-capability-map.md) maps product architectures to this runtime boundary and its scaling semantics.

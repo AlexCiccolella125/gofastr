@@ -3,11 +3,12 @@
 The headless layer renders a component's tags, roles, labelling
 relationships, state attributes and runtime hooks, and nothing else: no
 classes at a nil skin, no CSS, no script. A skin (a flat map from part
-to class) dresses it; a runtime module binds its `data-hui-*` hooks. The
-harness proves every registered component against the same contract, so
-a skin can be replaced without a single accessibility guarantee moving.
-No skin or runtime module ships in this repository yet; `framework/ui`
-is today's styled layer and does not render through this package.
+to class) dresses it; the behaviour module (behavior.go, served as the
+runtime module "headless") binds its `data-hui-*` hooks. The harness
+proves every registered component against the same contract, so a skin
+can be replaced without a single accessibility guarantee moving. No
+skin or stylesheet ships in this repository yet; `framework/ui` is
+today's styled layer and does not render through this package.
 
 **Use this when** the prompt mentions: headless, unstyled, reskin, a
 second design system, parts, slots, overrides, binds, words, translated
@@ -70,5 +71,12 @@ English words, `spec_golden_words.txt` at probe words).
 - **A golden update without reading it.** `GOFASTR_UPDATE_GOLDEN=1 go test`
   regenerates; every changed line is a change to what assistive
   technology is told.
+- **Arming the hooks by hand.** The behaviour module is armed by the
+  kernel, which hands it every inserted subtree; a MutationObserver or
+  a navigate listener in a host, or a second module binding the same
+  hooks, arms everything twice.
+- **Saying a sentence in the behaviour module.** Words travel as
+  `data-hui-*` attributes from `Words`, so the module itself writes no
+  sentence a translated page would say in English.
 
 Full contract: `gofastr docs ui-headless`.

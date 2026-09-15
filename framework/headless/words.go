@@ -101,6 +101,19 @@ type Words struct {
 	ToneWarning string
 	ToneDanger  string
 
+	// ─── Upload ──────────────────────────────────────────────────────
+
+	// FileSelected says one file was chosen, with {name} where the
+	// file's name goes. The runtime writes the name in when it knows
+	// it; the server never renders this string with a value in it,
+	// because before the reader picks there is no value to say.
+	FileSelected string
+	// FilesSelected says several files were chosen, with {n} for the
+	// count and {names} for the joined list. Substituted by the runtime
+	// like FileSelected's {name}, for the same reason: neither the
+	// count nor the names exist until the reader has picked.
+	FilesSelected string
+
 	// ─── ValidationSummary ──────────────────────────────────────────
 
 	// ThereIsAProblem heads the list a failed submit focuses. A short
@@ -130,6 +143,9 @@ var defaultWords = Words{
 	ToneSuccess: "Success",
 	ToneWarning: "Warning",
 	ToneDanger:  "Error",
+
+	FileSelected:  "{name} selected.",
+	FilesSelected: "{n} files selected: {names}.",
 
 	ThereIsAProblem: "There is a problem",
 }
