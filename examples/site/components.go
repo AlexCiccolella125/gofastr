@@ -275,8 +275,42 @@ func (s *ComponentShowcaseScreen) RenderCtx(ctx context.Context) render.HTML {
 		// are labeled "Live"; ones that show an explanatory note (need
 		// per-page wiring) are labeled "Note" so the box is honest.
 		s.demoStage(ctx),
+		// The site-local registered behaviour (behavior_ping.go), on the
+		// Button page: proof a host package ships behaviour the same way
+		// it ships a stylesheet.
+		s.registeredBehaviorSection(),
 		// Example code, the Go that produced the live demo above.
 		s.usage(),
+	)
+}
+
+// registeredBehaviorSection renders the "Registered behaviour" section
+// on the Button showcase page only. The button below carries
+// data-site-ping; the site-ping module (behavior_ping.go) is
+// demand-loaded by the runtime when it sees the marker, attaches, and
+// toggles aria-pressed on click. Composed entirely from design-system
+// pieces (hard rule 7): ui.Button + the page's existing doc-usage
+// framing, zero bespoke CSS.
+func (s *ComponentShowcaseScreen) registeredBehaviorSection() render.HTML {
+	if s.Entry.Slug != "button" {
+		return render.HTML("")
+	}
+	return html.Div(html.DivConfig{Class: "doc-usage"},
+		html.Heading(html.HeadingConfig{Level: 2, Class: "doc-usage__title"}, render.Text("Registered behaviour")),
+		html.Paragraph(html.TextConfig{},
+			render.Text("This button's behaviour is registered by the site itself with registry.RegisterBehavior and demand-loaded by the runtime when it sees the data-site-ping marker."),
+		),
+		ui.Button(ui.ButtonConfig{
+			Label: "Ping",
+			ID:    "site-ping-btn",
+			// data-fui-prefetch warms the module on hover; aria-pressed
+			// is the attribute the behaviour toggles on click.
+			ExtraAttrs: html.Attrs{
+				"data-site-ping":    "1",
+				"data-fui-prefetch": "site-ping",
+				"aria-pressed":      "false",
+			},
+		}),
 	)
 }
 

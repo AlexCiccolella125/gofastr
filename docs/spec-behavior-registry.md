@@ -216,7 +216,11 @@ Browser, in `core-ui/runtime` (chromedp against `httptest`):
   document;
 - `LoadIdle` defers to idle and still attaches;
 - `data-fui-prefetch="<name>"` on hover fetches before any click;
-- a failing fetch warns and does not strand the page.
+- a failing fetch does not strand the page: the marker element stays,
+  `loadedModules[<name>]` stays unset, nothing is thrown; the browser's
+  own network error is the signal, as it is for a table module, because
+  the scan path swallows the rejection on purpose (a warning would be
+  kernel bytes for a case the console already reports).
 
 Browser, in `examples/site`:
 
