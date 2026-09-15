@@ -265,13 +265,20 @@ func IsolateForTest(t testCleanup) {
 	mu.Lock()
 	saved := entries
 	savedBehaviors := behaviors
+	savedReserved := reservedBehaviorNames
 	entries = map[string]*Entry{}
 	behaviors = map[string]*BehaviorEntry{}
+	// The reserved names go too, so a test can reach the merge-time
+	// refusal in core-ui/runtime that the reservation normally
+	// forestalls; a test that wants the registration-time refusal
+	// reserves the name itself.
+	reservedBehaviorNames = map[string]bool{}
 	mu.Unlock()
 	t.Cleanup(func() {
 		mu.Lock()
 		entries = saved
 		behaviors = savedBehaviors
+		reservedBehaviorNames = savedReserved
 		mu.Unlock()
 	})
 }

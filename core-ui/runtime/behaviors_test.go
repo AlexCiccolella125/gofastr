@@ -132,18 +132,31 @@ func TestBehaviorsJSON(t *testing.T) {
 	}
 }
 
-// A behaviour registered under an embedded module's name, past the
-// reservation (registered before this package's init could reserve
-// it), is refused where the two sets meet rather than served in
-// silence.
+// A behaviour registered under an embedded module's name is refused
+// twice: at registration, by the names this package reserved at init,
+// and where the two sets meet, for a registration that ran before the
+// reservation (a package that does not import this one can init
+// first). Isolation clears the reservations, so the second path is
+// reachable here; the first is re-armed by reserving the name.
 func TestBehaviorShadowingAnEmbeddedModuleIsRefused(t *testing.T) {
-	registry.IsolateForTest(t)
-	// Isolation drops the reservation set only for the entries map, not
-	// the reserved names; so this exercises the registry's own refusal.
-	defer func() {
-		if r := recover(); r == nil || !strings.Contains(r.(string), "embedded runtime module") {
-			t.Fatalf("expected the reservation to refuse, got %v", r)
-		}
-	}()
-	registry.RegisterBehavior("copy", probeJS, registry.Markers("[data-copy-probe]"))
+	expectPanic := func(t *testing.T, fn func()) {
+		t.Helper()
+		defer func() {
+			if r := recover(); r == nil || !strings.Contains(r.(string), "embedded runtime module") {
+				t.Fatalf("expected the shadow refusal, got %v", r)
+			}
+		}()
+		fn()
+	}
+	t.Run("at registration", func(t *testing.T) {
+		registry.IsolateForTest(t)
+		registry.ReserveBehaviorNames("copy")
+		expectPanic(t, func() { registry.RegisterBehavior("copy", probeJS, registry.Markers("[data-copy-probe]")) })
+	})
+	t.Run("where the sets meet", func(t *testing.T) {
+		registry.IsolateForTest(t)
+		registry.RegisterBehavior("copy", probeJS, registry.Markers("[data-copy-probe]"))
+		expectPanic(t, func() { ModuleNames() })
+		expectPanic(t, func() { BehaviorsJSON() })
+	})
 }

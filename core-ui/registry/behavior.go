@@ -92,8 +92,14 @@ var (
 )
 
 var (
-	behaviorName   = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
-	behaviorMarker = regexp.MustCompile(`^\[(data-[a-z0-9-]+)(="[^"\]]*")?\]$`)
+	behaviorName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
+	// The value may not carry a control character (a tab included),
+	// DEL, a backslash, a quote or a bracket: a CSS string with an
+	// unescaped newline or a trailing backslash is not a selector,
+	// querySelector throws on it, and one throw in the kernel's scan
+	// aborts the boot pass for every module. Refused here, where it is
+	// a startup failure.
+	behaviorMarker = regexp.MustCompile(`^\[(data-[a-z0-9-]+)(="[^"\]\\\x00-\x1f\x7f]*")?\]$`)
 )
 
 // ReserveBehaviorNames records names no behaviour may register under:

@@ -35,6 +35,15 @@ func TestRegisterBehaviorRules(t *testing.T) {
 	mustPanic(t, "attribute selector", func() { RegisterBehavior("role", "x", Markers(`[role="tree"]`)) })
 	mustPanic(t, "attribute selector", func() { RegisterBehavior("bare", "x", Markers("data-x")) })
 	mustPanic(t, "attribute selector", func() { RegisterBehavior("nested", "x", Markers(`[data-x="a]b"]`)) })
+	// A value querySelector would throw on: an unescaped newline, a
+	// backslash, DEL. One throw in the kernel's scan aborts the boot
+	// pass for every module, so these are startup failures.
+	mustPanic(t, "attribute selector", func() { RegisterBehavior("newline", "x", Markers("[data-x=\"a\nb\"]")) })
+	mustPanic(t, "attribute selector", func() { RegisterBehavior("backslash", "x", Markers(`[data-x="a\"]`)) })
+	mustPanic(t, "attribute selector", func() { RegisterBehavior("del", "x", Markers("[data-x=\"a\x7fb\"]")) })
+	mustPanic(t, "attribute selector", func() { RegisterBehavior("quote", "x", Markers(`[data-x="a"b"]`)) })
+	mustPanic(t, "attribute selector", func() { RegisterBehavior("tab", "x", Markers("[data-x=\"a\tb\"]")) })
+	RegisterBehavior("spaced-ok", "x", Markers(`[data-x="a b"]`)) // a space is fine
 	b := RegisterBehavior("good", "(()=>{})()", Markers("[data-x]", `[data-y="v"]`), LoadIdle())
 	if b.Name() != "good" || !b.Entry().Idle || len(b.Entry().Markers) != 2 {
 		t.Fatalf("entry not as registered: %+v", b.Entry())

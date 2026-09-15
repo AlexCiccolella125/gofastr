@@ -97,11 +97,17 @@ startup failure and not a dead marker:
   because they share one URL and one manifest. A style and a behaviour
   may share a name: a component registers both under its own name.
 - Every marker is an attribute selector, `[data-x]` or `[data-x="v"]`,
-  on a `data-` attribute. Nothing else scans (no `role=` selectors for
-  registered behaviours; the two kernel modules that use them predate
-  this seam). A `data-fui-*` marker is permitted only when the attribute
-  is already in `core-ui/ARCHITECTURE.md`'s table, checked by the gate
-  below, so hard rule 5 holds through this seam as well.
+  on a `data-` attribute, and the value carries no control character,
+  backslash, quote or bracket: a string `querySelector` would throw on
+  is refused at registration, because one throw in the kernel's scan
+  would abort the boot pass for every module. Nothing else scans (no
+  `role=` selectors for registered behaviours; the two kernel modules
+  that use them predate this seam). A `data-fui-*` marker is permitted
+  only when the attribute is already in `core-ui/ARCHITECTURE.md`'s
+  table, checked by a gate that reads every `registry.Markers(...)`
+  call site in the tree rather than the registry of one test binary,
+  which links only what imports it, so hard rule 5 holds through this
+  seam as well.
 - A duplicate name with identical source and options is a no-op, as
   `RegisterStyle` is; a different definition panics.
 - `js` is non-empty and is served as registered, minified under the same
@@ -228,8 +234,9 @@ Browser, in `examples/site`:
   `core-ui/runtime`, and the runtime-split suite's contract holds for it:
   no marker no fetch, marker fetches, manifest is content-addressed,
   mutation observer loads it, SPA navigation rescans it, hover prefetch.
-- the static export contains the module file and the behaviours block,
-  and an exported page loads it.
+- the static export contains the module file and the behaviours block;
+  the static composition ships the same `boot` fragment the live suites
+  cover, so the scan itself is not re-proven from an exported page.
 
 Documentation, in the same change: `core-ui/ARCHITECTURE.md` ("Component
 CSS" gains "Component behaviour"), the `data-fui-*` table if any marker
