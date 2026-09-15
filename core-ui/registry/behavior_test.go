@@ -44,6 +44,10 @@ func TestRegisterBehaviorRules(t *testing.T) {
 	mustPanic(t, "attribute selector", func() { RegisterBehavior("quote", "x", Markers(`[data-x="a"b"]`)) })
 	mustPanic(t, "attribute selector", func() { RegisterBehavior("tab", "x", Markers("[data-x=\"a\tb\"]")) })
 	RegisterBehavior("spaced-ok", "x", Markers(`[data-x="a b"]`)) // a space is fine
+	// The name is a URL segment and a manifest key, at most 64 bytes:
+	// the same bound compute.ValidName holds every module name to.
+	RegisterBehavior("a"+strings.Repeat("b", 63), "x", Markers("[data-x]"))
+	mustPanic(t, "must match", func() { RegisterBehavior("a"+strings.Repeat("b", 64), "x", Markers("[data-x]")) })
 	b := RegisterBehavior("good", "(()=>{})()", Markers("[data-x]", `[data-y="v"]`), LoadIdle())
 	if b.Name() != "good" || !b.Entry().Idle || len(b.Entry().Markers) != 2 {
 		t.Fatalf("entry not as registered: %+v", b.Entry())
@@ -74,6 +78,15 @@ func TestRegisterBehaviorRefusesReservedNames(t *testing.T) {
 	IsolateForTest(t)
 	ReserveBehaviorNames("copy")
 	mustPanic(t, "embedded runtime module", func() { RegisterBehavior("copy", "x", Markers("[data-x]")) })
+}
+
+// A behaviour registered before the reservation arrives (its package
+// initialised first) is refused when the reservation does arrive,
+// still at init.
+func TestReservationRefusesAnEarlierRegistration(t *testing.T) {
+	IsolateForTest(t)
+	RegisterBehavior("early", "x", Markers("[data-x]"))
+	mustPanic(t, "already registered", func() { ReserveBehaviorNames("other", "early") })
 }
 
 // Behaviors is sorted, Lookup finds by name, and isolation hides
@@ -119,6 +132,8 @@ func TestMarkerSubstring(t *testing.T) {
 	for in, want := range map[string]string{
 		"[data-x]":       "data-x",
 		`[data-x="v w"]`: `data-x="v w"`,
+		`[data-x="a&b"]`: `data-x="a&amp;b"`, // as the renderer writes it
+		`[data-x="<v>"]`: `data-x="&lt;v&gt;"`,
 		".class":         "",
 		"data-x":         "",
 	} {

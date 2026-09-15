@@ -92,7 +92,8 @@ func LookupBehavior(name string) (*BehaviorEntry, bool)
 Rules, each a panic at registration with the reason, so a mistake is a
 startup failure and not a dead marker:
 
-- `name` matches `^[a-z][a-z0-9-]*$` and is not the name of an embedded
+- `name` matches `^[a-z][a-z0-9-]{0,63}$` (the bound every module
+  name keeps) and is not the name of an embedded
   kernel module (`runtime.ModuleNames()`); the two are one namespace
   because they share one URL and one manifest. A style and a behaviour
   may share a name: a component registers both under its own name.

@@ -5,7 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DonaldMurillo/gofastr/core-ui/html"
 	"github.com/DonaldMurillo/gofastr/core-ui/registry"
+	"github.com/DonaldMurillo/gofastr/core/render"
 )
 
 const probeJS = "(() => {\n  // a registered behaviour\n  window.__probe = 1;\n})();\n"
@@ -101,6 +103,18 @@ func TestNeededModulesMatchesRegisteredMarkers(t *testing.T) {
 	}
 	if has(`<div data-probe-kind="y">`) {
 		t.Fatal("a valued marker matched a different value")
+	}
+	// A value the renderer escapes is matched in its rendered form.
+	registry.RegisterBehavior("amp-beh", probeJS, registry.Markers(`[data-amp="a&b"]`))
+	rendered := string(render.Tag("div", html.Attrs{"data-amp": "a&b"}))
+	found := false
+	for _, n := range NeededModules(rendered) {
+		if n == "amp-beh" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("an escaped attribute value was not matched; rendered %q", rendered)
 	}
 	if has(`<div>`) {
 		t.Fatal("matched with no marker present")

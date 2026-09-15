@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -230,5 +232,29 @@ func TestE2E_BehaviorRegistry_HoverPrefetch(t *testing.T) {
 	}
 	if u := fetchedModuleURL(urls); u == "" {
 		t.Errorf("pointerover on data-fui-prefetch=site-ping should fetch the module; runtime urls observed: %v", listedURLs(urls))
+	}
+}
+
+// The section is gated to the Button page: another components page
+// carries neither the marker nor the prefetch hint. A plain fetch, no
+// browser needed; without this the gate could be removed unnoticed.
+func TestE2E_BehaviorRegistry_OtherPagesCarryNoMarker(t *testing.T) {
+	if testing.Short() {
+		t.Skip("e2e: -short")
+	}
+	base := startE2EServer(t)
+	res, err := http.Get(base + "/components/datatable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"data-site-ping", `data-fui-prefetch="site-ping"`, "Registered behaviour"} {
+		if strings.Contains(string(body), bad) {
+			t.Errorf("/components/datatable carries %q; the section is meant for the Button page only", bad)
+		}
 	}
 }

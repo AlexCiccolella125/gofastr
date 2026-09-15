@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/DonaldMurillo/gofastr/core/render"
 )
 
 // Behaviour registers like style.
@@ -111,6 +113,12 @@ func ReserveBehaviorNames(names ...string) {
 	defer mu.Unlock()
 	for _, n := range names {
 		reservedBehaviorNames[n] = true
+		// A package that imports registry but not runtime can register
+		// before the reservation arrives; the collision is refused
+		// here, at init, rather than where the two sets are served.
+		if _, taken := behaviors[n]; taken {
+			panic("registry.ReserveBehaviorNames: behaviour " + n + " is already registered under an embedded runtime module's name — the two share one URL and one manifest")
+		}
 	}
 }
 
@@ -180,7 +188,9 @@ func Behaviors() []*BehaviorEntry {
 
 // MarkerSubstring is what a marker selector looks like inside rendered
 // HTML, for the host's preload scan: "[data-x]" is the attribute name
-// data-x, "[data-x=\"v\"]" is data-x="v". The host matches it at an
+// data-x, "[data-x=\"v\"]" is data-x="v" with the value escaped the way
+// the renderer escapes an attribute value (& as &amp; and so on), since
+// the scan runs over rendered HTML. The host matches it at an
 // attribute-name boundary, so a marker never fires as the prefix of a
 // longer attribute.
 func MarkerSubstring(selector string) string {
@@ -188,7 +198,11 @@ func MarkerSubstring(selector string) string {
 	if m == nil {
 		return ""
 	}
-	return m[1] + m[2]
+	if m[2] == "" {
+		return m[1]
+	}
+	value := m[2][2 : len(m[2])-1] // strip ="…"
+	return m[1] + `="` + render.Escape(value) + `"`
 }
 
 func sameBehavior(a, b *BehaviorEntry) bool {

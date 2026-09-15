@@ -295,12 +295,14 @@ func (s *ComponentShowcaseScreen) registeredBehaviorSection() render.HTML {
 	if s.Entry.Slug != "button" {
 		return render.HTML("")
 	}
-	return html.Div(html.DivConfig{Class: "doc-usage"},
-		html.Heading(html.HeadingConfig{Level: 2, Class: "doc-usage__title"}, render.Text("Registered behaviour")),
-		html.Paragraph(html.TextConfig{},
-			render.Text("This button's behaviour is registered by the site itself with registry.RegisterBehavior and demand-loaded by the runtime when it sees the data-site-ping marker."),
-		),
-		ui.Button(ui.ButtonConfig{
+	return ui.Section(ui.SectionConfig{
+		Class:       "doc-usage",
+		Heading:     "Registered behaviour",
+		Description: "This button's behaviour is registered by the site itself with registry.RegisterBehavior and demand-loaded by the runtime when it sees the data-site-ping marker.",
+	},
+		// A Cluster, so the button keeps its own width inside the
+		// section's stacked body.
+		ui.Cluster(ui.ClusterConfig{}, ui.Button(ui.ButtonConfig{
 			Label: "Ping",
 			ID:    "site-ping-btn",
 			// data-fui-prefetch warms the module on hover; aria-pressed
@@ -310,7 +312,7 @@ func (s *ComponentShowcaseScreen) registeredBehaviorSection() render.HTML {
 				"data-fui-prefetch": "site-ping",
 				"aria-pressed":      "false",
 			},
-		}),
+		})),
 	)
 }
 
