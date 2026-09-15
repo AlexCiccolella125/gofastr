@@ -9,6 +9,7 @@ package headless
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/DonaldMurillo/gofastr/core-ui/html"
 	"github.com/DonaldMurillo/gofastr/core/render"
@@ -55,11 +56,12 @@ type InputProps struct {
 
 	ID    string
 	Extra html.Attrs
-	// Owned are the type-specific attrs (min, max, step), applied
-	// after the common set and after Extra so a caller cannot widen a
-	// numeric input's bounds through extra attrs behind the config's
-	// back. Empty values are skipped, leaving Extra's say if it has
-	// one.
+	// Owned are the type-specific attrs — min, max and step, and only
+	// those — applied after the common set and after Extra so a caller
+	// cannot widen a numeric input's bounds through extra attrs behind
+	// the config's back. Any other key is refused: this is a seam for
+	// bounds, not a second ExtraAttrs. Empty values are skipped,
+	// leaving Extra's say if it has one.
 	Owned html.Attrs
 }
 
@@ -84,8 +86,13 @@ func Input(p InputProps, s Skin) render.HTML {
 		attrs["aria-invalid"] = "true"
 	}
 	for k, v := range p.Owned {
+		switch strings.ToLower(k) {
+		case "min", "max", "step":
+		default:
+			panic("headless: Input Owned carries " + k + " — Owned is for min, max and step only")
+		}
 		if v != "" {
-			attrs[k] = v
+			attrs[strings.ToLower(k)] = v
 		}
 	}
 	return El("input", s, PartRoot, attrs)

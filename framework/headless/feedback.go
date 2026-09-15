@@ -2,7 +2,10 @@ package headless
 
 import (
 	"fmt"
+	"strconv"
+
 	"github.com/DonaldMurillo/gofastr/core-ui/html"
+	"github.com/DonaldMurillo/gofastr/core-ui/urlsafe"
 	"github.com/DonaldMurillo/gofastr/core/render"
 )
 
@@ -44,8 +47,10 @@ const (
 
 // AlertProps is a message about something that happened, or is true.
 type AlertProps struct {
-	// Tone names the kind of message: the skin turns it into colour.
-	// It is passed through, not interpreted.
+	// Tone names the kind of message: the skin turns it into colour
+	// through the root's "<part>--<tone>" variant. It is passed
+	// through, not interpreted; the tone word is what carries it to a
+	// reader.
 	Tone string
 	// ToneWord is the tone in words — "Error", "Warning", "Success".
 	// It is rendered for assistive tech and hidden visually, and it is
@@ -78,20 +83,25 @@ type AlertProps struct {
 	// server-rendered app — the confirmation is present at load, so
 	// the only reliable way to say it is to put the reader on it.
 	Focus bool
-	// DismissHref makes the alert dismissable with a link, which needs
-	// no script and survives the page being reloaded. The label names
-	// what is being dismissed, because "Dismiss" three times in a row
-	// tells a screen reader user nothing.
+	// DismissHref makes the alert dismissable with a link that keeps a
+	// real href, so dismissing needs no script and survives the page
+	// being reloaded. The label names what is being dismissed, because
+	// "Dismiss" three times in a row tells a screen reader user
+	// nothing.
 	DismissHref  string
 	DismissLabel string
+	// Island is where the dismiss goes with script: dismissing is an
+	// in-page state change, so the × carries the RPC contract beside
+	// its href. Required when DismissHref is set; ignored otherwise.
+	Island Island
 
 	ID         string
 	ExtraAttrs html.Attrs
 
-	// Seams: overrides only. Nothing here is fillable — Actions
-	// already takes the page's own controls, and everything else an
-	// alert draws is what a screen reader is given to tell one alert
-	// from another.
+	// Seams: overrides and binds on every part. Nothing here is
+	// fillable — Actions already takes the page's own controls, and
+	// everything else an alert draws is what a screen reader is given
+	// to tell one alert from another.
 	Seams
 }
 
@@ -114,10 +124,13 @@ func Alert(p AlertProps, s Skin) render.HTML {
 	case LivePolite:
 		own["role"] = "status"
 	}
+	if cls := s.Variant(PartRoot, p.Tone); cls != "" {
+		own["class"] = cls
+	}
 
 	head := make([]render.HTML, 0, 3)
 	if p.Icon != "" {
-		head = append(head, El("span", s, PartIcon,
+		head = append(head, b.El("span", PartIcon,
 			Attrs(map[string]string{"aria-hidden": "true"}), p.Icon))
 	}
 	title := make([]render.HTML, 0, 2)
@@ -126,26 +139,33 @@ func Alert(p AlertProps, s Skin) render.HTML {
 		// the message. The trailing space is inside the hidden span:
 		// without it screen readers run the two together ("ErrorDeploy
 		// failed").
-		title = append(title, El("span", s, PartToneWord, nil, render.Text(p.ToneWord+": ")))
+		title = append(title, b.El("span", PartToneWord, nil, render.Text(p.ToneWord+": ")))
 	}
 	title = append(title, render.Text(p.Title))
-	head = append(head, El("p", s, PartTitle, nil, title...))
+	head = append(head, b.El("p", PartTitle, nil, title...))
 
-	kids := []render.HTML{El("div", s, PartHeader, nil, head...)}
+	kids := []render.HTML{b.El("div", PartHeader, nil, head...)}
 	if p.Text != "" {
-		kids = append(kids, El("p", s, PartDesc, nil, render.Text(p.Text)))
+		kids = append(kids, b.El("p", PartDesc, nil, render.Text(p.Text)))
 	}
 	if p.Actions != "" {
 		kids = append(kids, b.El("div", PartFooter, nil, p.Actions))
 	}
 	if p.DismissHref != "" {
+		requireIsland("Alert with DismissHref", p.Island)
+		if urlsafe.CleanAnchor(p.DismissHref) == "" {
+			panic("headless: Alert DismissHref " + strconv.Quote(p.DismissHref) + " is not a URL the anchor policy allows")
+		}
 		label := p.DismissLabel
 		if label == "" {
 			label = fmt.Sprintf(p.Seams.W().DismissTitled, p.Title)
 		}
-		kids = append(kids, El("a", s, PartDismiss, Attrs(map[string]string{
-			"href": p.DismissHref, "aria-label": label,
-		}), render.Text("×")))
+		// The same element is both destinations: the href is the page
+		// without script, the island contract is the region update
+		// with it.
+		dismiss := Merge(Attrs(map[string]string{"href": p.DismissHref, "aria-label": label}),
+			p.Island.attrs(p.DismissHref, "GET"))
+		kids = append(kids, b.El("a", PartDismiss, dismiss, render.Text("×")))
 	}
 	return b.El("div", PartRoot, own, kids...)
 }
@@ -155,7 +175,10 @@ func init() {
 		Name:  "Alert",
 		Parts: []Part{PartRoot, PartHeader, PartIcon, PartToneWord, PartTitle, PartDesc, PartFooter, PartDismiss},
 		WithSeams: func(s Skin, seams Seams) render.HTML {
-			return Alert(AlertProps{Title: "Deploy failed", Seams: seams}, s)
+			return Alert(AlertProps{Title: "Deploy failed", Text: "Exit 1 in the test stage.", Tone: "danger",
+				ToneWord: "Error", Icon: SpecimenGlyph, Actions: render.HTML("<a href=\"/logs\">View logs</a>"),
+				DismissHref: "/apps?dismiss=1", Island: Island{Endpoint: "/island/alerts", Signal: "alerts"},
+				Seams: seams}, s)
 		},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
@@ -167,6 +190,7 @@ func init() {
 					ToneWord: "Error", Live: LiveAssertive, Icon: SpecimenGlyph,
 					Actions:     Button(ButtonProps{Label: "View logs", Variant: "secondary"}, k.For("Button")),
 					DismissHref: "/apps?dismiss=1", DismissLabel: "Dismiss deploy failure",
+					Island: Island{Endpoint: "/island/alerts", Signal: "alerts"},
 				}, k.Variant("Alert", "danger")),
 			}, {
 				Name: "quiet",

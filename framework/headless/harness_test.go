@@ -31,27 +31,29 @@ import (
 // that drew a header counted as drawing a head. That made
 // TestEveryDeclaredPartIsActuallyDrawn pass for a part nothing rendered,
 // which is the exact failure it exists to prevent.
+//
+// It reads class attributes and their tokens, and nothing else: a
+// probe class carried as a hook's VALUE (the multi-select tells its
+// runtime which class to give the chips it builds) is not a drawn
+// part.
 func drawsClass(html, class string) bool {
-	for i := 0; ; {
-		j := strings.Index(html[i:], class)
-		if j < 0 {
-			return false
+	for _, m := range classAttr.FindAllStringSubmatch(html, -1) {
+		for _, tok := range strings.Fields(m[1]) {
+			if tok == class {
+				return true
+			}
 		}
-		j += i
-		before := byte(' ')
-		if j > 0 {
-			before = html[j-1]
-		}
-		after := byte(' ')
-		if end := j + len(class); end < len(html) {
-			after = html[end]
-		}
-		isEdge := func(c byte) bool { return c == ' ' || c == '"' || c == '\'' }
-		if isEdge(before) && isEdge(after) {
-			return true
-		}
-		i = j + 1
 	}
+	return false
+}
+
+var classAttr = regexp.MustCompile(`\sclass="([^"]*)"`)
+
+// hasAttr reports whether html carries an attribute NAMED name: not
+// the name inside a value, not the name inside text, and not a longer
+// attribute that happens to end in it.
+func hasAttr(html, name string) bool {
+	return regexp.MustCompile(`\s` + regexp.QuoteMeta(name) + `(=|\s|/|>)`).MatchString(html)
 }
 
 // probeKit is a kit where this component and every child it composes
@@ -173,8 +175,20 @@ func TestEveryDeclaredHookIsRendered(t *testing.T) {
 			}
 		}
 		for _, h := range sp.Hooks {
-			if !strings.Contains(all.String(), h) {
-				t.Errorf("%s declares hook %q and no case renders it", sp.Name, h)
+			if !hasAttr(all.String(), h) {
+				t.Errorf("%s declares hook %q and no case renders it as an attribute", sp.Name, h)
+			}
+		}
+		// And the other direction: every data-ds-* attribute a case
+		// renders is declared, so a hook cannot be published by
+		// accident and bound to by a runtime nobody told.
+		declared := map[string]bool{}
+		for _, h := range sp.Hooks {
+			declared[h] = true
+		}
+		for _, m := range dsAttr.FindAllStringSubmatch(all.String(), -1) {
+			if !declared[m[1]] && !childHook(sp, m[1]) {
+				t.Errorf("%s renders %q and does not declare it", sp.Name, m[1])
 			}
 		}
 		// The namespace rule: a hook this system invents, whether a
@@ -245,7 +259,7 @@ func TestEveryControlHasAName(t *testing.T) {
 			}
 			named := strings.Contains(attrs, "aria-label=") || strings.Contains(attrs, "aria-labelledby=")
 			if id := idOf.FindStringSubmatch(attrs); !named && id != nil {
-				named = strings.Contains(html, `for="`+id[1]+`"`)
+				named = strings.Contains(html, ` for="`+id[1]+`"`)
 			}
 			if before := html[:m[0]]; !named {
 				named = strings.LastIndex(before, "<label") > strings.LastIndex(before, "</label>")
@@ -674,6 +688,27 @@ func embedsSeams(st *ast.StructType) bool {
 		}
 		if id, ok := f.Type.(*ast.Ident); ok && id.Name == "Seams" {
 			return true
+		}
+	}
+	return false
+}
+
+var dsAttr = regexp.MustCompile(`\s(data-ds-[a-z0-9-]+)(=|\s|/|>)`)
+
+// childHook reports whether a hook rendered inside sp's cases belongs
+// to a component the fixture composes: a Form case renders an Input,
+// a Card case renders a Button, and their hooks are theirs to
+// declare. The hook must be declared by SOME spec; an undeclared one
+// fails either way.
+func childHook(sp Spec, hook string) bool {
+	for _, other := range Specs() {
+		if other.Name == sp.Name {
+			continue
+		}
+		for _, h := range other.Hooks {
+			if h == hook {
+				return true
+			}
 		}
 	}
 	return false

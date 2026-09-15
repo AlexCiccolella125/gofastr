@@ -348,18 +348,19 @@ func renderAction(a action, s Skin) render.HTML {
 		own["class"] = joinClasses(own["class"], cls)
 	}
 
+	b := a.seams.Box(s)
 	kids := []render.HTML{
-		actionSpan(s, PartActionIdle, a.idleAttr, a.state == "committed", a.idleLabel, a.idleIcon),
-		actionSpan(s, PartActionDone, a.doneAttr, a.state != "committed", a.doneLabel, a.doneIcon),
+		actionSpan(b, PartActionIdle, a.idleAttr, a.state == "committed", a.idleLabel, a.idleIcon),
+		actionSpan(b, PartActionDone, a.doneAttr, a.state != "committed", a.doneLabel, a.doneIcon),
 		// The accessibility the framework's runtime does not ship.
-		// A polite status region: the flip is visible, and this is how
-		// the rollback reaches anyone who cannot see it.
-		El("span", s, PartVisuallyHidden, Mark(Attrs(map[string]string{
-			"role":      "status",
-			"aria-live": "polite",
+		// A polite status region — role=status already means polite,
+		// and stating it twice can announce twice: the flip is
+		// visible, and this is how the rollback reaches anyone who
+		// cannot see it.
+		b.El("span", PartVisuallyHidden, Mark(Attrs(map[string]string{
+			"role": "status",
 		}), "data-ds-action-status")),
 	}
-	b := a.seams.Box(s)
 	return b.El("button", PartRoot, own, kids...)
 }
 
@@ -367,18 +368,18 @@ func renderAction(a action, s Skin) render.HTML {
 // the pair carries it: the runtime flips that attribute and nothing
 // else, so the server ships exactly the opposite pair and the first
 // paint already agrees with the state attribute above it.
-func actionSpan(s Skin, part Part, hook string, hidden bool, label string, icon render.HTML) render.HTML {
+func actionSpan(b Box, part Part, hook string, hidden bool, label string, icon render.HTML) render.HTML {
 	attrs := html.Attrs{hook: ""}
 	if hidden {
 		Mark(attrs, "hidden")
 	}
 	kids := make([]render.HTML, 0, 2)
 	if icon != "" {
-		kids = append(kids, El("span", s, PartIcon,
+		kids = append(kids, b.El("span", PartIcon,
 			Attrs(map[string]string{"aria-hidden": "true"}), icon))
 	}
 	kids = append(kids, render.Text(label))
-	return El("span", s, part, attrs, kids...)
+	return b.El("span", part, attrs, kids...)
 }
 
 func init() {

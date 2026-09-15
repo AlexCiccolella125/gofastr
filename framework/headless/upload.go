@@ -114,8 +114,10 @@ func FileUpload(p FileUploadProps, s Skin) render.HTML {
 		// Populated by the runtime as files are chosen, so the names
 		// are on screen as well as announced.
 		El("ul", s, PartDropList, Mark(Attrs(map[string]string{"role": "list"}), "data-ds-drop-list")),
+		// role=status already means polite; stating it twice can
+		// announce twice.
 		El("span", s, PartStatus, Mark(Attrs(map[string]string{
-			"role": "status", "aria-live": "polite",
+			"role": "status",
 		}), "data-ds-drop-status")),
 	)
 }

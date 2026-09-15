@@ -142,6 +142,26 @@ func DefaultWords() *Words {
 	return &w
 }
 
+// withDefaults returns w with every empty field filled from the
+// English defaults; w itself is left alone.
+func (w *Words) withDefaults() *Words {
+	out := DefaultWords()
+	src := reflect.ValueOf(w).Elem()
+	dst := reflect.ValueOf(out).Elem()
+	for i := 0; i < src.NumField(); i++ {
+		v := src.Field(i).String()
+		if v == "" {
+			continue
+		}
+		f := dst.Field(i)
+		if !f.CanSet() {
+			panic("headless: Words." + src.Type().Field(i).Name + " is not settable — every field of Words must be an exported string")
+		}
+		f.SetString(v)
+	}
+	return out
+}
+
 // ProbeWords returns a Words whose every field is its own name in
 // angle brackets — formats as the name plus their placeholders, so
 // `<RemoveLabelled env=prod>` renders where "Remove env=prod" would. A render against it shows exactly which words came
@@ -199,12 +219,15 @@ func placeholdersIn(s string) []string {
 // nil in production and W() behaves as if it did not exist.
 var wordsProbe *Words
 
-// W is how a component reaches its words: the caller's when the typed
-// layer resolved them from the request, the harness's probe when a
-// test is looking, and the English defaults otherwise.
+// W is how a component reaches its words: the caller's when a layer
+// above resolved them from the request, the harness's probe when a
+// test is looking, and the English defaults otherwise. A caller's
+// Words may be partial: every empty field falls back to its English
+// default, so a Words that sets one string does not silently unname
+// the reveal button.
 func (s Seams) W() *Words {
 	if s.Words != nil {
-		return s.Words
+		return s.Words.withDefaults()
 	}
 	if wordsProbe != nil {
 		return wordsProbe

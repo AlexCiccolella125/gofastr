@@ -527,6 +527,7 @@ func init() {
 	Register(Spec{
 		Name:  "Spacer",
 		Parts: []Part{PartRoot},
+		Hooks: []string{"data-ds-grow"},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{

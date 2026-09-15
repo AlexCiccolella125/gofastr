@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/DonaldMurillo/gofastr/core-ui/html"
+	"github.com/DonaldMurillo/gofastr/core-ui/urlsafe"
 	"github.com/DonaldMurillo/gofastr/core/render"
 )
 
@@ -116,6 +117,9 @@ func Tag(p TagProps, s Skin) render.HTML {
 			aria = fmt.Sprintf(p.Seams.W().RemoveLabelled, p.Label)
 		}
 		requireIsland("Tag with DismissHref", p.Island)
+		if urlsafe.CleanAnchor(p.DismissHref) == "" {
+			panic("headless: Tag DismissHref " + strconv.Quote(p.DismissHref) + " is not a URL the anchor policy allows")
+		}
 		dismiss := Attrs(map[string]string{
 			"href":       p.DismissHref,
 			"aria-label": aria,
@@ -241,6 +245,16 @@ func Pagination(p PaginationProps, s Skin) render.HTML {
 	}
 	if p.HrefPattern == "" {
 		panic("headless: Pagination requires HrefPattern")
+	}
+	// The page number is substituted as text, not formatted, so the
+	// token is the literal "%d": without it every anchor is the same
+	// URL and no page can be told from another. The pattern passes the
+	// anchor policy once, here, so no substituted href needs to.
+	if !strings.Contains(p.HrefPattern, "%d") {
+		panic("headless: Pagination HrefPattern " + strconv.Quote(p.HrefPattern) + " has no %d for the page number")
+	}
+	if urlsafe.CleanAnchor(p.HrefPattern) == "" {
+		panic("headless: Pagination HrefPattern " + strconv.Quote(p.HrefPattern) + " is not a URL the anchor policy allows")
 	}
 	if p.Pages < 1 {
 		panic("headless: Pagination requires Pages >= 1")

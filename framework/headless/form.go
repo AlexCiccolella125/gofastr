@@ -1,7 +1,10 @@
 package headless
 
 import (
+	"strconv"
+
 	"github.com/DonaldMurillo/gofastr/core-ui/html"
+	"github.com/DonaldMurillo/gofastr/core-ui/urlsafe"
 	"github.com/DonaldMurillo/gofastr/core/render"
 )
 
@@ -61,6 +64,12 @@ type FormProps struct {
 func Form(p FormProps, s Skin, fields ...render.HTML) render.HTML {
 	if p.Action == "" {
 		panic("headless: Form requires Action — with none the form posts to the page it is on, and a failed submit quietly renders the same page again")
+	}
+	// The same anchor policy framework/ui's Form applies, and the same
+	// posture as every other refusal here: a form whose action the
+	// policy rejects is a programming error, said at render.
+	if urlsafe.CleanAnchor(p.Action) == "" {
+		panic("headless: Form Action " + strconv.Quote(p.Action) + " is not a URL the anchor policy allows")
 	}
 	own := Merge(Safe(p.ExtraAttrs, "method", "action"), Attrs(map[string]string{
 		"id": p.ID, "action": p.Action, "aria-label": p.Label,

@@ -1,6 +1,8 @@
 package headless
 
 import (
+	"strconv"
+
 	"github.com/DonaldMurillo/gofastr/core-ui/html"
 	"github.com/DonaldMurillo/gofastr/core/render"
 )
@@ -55,7 +57,11 @@ func Card(p CardProps, s Skin, body ...render.HTML) render.HTML {
 	if p.Title != "" || p.Desc != "" || b.Filled(PartCardHeader) {
 		head := make([]render.HTML, 0, 2)
 		if p.Title != "" {
-			head = append(head, El(orDefault(p.TitleTag, "h3"), s, PartTitle, nil, render.Text(p.Title)))
+			tag := orDefault(p.TitleTag, "h3")
+			if len(tag) != 2 || tag[0] != 'h' || tag[1] < '1' || tag[1] > '6' {
+				panic("headless: Card TitleTag must be h1 to h6, not " + strconv.Quote(tag))
+			}
+			head = append(head, El(tag, s, PartTitle, nil, render.Text(p.Title)))
 		}
 		if p.Desc != "" {
 			head = append(head, El("p", s, PartDesc, nil, render.Text(p.Desc)))

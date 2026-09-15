@@ -54,6 +54,12 @@ func Choice(p ChoiceProps, s Skin) render.HTML {
 	if p.Type != "checkbox" && p.Type != "radio" {
 		panic("headless: Choice Type must be checkbox or radio, not " + strconv.Quote(p.Type) + " — any other type is a text input that breaks the group")
 	}
+	if p.Name == "" {
+		panic("headless: Choice requires Name — a control with no name submits nothing")
+	}
+	if p.Type == "radio" && p.Value == "" {
+		panic("headless: a radio Choice requires Value — without distinct values a group cannot tell its options apart")
+	}
 	input := Merge(Safe(p.Extra), html.Attrs{
 		"type": p.Type,
 		"name": p.Name,
@@ -101,6 +107,9 @@ func Switch(p SwitchProps, s Skin) render.HTML {
 	if p.Label == "" {
 		panic("headless: Switch requires Label — an on/off switch about nothing is a bug, not a variant")
 	}
+	if p.Name == "" {
+		panic("headless: Switch requires Name — a control with no name submits nothing")
+	}
 	input := Merge(Safe(p.Extra), html.Attrs{
 		"type": "checkbox",
 		"role": "switch",
@@ -134,6 +143,9 @@ type GroupProps struct {
 // real <fieldset>: that pair is the native group semantic, naming
 // every control inside without a single aria attribute.
 func Group(p GroupProps, s Skin, items ...render.HTML) render.HTML {
+	if p.Legend == "" {
+		panic("headless: Group requires Legend — a set of choices with no question above them is as broken as an unlabelled input")
+	}
 	attrs := Safe(p.Extra)
 	attrsSet(attrs, "id", p.ID)
 	kids := append([]render.HTML{

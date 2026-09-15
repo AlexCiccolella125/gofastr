@@ -53,7 +53,8 @@ both directions.
 - **Words** are the strings a component says: one typed struct, nil for
   English, for a layer above to resolve once per request from the
   framework's `i18nui` keys. A missing field is a compile error, not a
-  stray English word on a French page.
+  stray English word on a French page, and a partial value keeps the
+  English default for every field it leaves empty.
 
 Two more are not per part. A `Button` takes an **Action**, the
 framework's request contract, on itself; `ExtraAttrs` cannot carry one.
@@ -102,9 +103,14 @@ headless.Pagination(headless.PaginationProps{
 ```
 
 Where the change would otherwise be a route the Island is required:
-`Pagination`, `ToolbarSearch` and a `Tag` with a dismiss panic without
-one, so the link-only render cannot be built. On a `Form` it is
-optional, for a page that is the form.
+`Pagination`, `ToolbarSearch`, a `Tag` with a dismiss and an `Alert`
+with a dismiss panic without one, so the link-only render cannot be
+built. On a `Form` it is optional, for a page that is the form.
+
+Every href a component writes goes through the framework's anchor
+policy, `urlsafe.CleanAnchor`: a `Button` whose href is rejected
+renders the disabled-link posture, and a form action, a dismiss href
+or a pager pattern that is rejected is refused at render.
 
 The endpoint keeps the href's query, so the page and the island answer
 the same question. `data-fui-push-state` is rendered only for a GET

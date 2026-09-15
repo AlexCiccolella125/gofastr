@@ -3,6 +3,8 @@ package headless
 import (
 	"strings"
 	"testing"
+
+	"github.com/DonaldMurillo/gofastr/core-ui/html"
 )
 
 // refuse asserts that fn panics and that the panic names the missing
@@ -82,5 +84,66 @@ func TestChoiceRefusesAnUnknownType(t *testing.T) {
 func TestPaginationRefusesAnUnnamedNav(t *testing.T) {
 	refuse(t, "AriaLabel", func() {
 		Pagination(PaginationProps{Page: 1, Pages: 2, HrefPattern: "/x?p=%d", Island: fixtureIsland}, nil)
+	})
+}
+
+// The choice family's other required props: a control with no name
+// submits nothing; radios without distinct values all submit "on";
+// a fieldset with no legend names nothing inside it.
+func TestChoiceFamilyRefusesWhatCannotSubmitOrBeNamed(t *testing.T) {
+	refuse(t, "Name", func() { Choice(ChoiceProps{Type: "checkbox", Label: "L"}, nil) })
+	refuse(t, "Value", func() { Choice(ChoiceProps{Type: "radio", Name: "n", Label: "L"}, nil) })
+	refuse(t, "Name", func() { Switch(SwitchProps{Label: "L"}, nil) })
+	refuse(t, "Legend", func() { Group(GroupProps{}, nil) })
+}
+
+// A heading tag that is not h1 to h6 renders an unknown element, or a
+// void one that drops the title. Refused with the reason.
+func TestCardRefusesAnUnknownTitleTag(t *testing.T) {
+	refuse(t, "TitleTag", func() { Card(CardProps{Title: "T", TitleTag: "h33"}, nil) })
+	refuse(t, "TitleTag", func() { Card(CardProps{Title: "T", TitleTag: "input"}, nil) })
+}
+
+// Owned is a seam for numeric bounds and nothing else; a key that is
+// not min, max or step is refused rather than let past Safe.
+func TestInputOwnedIsForBoundsOnly(t *testing.T) {
+	refuse(t, "Owned", func() {
+		Input(InputProps{Name: "n", AriaLabel: "n", Owned: html.Attrs{"type": "text"}}, nil)
+	})
+	got := Input(InputProps{Name: "n", AriaLabel: "n", Owned: html.Attrs{"min": "1", "MAX": "9"}}, nil)
+	has(t, got, `min="1"`, "a bound was dropped")
+	has(t, got, `max="9"`, "a folded bound was dropped")
+}
+
+// A pager whose pattern has no %d renders every page at one URL.
+func TestPaginationRefusesAPatternWithoutThePage(t *testing.T) {
+	refuse(t, "%d", func() {
+		Pagination(PaginationProps{Page: 1, Pages: 2, HrefPattern: "/apps", AriaLabel: "Pages", Island: fixtureIsland}, nil)
+	})
+}
+
+// Every href a component writes goes through the framework's anchor
+// policy. A Button's rejected href renders the disabled-link posture;
+// a Form's action, a Tag's or an Alert's dismiss, and a pager's
+// pattern are refused at render.
+func TestHrefsGoThroughTheAnchorPolicy(t *testing.T) {
+	got := Button(ButtonProps{Label: "Go", Href: "javascript:alert(1)"}, nil)
+	hasNot(t, got, "href=", "a javascript: href reached the anchor")
+	has(t, got, `aria-disabled="true"`, "a rejected href did not render as a dead link")
+	refuse(t, "Action", func() { Form(FormProps{Action: "javascript:alert(1)"}, nil) })
+	refuse(t, "DismissHref", func() {
+		Tag(TagProps{Label: "x", DismissHref: "data:text/html,x", Island: fixtureIsland}, nil)
+	})
+	refuse(t, "DismissHref", func() {
+		Alert(AlertProps{Title: "T", DismissHref: "//evil/x", Island: fixtureIsland}, nil)
+	})
+	refuse(t, "HrefPattern", func() {
+		Pagination(PaginationProps{Page: 1, Pages: 2, HrefPattern: "javascript:%d", AriaLabel: "Pages", Island: fixtureIsland}, nil)
+	})
+	refuse(t, "data-fui-rpc", func() {
+		Button(ButtonProps{Label: "Go", Type: "button", Action: html.Attrs{"data-fui-rpc": "//evil/x"}}, nil)
+	})
+	refuse(t, "data-fui-rpc", func() {
+		Button(ButtonProps{Label: "Go", Type: "button", Action: html.Attrs{"data-fui-rpc": ""}}, nil)
 	})
 }

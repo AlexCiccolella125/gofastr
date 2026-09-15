@@ -224,3 +224,16 @@ func TestSafeRefusesFoldedAndPrivilegedKeys(t *testing.T) {
 	}
 	has(t, got, `data-testid="kept"`, "an ordinary attribute was dropped with the refused ones")
 }
+
+// Dismissing an alert is an in-page state change like removing a
+// filter: the × keeps its href for no script and carries the GET
+// contract beside it, and without an Island the render is refused.
+func TestAlertDismissIsAnIsland(t *testing.T) {
+	got := Alert(AlertProps{Title: "Deploy failed", DismissHref: "/apps?dismiss=1", Island: fixtureIsland}, nil)
+	has(t, got, `href="/apps?dismiss=1"`, "the dismiss lost its href")
+	has(t, got, `data-fui-rpc="/island/apps?dismiss=1" data-fui-rpc-method="GET" data-fui-rpc-signal="apps"`,
+		"the dismiss did not carry the GET contract with the href's query")
+	refuse(t, "Island", func() {
+		Alert(AlertProps{Title: "Deploy failed", DismissHref: "/apps?dismiss=1"}, nil)
+	})
+}

@@ -15,8 +15,8 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   Words, Island) are typed and sanitised; every component registers a
   `Spec` that drives the nil-skin sweep, the seam gates and two goldens.
   An in-page state change is an `Island` at render time (hard rule 1):
-  `Pagination`, `ToolbarSearch` and a dismissible `Tag` refuse the
-  link-only render. Ships the vocabulary, the harness and the basic
+  `Pagination`, `ToolbarSearch` and a dismissible `Tag` or `Alert`
+  refuse the link-only render; every href passes the anchor policy. Ships the vocabulary, the harness and the basic
   components; no skin or runtime module binds the hooks yet.
   `gofastr docs ui-headless`.
 

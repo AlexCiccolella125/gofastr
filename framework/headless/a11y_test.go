@@ -169,7 +169,7 @@ func TestAlertToneSurvivesWithoutColour(t *testing.T) {
 // "Dismiss" three times in a row tells a screen reader user which
 // nothing.
 func TestAlertDismissNamesWhatItDismisses(t *testing.T) {
-	got := Alert(AlertProps{Title: "Deploy failed", DismissHref: "/x"}, nil)
+	got := Alert(AlertProps{Title: "Deploy failed", DismissHref: "/x", Island: fixtureIsland}, nil)
 	has(t, got, `aria-label="Dismiss: Deploy failed"`, "the dismiss does not say what it closes")
 }
 
@@ -354,7 +354,8 @@ func TestUploadIsARealInputInALabel(t *testing.T) {
 // value is not read back and the names appear in silence.
 func TestUploadAnnouncesWhatWasChosen(t *testing.T) {
 	got := FileUpload(FileUploadProps{Name: "backup", ID: "up", Label: "Drag a backup here"}, nil)
-	has(t, got, `aria-live="polite"`, "chosen files are never announced")
+	has(t, got, `role="status"`, "chosen files are never announced")
+	hasNot(t, got, "aria-live", "the live-region policy is stated twice")
 	has(t, got, "data-ds-drop-list", "there is nowhere to show the chosen names")
 }
 
@@ -481,7 +482,7 @@ func TestAFailedActionHasSomewhereToSayItAndSomethingToSay(t *testing.T) {
 	got := OptimisticAction(OptimisticActionProps{
 		Endpoint: "/save", IdleLabel: "Save", SuccessLabel: "Saved"}, nil)
 	has(t, got, `role="status"`, "a failure has nowhere to be announced")
-	has(t, got, `aria-live="polite"`, "a rollback interrupts instead of waiting its turn")
+	hasNot(t, got, "aria-live", "role=status already means polite; stating it twice can announce twice")
 	has(t, got, `data-ds-action-status`, "the runtime has no hook to write the announcement into")
 	has(t, got, `data-ds-action-failed="Could not save. Try again."`,
 		"the default failure sentence is not on the root for the runtime to read")

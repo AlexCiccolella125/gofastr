@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/DonaldMurillo/gofastr/core-ui/html"
+	"github.com/DonaldMurillo/gofastr/core-ui/urlsafe"
 	"github.com/DonaldMurillo/gofastr/core/render"
 )
 
@@ -64,6 +65,12 @@ func actionAttrs(a html.Attrs) html.Attrs {
 	out := html.Attrs{}
 	for k, v := range a {
 		switch {
+		case k == "data-fui-rpc":
+			if v == "" {
+				panic("headless: Action carries an empty data-fui-rpc — a request with no endpoint")
+			}
+			checkSameOrigin("a Button Action", "data-fui-rpc", v)
+			out[k] = v
 		case k == "data-fui-rpc-signal":
 			checkSignalName(v)
 			out[k] = v
@@ -130,13 +137,20 @@ func Button(p ButtonProps, s Skin) render.HTML {
 	}
 
 	if p.Href != "" {
-		if p.Disabled {
+		// The href goes through the framework's one anchor policy:
+		// http(s), relative, fragment, mailto and tel pass; javascript:
+		// and data: do not, and neither does a protocol-relative or
+		// backslash spelling. A rejected href renders the same posture
+		// as a disabled link — named, visible, out of the tab order —
+		// rather than a link that runs something.
+		href := urlsafe.CleanAnchor(p.Href)
+		if p.Disabled || href == "" {
 			own["aria-disabled"] = "true"
 			own["tabindex"] = "-1"
 			own["role"] = "link"
 			return El("a", s, PartRoot, own, kids...)
 		}
-		own["href"] = p.Href
+		own["href"] = href
 		return El("a", s, PartRoot, own, kids...)
 	}
 	own["type"] = orDefault(p.Type, "button")

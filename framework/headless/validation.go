@@ -173,8 +173,16 @@ func Timeline(p TimelineProps, s Skin) render.HTML {
 
 		body := make([]render.HTML, 0, 4)
 		if e.When != "" {
-			timeAttrs := Attrs(map[string]string{"datetime": e.Machine})
-			body = append(body, El("time", s, PartTimelineTime, timeAttrs, render.Text(e.When)))
+			// <time> promises machine-readable content: with a datetime
+			// the text may say anything ("3 days ago"); without one the
+			// text itself must be a valid date or time, and relative
+			// words are not, so the element becomes a span.
+			if e.Machine != "" {
+				body = append(body, El("time", s, PartTimelineTime,
+					Attrs(map[string]string{"datetime": e.Machine}), render.Text(e.When)))
+			} else {
+				body = append(body, El("span", s, PartTimelineTime, nil, render.Text(e.When)))
+			}
 		}
 		body = append(body, El("p", s, PartTitle, nil, render.Text(e.Title)))
 		if e.Detail != "" {

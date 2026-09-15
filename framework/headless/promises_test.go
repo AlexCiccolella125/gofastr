@@ -88,3 +88,33 @@ func TestToolbarDoesNotClaimTheToolbarPattern(t *testing.T) {
 		Button(ButtonProps{Label: "New app"}, nil))
 	has(t, with, `role="toolbar"`, "a caller who ships the roving keyboard cannot add the role")
 }
+
+// Tone reaches the skin as the root's variant, the same lookup a
+// Button's variant uses, so a danger alert and an info alert can be
+// told apart by a stylesheet without the structure knowing what
+// either means.
+func TestAlertToneReachesTheSkin(t *testing.T) {
+	skin := Skin{PartRoot: "alert", "root--danger": "alert--danger"}
+	got := Alert(AlertProps{Title: "Deploy failed", Tone: "danger"}, skin)
+	has(t, got, `class="alert alert--danger"`, "the tone did not reach the root")
+	plain := Alert(AlertProps{Title: "Deploy failed"}, skin)
+	has(t, plain, `class="alert"`, "an alert with no tone lost its root class")
+}
+
+// A partial Words keeps every word it does not set: a caller that
+// translates one string must not unname the reveal button.
+func TestPartialWordsFallBackToEnglish(t *testing.T) {
+	got := Password(PasswordProps{Name: "token", Seams: Seams{Words: &Words{RevealShow: "Montrer"}}}, nil)
+	has(t, got, ">Montrer<", "the caller's word was not said")
+	has(t, got, `aria-label="Show password"`, "an unset word rendered as nothing")
+}
+
+// A relative date with no machine value is text, not a <time>: the
+// element promises machine-readable content it cannot keep.
+func TestTimelineRendersRelativeTextWithoutAMachineValueAsText(t *testing.T) {
+	got := Timeline(TimelineProps{Events: []Event{{Title: "Deployed", When: "3 days ago"}}}, nil)
+	hasNot(t, got, "<time", "a <time> with no datetime carries relative words")
+	has(t, got, ">3 days ago<", "the relative words were dropped")
+	dated := Timeline(TimelineProps{Events: []Event{{Title: "Deployed", When: "3 days ago", Machine: "2026-09-08T11:04:00Z"}}}, nil)
+	has(t, dated, `<time datetime="2026-09-08T11:04:00Z">3 days ago</time>`, "a dated event lost its <time>")
+}

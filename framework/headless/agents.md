@@ -50,16 +50,19 @@ English words, `spec_golden_words.txt` at probe words).
 
 - **A class to find an element from script.** The runtime binds to
   `data-ds-*` hooks only; a skin may rename every class.
-- **A link that changes in-page state.** `Pagination`, `ToolbarSearch`
-  and a `Tag` with a dismiss require an `Island` and refuse to render
-  without one; the same element keeps its href for no-script.
+- **A link that changes in-page state.** `Pagination`, `ToolbarSearch`,
+  a `Tag` with a dismiss and an `Alert` with a dismiss require an
+  `Island` and refuse to render without one; the same element keeps
+  its href for no-script. Every href goes through the framework's
+  anchor policy (`urlsafe.CleanAnchor`).
 - **A request through `ExtraAttrs`.** `Safe` drops every `data-fui-*`
   key. A request is `ButtonProps.Action`; a signal is a `Bind`; a
   region's refresh is an `Island`.
 - **An English string in a component.** Words live on `Words`, one typed
   field each, so a missing translation is a compile error rather than a
   stray word on a French page; `words_test.go` refuses English outside
-  the seam.
+  the seam. A partial `Words` is safe: every empty field falls back to
+  its English default.
 - **A golden update without reading it.** `GOFASTR_UPDATE_GOLDEN=1 go test`
   regenerates; every changed line is a change to what assistive
   technology is told.

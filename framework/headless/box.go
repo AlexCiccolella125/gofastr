@@ -153,12 +153,19 @@ func (b Box) El(tag string, p Part, own html.Attrs, children ...render.HTML) ren
 	}
 	merged := html.Attrs{}
 	extraClass := ""
+	// Ownership is compared folded: ROLE and role are one attribute to
+	// the browser, so a spelling the component does not use must not
+	// slip past the one it does.
+	ownedKeys := make(map[string]bool, len(own))
+	for k := range own {
+		ownedKeys[strings.ToLower(k)] = true
+	}
 	for k, v := range allowedOverride(b.Over[p]) {
-		if k == "class" {
+		if strings.ToLower(k) == "class" {
 			extraClass = v
 			continue
 		}
-		if _, owned := own[k]; owned {
+		if ownedKeys[strings.ToLower(k)] {
 			continue
 		}
 		merged[k] = v
