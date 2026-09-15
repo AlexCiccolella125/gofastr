@@ -415,12 +415,30 @@ func TestE2E_FormErrorsFocusTheSummaryOnce(t *testing.T) {
 	}, nil)
 	form := Form(FormProps{Action: "/x", Errors: summary}, nil,
 		Input(InputProps{Name: "name", ID: "f-name"}, nil))
-	b := startBehaviorServer(t, `<div id="host">`+string(form)+`</div>`)
+	// A second form with errors on the same page: only the first
+	// summary is focused, and the second is marked in the same pass,
+	// so a later scan does not hand it the focus from wherever the
+	// reader has moved to.
+	second := Form(FormProps{Action: "/y", ID: "second", Errors: ValidationSummary(ValidationSummaryProps{
+		Errors: []FieldError{{For: "g-name", Message: "Name is required."}},
+	}, nil)}, nil, Input(InputProps{Name: "name", ID: "g-name"}, nil))
+	b := startBehaviorServer(t, `<div id="host">`+string(form)+`</div>`+string(second))
 	ctx := behaviorPage(t, b)
 
 	const focused = `document.activeElement === document.querySelector('[role="alert"][tabindex="-1"]')`
 	if !pollTrue(ctx, focused) {
 		t.Fatal("the summary never received focus after load")
+	}
+	var later string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		document.activeElement.blur();
+		window.__gofastr._moduleScanners.headless(document);
+		return document.activeElement.tagName;
+	})()`, &later)); err != nil {
+		t.Fatalf("rescanning with a second form: %v", err)
+	}
+	if later != "BODY" {
+		t.Fatalf("a later scan moved focus to %s: the second form was left unmarked by the first pass", later)
 	}
 
 	// Replace the form: same errors, new element. Focus must move to
@@ -454,9 +472,12 @@ func TestE2E_FormErrorsFocusTheSummaryOnce(t *testing.T) {
 // count and the joined names, from the words the component rendered.
 func TestE2E_DropListsFilesAndSaysHowMany(t *testing.T) {
 	b := startBehaviorServer(t, string(FileUpload(FileUploadProps{
-		Name: "backup", ID: "backup",
-		Label: "Drag an archive here, or ", CTA: "choose a file",
+		Name: "backup", ID: "backup", Multiple: true,
+		Label: "Drag archives here, or ", CTA: "choose files",
 		Hint: ".tar.gz up to 2 GB", Accept: ".tar.gz",
+	}, nil))+string(FileUpload(FileUploadProps{
+		Name: "single", ID: "single",
+		Label: "Drag one archive here, or ", CTA: "choose a file",
 	}, nil)))
 	ctx := behaviorPage(t, b)
 	if !pollTrue(ctx, moduleLoadedExpr) {
@@ -538,6 +559,28 @@ func TestE2E_DropListsFilesAndSaysHowMany(t *testing.T) {
 	if want := "2 files selected: dropped.md, second.md."; state.Status != want {
 		t.Fatalf("after the drop the sentence was %q, want %q", state.Status, want)
 	}
+	// A zone whose input takes one file keeps one from a drop of two,
+	// the rule the picker already applies.
+	var single struct {
+		Count  int    `json:"count"`
+		Status string `json:"status"`
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		const dt = new DataTransfer();
+		dt.items.add(new File(['x'], 'first.md', {type: 'text/markdown'}));
+		dt.items.add(new File(['y'], 'extra.md', {type: 'text/markdown'}));
+		const root = document.querySelector('[data-hui-drop-input="single"]');
+		root.dispatchEvent(new DragEvent('drop', {bubbles: true, dataTransfer: dt}));
+		return {
+			count: document.getElementById('single').files.length,
+			status: root.querySelector('[data-hui-drop-status]').textContent,
+		};
+	})()`, &single)); err != nil {
+		t.Fatalf("dropping two files on a single-file zone: %v", err)
+	}
+	if single.Count != 1 || single.Status != "first.md selected." {
+		t.Fatalf("a single-file zone took %d files and said %q, want one file and its sentence", single.Count, single.Status)
+	}
 }
 
 // A rolled-back optimistic mutation announces its failure sentence in
@@ -579,6 +622,11 @@ func TestE2E_SystemDismissIsRemembered(t *testing.T) {
 	}, nil)
 	b := startBehaviorServer(t, `<div id="host">`+string(banner)+`</div>`)
 	ctx := behaviorPage(t, b)
+	// The dismiss handler exists only once the module has evaluated; a
+	// click before that lands on nothing.
+	if !pollTrue(ctx, moduleLoadedExpr) {
+		t.Fatal("the module never loaded")
+	}
 
 	if err := chromedp.Run(ctx, chromedp.Click(`[data-hui-system-dismiss]`, chromedp.ByQuery)); err != nil {
 		t.Fatalf("clicking dismiss: %v", err)

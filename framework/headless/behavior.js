@@ -154,13 +154,18 @@
   // who submitted again and failed again has to be told.
   function armFormErrors(root) {
     var forms = within(root, '[data-hui-form-errors]');
+    // Every form in the pass is marked, and only the first summary is
+    // focused: a form left unmarked because an earlier one took the
+    // focus would take it itself on the next pass, from wherever the
+    // reader had moved to by then.
+    var announced = false;
     for (var i = 0; i < forms.length; i++) {
       var form = forms[i];
       if (!once(form, 'errors')) continue;
       var summary = form.querySelector('[role="alert"][tabindex="-1"]');
-      if (summary) {
+      if (summary && !announced) {
         summary.focus();
-        break;
+        announced = true;
       }
     }
   }
@@ -229,7 +234,17 @@
       // A disabled input keeps its files: the drop is refused rather
       // than silently queued for a control that cannot submit.
       if (input.disabled || !e.dataTransfer) return;
-      input.files = e.dataTransfer.files;
+      // The picker lets one file through an input without multiple;
+      // a drop keeps the same rule rather than smuggling several past
+      // it. The first file is the one taken, as the picker would take
+      // the one chosen.
+      var dropped = e.dataTransfer.files;
+      if (!input.multiple && dropped.length > 1) {
+        var one = new DataTransfer();
+        one.items.add(dropped[0]);
+        dropped = one.files;
+      }
+      input.files = dropped;
       showFiles(root);
       input.dispatchEvent(new Event('change', { bubbles: true }));
     });
