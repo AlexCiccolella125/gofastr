@@ -8,6 +8,15 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
 ## [Unreleased]
 
 ### Added
+- **`registry.RegisterBehavior`**: behaviour registers like style. A
+  component's package embeds its runtime module beside the Go and
+  registers it with the markers the kernel scans for; the host serves
+  it at `/__gofastr/runtime/<name>.js` under the same minification and
+  cache rules as the embedded modules, lists it in the manifest, and
+  preloads it when a marker is in the page. The kernel reads registered
+  markers from one block beside the manifest and loads the module once
+  when one appears. No trigger vocabulary: the marker is the trigger.
+  Spec: `docs/spec-behavior-registry.md`.
 - **`framework/headless`**: the structure half of a design system.
   Components render tags, roles, labelling relationships, state
   attributes and `data-hui-*` hooks with no classes at a nil skin; a

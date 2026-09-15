@@ -431,6 +431,23 @@ its hidden form fields); those are documented by the owning plugin.
 
 ---
 
+## Registered behaviours
+
+A package can register its own runtime module beside its stylesheet:
+`registry.RegisterBehavior(name, js, registry.Markers("[data-x]"))`.
+The host serves it at `/__gofastr/runtime/<name>.js?v=<hash>` and lists
+it in the module manifest; its markers reach the kernel as
+`window.__gofastr_behaviors` (from `/__gofastr/manifest.js`) on live
+pages and as the inline `<script type="application/json"
+id="gofastr-behaviors">` block in static exports and the embed frame.
+The kernel scans those markers after its own table, so the module loads
+once when a marker appears, at boot, on DOM insertion, or after a
+client navigation, and `data-fui-prefetch="<name>"` warms it on hover.
+Registered markers use the package's own `data-` prefix; a
+`data-fui-*` marker is admitted only when the attribute is in the table
+above. Contract and rules: `core-ui/ARCHITECTURE.md` "Component
+behaviour".
+
 ## See also
 
 - [UI capability map](ui-capability-map.md) maps product architectures to this runtime boundary and its scaling semantics.
