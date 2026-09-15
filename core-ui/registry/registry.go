@@ -222,6 +222,7 @@ func reset() {
 	mu.Lock()
 	defer mu.Unlock()
 	entries = map[string]*Entry{}
+	behaviors = map[string]*BehaviorEntry{}
 }
 
 // testCleanup is the subset of *testing.T that IsolateForTest needs.
@@ -229,8 +230,9 @@ func reset() {
 // production package never imports testing.
 type testCleanup interface{ Cleanup(func()) }
 
-// IsolateForTest swaps the process-global registry for a fresh, empty
-// one and restores the original when the test finishes (t.Cleanup).
+// IsolateForTest swaps the process-global registry, styles and
+// behaviours both, for a fresh, empty one and restores the original
+// when the test finishes (t.Cleanup).
 //
 // Why it exists: the registry is process-global and a Go test binary
 // is one process per package, so any package linked into the binary
@@ -262,11 +264,21 @@ type testCleanup interface{ Cleanup(func()) }
 func IsolateForTest(t testCleanup) {
 	mu.Lock()
 	saved := entries
+	savedBehaviors := behaviors
+	savedReserved := reservedBehaviorNames
 	entries = map[string]*Entry{}
+	behaviors = map[string]*BehaviorEntry{}
+	// The reserved names go too, so a test can reach the merge-time
+	// refusal in core-ui/runtime that the reservation normally
+	// forestalls; a test that wants the registration-time refusal
+	// reserves the name itself.
+	reservedBehaviorNames = map[string]bool{}
 	mu.Unlock()
 	t.Cleanup(func() {
 		mu.Lock()
 		entries = saved
+		behaviors = savedBehaviors
+		reservedBehaviorNames = savedReserved
 		mu.Unlock()
 	})
 }

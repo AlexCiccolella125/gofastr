@@ -1,9 +1,11 @@
 package widget_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/DonaldMurillo/gofastr/core-ui/registry"
 	"github.com/DonaldMurillo/gofastr/core-ui/runtime"
 	"github.com/DonaldMurillo/gofastr/core-ui/widget"
 )
@@ -45,5 +47,30 @@ func TestRuntimeTagEmbedsModuleManifest(t *testing.T) {
 		if !strings.Contains(tag, hash) {
 			t.Errorf("manifest missing hash %q for module %q", hash, name)
 		}
+	}
+}
+
+// The behaviours block carries registered markers to the browser as an
+// inline JSON script; a marker value that spells a closing tag must not
+// end the block early, and must round-trip.
+func TestBehaviorsManifestEscapesClosingScript(t *testing.T) {
+	registry.IsolateForTest(t)
+	registry.RegisterBehavior("esc-probe", "(()=>{})()", registry.Markers(`[data-esc="</script><script>alert(1)</script>"]`))
+	script := widget.BehaviorsManifestScript()
+	if script == "" {
+		t.Fatal("no block for a registered behaviour")
+	}
+	inner := script[strings.IndexByte(script, '>')+1 : strings.LastIndex(script, "</script>")]
+	if strings.Contains(inner, "</") {
+		t.Fatalf("block contains a raw closing tag: %q", inner)
+	}
+	var got map[string]struct {
+		S []string `json:"s"`
+	}
+	if err := json.Unmarshal([]byte(inner), &got); err != nil {
+		t.Fatalf("escaped block JSON: %v", err)
+	}
+	if len(got["esc-probe"].S) != 1 || got["esc-probe"].S[0] != `[data-esc="</script><script>alert(1)</script>"]` {
+		t.Fatalf("marker did not round-trip: %v", got["esc-probe"].S)
 	}
 }

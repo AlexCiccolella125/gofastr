@@ -1,12 +1,20 @@
 package runtime
 
 import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/DonaldMurillo/gofastr/core-ui/registry"
 )
 
 // attrPattern matches a full data-fui-* attribute token. It is greedy on
@@ -606,4 +614,212 @@ func goEmittedAttrs(t *testing.T) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// A registered behaviour (registry.RegisterBehavior) owns its own
+// prefix; the seam admits a data-fui-* marker only when the attribute
+// is already in the documented table, so hard rule 5 holds through the
+// registry as well as through the sources. undocumentedBehaviorMarkers
+// is the check; the test exercises it against a fixture in isolation,
+// since this package's own test binary registers nothing.
+func undocumentedBehaviorMarkers(doc map[string]struct{}) []string {
+	var out []string
+	for _, e := range registry.Behaviors() {
+		for _, m := range e.Markers {
+			name := registry.MarkerSubstring(m)
+			if i := strings.Index(name, "="); i >= 0 {
+				name = name[:i]
+			}
+			if strings.HasPrefix(name, "data-fui-") {
+				if _, ok := doc[name]; !ok {
+					out = append(out, e.Name+": "+m)
+				}
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func TestRegisteredBehaviorDataFuiMarkersAreDocumented(t *testing.T) {
+	doc := documentedAttrs(t)
+	// The live registry first, whatever this binary links: nothing may
+	// carry an undocumented data-fui-* marker.
+	if got := undocumentedBehaviorMarkers(doc); len(got) != 0 {
+		t.Fatalf("registered behaviours carry undocumented data-fui-* markers (hard rule 5): %v", got)
+	}
+	registry.IsolateForTest(t)
+	registry.RegisterBehavior("own-prefix", "(()=>{})()", registry.Markers("[data-hui-probe]"))
+	registry.RegisterBehavior("documented", "(()=>{})()", registry.Markers("[data-fui-rpc]"))
+	if got := undocumentedBehaviorMarkers(doc); len(got) != 0 {
+		t.Fatalf("an own-prefix marker and a documented data-fui-* marker were reported: %v", got)
+	}
+	registry.RegisterBehavior("undocumented", "(()=>{})()", registry.Markers("[data-fui-not-in-the-table-probe]"))
+	got := undocumentedBehaviorMarkers(doc)
+	if len(got) != 1 || !strings.HasPrefix(got[0], "undocumented:") {
+		t.Fatalf("the undocumented data-fui-* marker was not reported: %v", got)
+	}
+}
+
+// markerSelectorsInSource returns every selector literal passed to
+// core-ui/registry's Markers in one Go file, and every argument that
+// is not a string literal. It parses the file (go/parser, no type
+// information) and binds the call through the file's own import of
+// the registry package, so an alias or a dot import is seen and a
+// same-named function from another package is not.
+//
+// A non-literal argument (a constant, a variable, a call) cannot be
+// read here, and the gate refuses it: markers are declared as
+// literals so the tree scan can read them, the same reason the
+// attribute table is prose and not code.
+const registryImportPath = "github.com/DonaldMurillo/gofastr/core-ui/registry"
+
+func markerSelectorsInSource(src string) (selectors, nonLiteral []string) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", src, 0)
+	if err != nil {
+		return nil, []string{"unparseable source: " + err.Error()}
+	}
+	local := ""
+	for _, imp := range f.Imports {
+		if path, err := strconv.Unquote(imp.Path.Value); err == nil && path == registryImportPath {
+			local = "registry"
+			if imp.Name != nil {
+				local = imp.Name.Name
+			}
+		}
+	}
+	if local == "" || local == "_" {
+		return nil, nil
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		isMarkers := false
+		switch fn := call.Fun.(type) {
+		case *ast.SelectorExpr:
+			if id, ok := fn.X.(*ast.Ident); ok && id.Name == local && fn.Sel.Name == "Markers" {
+				isMarkers = true
+			}
+		case *ast.Ident:
+			if local == "." && fn.Name == "Markers" {
+				isMarkers = true
+			}
+		}
+		if !isMarkers {
+			return true
+		}
+		for _, a := range call.Args {
+			lit, ok := a.(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				nonLiteral = append(nonLiteral, types.ExprString(a))
+				continue
+			}
+			if s, err := strconv.Unquote(lit.Value); err == nil {
+				selectors = append(selectors, s)
+			}
+		}
+		return true
+	})
+	return selectors, nonLiteral
+}
+
+// undocumentedDataFuiMarkers reports the data-fui-* attributes among
+// the selectors that are not in the documented table.
+func undocumentedDataFuiMarkers(selectors []string, doc map[string]struct{}) []string {
+	var out []string
+	for _, sel := range selectors {
+		name := registry.MarkerSubstring(sel)
+		if i := strings.Index(name, "="); i >= 0 {
+			name = name[:i]
+		}
+		if strings.HasPrefix(name, "data-fui-") {
+			if _, ok := doc[name]; !ok {
+				out = append(out, sel)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TestMarkersInTheTreeUseDocumentedDataFuiAttrs is the hard-rule-5
+// gate for the behaviour seam that does not depend on what a test
+// binary links: it reads every registry.Markers(...) call in the
+// module's Go source (framework/ui and the hosts sit above this
+// package and can never be linked into its test binary), and refuses
+// a data-fui-* marker whose attribute is not in the documented table.
+// A behaviour's own prefix is never in question.
+func TestMarkersInTheTreeUseDocumentedDataFuiAttrs(t *testing.T) {
+	doc := documentedAttrs(t)
+	root := filepath.Join("..", "..")
+	var selectors, nonLiteral []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "dist", "node_modules", "vendor", "tmp", "worktrees":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		raw, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return rerr
+		}
+		if !strings.Contains(string(raw), registryImportPath) {
+			return nil
+		}
+		sel, non := markerSelectorsInSource(string(raw))
+		selectors = append(selectors, sel...)
+		for _, n := range non {
+			nonLiteral = append(nonLiteral, path+": "+n)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selectors) == 0 {
+		t.Fatal("no Markers call found in the tree — the site's behavior_ping.go registers one, so the scan is broken")
+	}
+	if len(nonLiteral) != 0 {
+		t.Fatalf("registry.Markers called with arguments that are not string literals, which this gate cannot read; declare markers as literals:\n  %s", strings.Join(nonLiteral, "\n  "))
+	}
+	if got := undocumentedDataFuiMarkers(selectors, doc); len(got) != 0 {
+		t.Fatalf("registered behaviours in the tree carry data-fui-* markers not in core-ui/ARCHITECTURE.md's table (hard rule 5): %v", got)
+	}
+	// The scan itself, on fixtures: the plain import, an alias, a dot
+	// import, a same-named function from another package (ignored), a
+	// constant argument (refused as unreadable), and the documented
+	// versus undocumented data-fui-* markers.
+	const head = "package p\nimport (\n\t%s \"" + registryImportPath + "\"\n\tother \"example.com/other\"\n)\nconst k = \"[data-fui-k]\"\n"
+	cases := []struct {
+		name, src           string
+		wantSel, wantNonLit int
+	}{
+		{"plain", fmt.Sprintf(head, "registry") + "var b = registry.RegisterBehavior(\"x\", js, registry.Markers(\"[data-hui-probe]\", `[data-fui-rpc]`, \"[data-fui-not-in-the-table-probe]\"))", 3, 0},
+		{"alias", fmt.Sprintf(head, "reg") + "var b = reg.RegisterBehavior(\"x\", js, reg.Markers(\"[data-hui-probe]\"))", 1, 0},
+		{"dot", fmt.Sprintf(head, ".") + "var b = RegisterBehavior(\"x\", js, Markers(\"[data-hui-probe]\"))", 1, 0},
+		{"other package", fmt.Sprintf(head, "registry") + "var b = other.Markers(\"[data-fui-not-ours]\")", 0, 0},
+		{"constant", fmt.Sprintf(head, "registry") + "var b = registry.RegisterBehavior(\"x\", js, registry.Markers(k, \"[data-hui-probe]\"))", 1, 1},
+	}
+	for _, c := range cases {
+		sel, non := markerSelectorsInSource(c.src)
+		if len(sel) != c.wantSel || len(non) != c.wantNonLit {
+			t.Errorf("%s: selectors %v nonLiteral %v, want %d and %d", c.name, sel, non, c.wantSel, c.wantNonLit)
+		}
+	}
+	sel, _ := markerSelectorsInSource(cases[0].src)
+	got := undocumentedDataFuiMarkers(sel, doc)
+	if len(got) != 1 || got[0] != "[data-fui-not-in-the-table-probe]" {
+		t.Fatalf("the check missed the undocumented marker or flagged a documented one: %v", got)
+	}
 }

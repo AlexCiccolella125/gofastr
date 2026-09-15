@@ -8,6 +8,15 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
 ## [Unreleased]
 
 ### Added
+- **`registry.RegisterBehavior`**: behaviour registers like style. A
+  component's package embeds its runtime module beside the Go and
+  registers it with the markers the kernel scans for; the host serves
+  it at `/__gofastr/runtime/<name>.js` under the same minification and
+  cache rules as the embedded modules, lists it in the manifest, and
+  preloads it when a marker is in the page. The kernel reads registered
+  markers from one block beside the manifest and loads the module once
+  when one appears. No trigger vocabulary: the marker is the trigger.
+  Spec: `docs/spec-behavior-registry.md`.
 - **`framework/headless`**: the structure half of a design system.
   Components render tags, roles, labelling relationships, state
   attributes and `data-hui-*` hooks with no classes at a nil skin; a
@@ -72,6 +81,12 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   error text is byte-identical. The ecommerce example was regenerated;
   meridian's generated files predate the current templates and carry
   hand edits, so they were left alone.
+
+### Fixed
+- **`framework/headless`**: `Safe` and the override sanitiser store
+  attribute names folded, as the browser reads them. Stored as written, a
+  caller's `NAME` sorted ahead of the component's `name` and the browser
+  kept the caller's value; one key under two spellings is now refused.
 
 ## [0.85.0] - 2026-09-08
 

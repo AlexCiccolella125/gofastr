@@ -55,28 +55,11 @@ func RuntimeHash() string { return runtimeHash() }
 // `Cache-Control: public, max-age=31536000, immutable` so the browser
 // caches it forever and a new build (different hash → different URL)
 // busts cleanly.
-var (
-	moduleHashesOnce sync.Once
-	moduleHashes     = map[string]string{}
-)
-
 // RuntimeModuleHash returns the content-addressed hash for a split
-// runtime module. Used by client-side preload tags + by the loader
-// to construct `?v=<hash>` URLs. Empty string if the module isn't
-// embedded.
-func RuntimeModuleHash(name string) string {
-	moduleHashesOnce.Do(func() {
-		for _, n := range runtime.ModuleNames() {
-			src, ok := runtime.Module(n)
-			if !ok {
-				continue
-			}
-			sum := sha256.Sum256([]byte(src))
-			moduleHashes[n] = hex.EncodeToString(sum[:8])
-		}
-	})
-	return moduleHashes[name]
-}
+// runtime module, embedded or registered. Used by client-side preload
+// tags + by the loader to construct `?v=<hash>` URLs. Empty string if
+// the module is unknown.
+func RuntimeModuleHash(name string) string { return runtime.ModuleHash(name) }
 
 // RuntimeModuleManifestJSON returns the raw JSON manifest mapping every
 // split runtime module to its content-addressed hash, nil when no
@@ -115,7 +98,23 @@ func RuntimeModuleManifestScript() string {
 			escapeJSONForScript(buf) +
 			`</script>`
 	}
-	return script + ComputeManifestScript()
+	return script + BehaviorsManifestScript() + ComputeManifestScript()
+}
+
+// BehaviorsManifestScript emits the inert JSON block the kernel reads
+// to learn registered behaviours' markers (registry.RegisterBehavior):
+// {"<name>": {"s": ["[data-x]"], "i": true}}. Returns "" when nothing
+// is registered. Live pages get the same data as
+// window.__gofastr_behaviors from /__gofastr/manifest.js; this block is
+// for exports and the embed frame, which must be self-contained.
+func BehaviorsManifestScript() string {
+	buf := runtime.BehaviorsJSON()
+	if buf == nil {
+		return ""
+	}
+	return `<script type="application/json" id="gofastr-behaviors">` +
+		escapeJSONForScript(buf) +
+		`</script>`
 }
 
 // ComputeManifestScript emits an inert JSON manifest mapping registered

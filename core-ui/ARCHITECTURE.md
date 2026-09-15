@@ -454,7 +454,10 @@ Ownership, not reference, decides the map: an attribute belongs to the
 fragment or module whose code implements its handler. The ~55 attributes
 that appear in BOTH `runtime.js` and a `src/*.js` module are core's
 load/dispatch glue (`_scanForModules`, `dispatchRPC`'s widget-scoping
-reads), not ownership. An attribute owned by a `src/<name>.js` module maps
+reads), not ownership. Registered behaviours (`registry.RegisterBehavior`,
+"Component behaviour" below) are outside this map on purpose: they own
+their own prefix, and the scanner learns their markers from the
+behaviours block rather than from the table. An attribute owned by a `src/<name>.js` module maps
 to that module. `data-fui-compute` is the one overlap to note: it is owned
 by the `compute` core fragment (which step 2 extracts from today's
 `src/compute.js`), not by the module of the same name.
@@ -1418,6 +1421,47 @@ matching `data-fui-comp` value its CSS scopes to, is the package name
 verbatim (`accordion`, `breadcrumbs`, `multiselect`, `sortablelist`), not an
 `ui-`-prefixed alias. The prefix matches no convention in the repo and only
 hides which package owns the stylesheet.
+
+### Component behaviour: the same seam
+
+A component's behaviour registers the way its stylesheet does. The
+package that renders the markup embeds its module beside the Go and
+registers it with its markers:
+
+```go
+// framework/headless/behavior.go
+//go:embed runtime.js
+var runtimeJS string
+
+var Behavior = registry.RegisterBehavior("headless", runtimeJS,
+    registry.Markers("[data-hui-reveal]", "[data-hui-when]"))
+```
+
+From the host down a registered behaviour is a runtime module like the
+embedded ones: served at `/__gofastr/runtime/<name>.js?v=<hash>`,
+minified under the same gate, listed in the module manifest, preloaded
+when its marker is in the rendered page. The kernel learns registered
+markers from one block beside the manifest (`window.__gofastr_behaviors`
+from `manifest.js` on live pages, the inline `#gofastr-behaviors` block
+in exports and the embed frame) and scans them after its own table.
+The marker is the one trigger; when it appears, at boot, on DOM
+insertion or after a client navigation, the module loads once and
+attaches. `registry.LoadIdle()` defers the load to idle time.
+
+The rules, each a panic at registration: the name is a URL segment
+(`^[a-z][a-z0-9-]{0,63}$`) and not an embedded module's; every marker
+is an attribute selector on a `data-` attribute (`[data-x]` or
+`[data-x="v"]`); at least one marker; an identical re-registration is
+a no-op and a different one panics. A `data-fui-*` marker is admitted
+only when the attribute is already in the table above (hard rule 5
+through the seam, `TestRegisteredBehaviorDataFuiMarkersAreDocumented`).
+
+The module keeps the contract every `src/*.js` module keeps: an IIFE
+that binds only its own markers by attribute, sets
+`window.__gofastr.loadedModules[<name>] = true` when attached, and
+registers `window.__gofastr._moduleScanners[<name>] = fn(root)`,
+idempotent, so the kernel can hand it inserted DOM and the document
+after a navigation. Design and sequence: `docs/spec-behavior-registry.md`.
 
 ### What about widgets?
 

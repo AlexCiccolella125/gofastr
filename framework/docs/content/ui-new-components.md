@@ -467,6 +467,17 @@ helpful pre-flight read for human reviewers.
    `data-fui-open` + `data-fui-deeplink` + signal-binding already
    covers the case. Lightbox and NotificationBell each ship without
    a runtime module by composing existing primitives.
+9. **Behaviour registers like style**: when a module is warranted, it
+   lives in your package, embedded beside the Go, and registers with
+   its markers: `registry.RegisterBehavior("<name>", js,
+   registry.Markers("[data-<prefix>-x]"))`. The host serves it at
+   `/__gofastr/runtime/<name>.js`, the kernel scans the markers, and
+   the module loads once when one appears. Keep the module contract
+   (`window.__gofastr.loadedModules[name] = true` on attach, a scanner
+   under `window.__gofastr._moduleScanners[name]`), bind by attribute
+   only, and use your own `data-` prefix: a `data-fui-*` marker is
+   admitted only when the attribute is already documented. See
+   `core-ui/ARCHITECTURE.md` "Component behaviour".
 
 ---
 
