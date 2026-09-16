@@ -36,7 +36,7 @@ type CardProps struct {
 	ID         string
 	ExtraAttrs html.Attrs
 
-	// Seams. The header is the one fillable part, and the rule it
+	// Parts. The header is the one fillable part, and the rule it
 	// comes from is worth stating: a slot exists only where the
 	// component COMPOSES something a prop cannot express. A card's
 	// header is built from a title string and a description string,
@@ -45,14 +45,17 @@ type CardProps struct {
 	// a slot there would be a second way to do one thing — which is
 	// worse than none, because half the call sites will use each.
 	//
-	// Overrides are the opposite: they apply to every part, on every
+	// Attrs are the opposite: they apply to every part, on every
 	// component, because adding an attribute cannot break a structure.
-	Seams
+	Parts Parts
+	// Strings are the strings this component says. Nil means the English
+	// defaults; a layer above sets them from the request's language.
+	Strings *Strings
 }
 
 // Card renders a card around its body.
 func Card(p CardProps, s Skin, body ...render.HTML) render.HTML {
-	b := p.Seams.Box(s)
+	b := p.Parts.Box(s)
 	kids := make([]render.HTML, 0, 3)
 	if p.Title != "" || p.Desc != "" || b.Filled(PartCardHeader) {
 		head := make([]render.HTML, 0, 2)
@@ -79,10 +82,10 @@ func Card(p CardProps, s Skin, body ...render.HTML) render.HTML {
 func init() {
 	Register(Spec{
 		Name:     "Card",
-		Parts:    []Part{PartRoot, PartTitle, PartDesc, PartCardHeader, PartCardBody, PartFooter},
+		Anatomy:  []Part{PartRoot, PartTitle, PartDesc, PartCardHeader, PartCardBody, PartFooter},
 		Fillable: []Part{PartCardHeader},
-		WithSeams: func(s Skin, seams Seams) render.HTML {
-			return Card(CardProps{Title: "Deployments", Seams: seams}, s, render.Text("body"))
+		WithParts: func(s Skin, parts Parts) render.HTML {
+			return Card(CardProps{Title: "Deployments", Parts: parts}, s, render.Text("body"))
 		},
 		Cases: func(k Kit) []Case {
 			s := k.Skin

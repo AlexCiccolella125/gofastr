@@ -244,10 +244,13 @@ type PasswordProps struct {
 	Extra       html.Attrs
 	DescribedBy string
 
-	// Seams: overrides and binds on the shell, the input and the
-	// reveal button. Words ride here too (the reveal button's two
+	// Parts: attrs and binds on the shell, the input and the
+	// reveal button. Strings carry the reveal button's two
 	// names).
-	Seams
+	Parts Parts
+	// Strings are the strings this component says. Nil means the English
+	// defaults; a layer above sets them from the request's language.
+	Strings *Strings
 }
 
 // Password renders the affix shell: a div carrying the runtime's
@@ -261,7 +264,7 @@ type PasswordProps struct {
 // Nothing is wired on purpose: no inline script, no dead onclick, and
 // no pretending it works before it does.
 func Password(p PasswordProps, s Skin) render.HTML {
-	b := p.Seams.Box(s)
+	b := p.Parts.Box(s)
 	if p.Name == "" {
 		panic("headless: Password requires Name — a control with no name submits nothing")
 	}
@@ -288,11 +291,11 @@ func Password(p PasswordProps, s Skin) render.HTML {
 		"type":                "button",
 		"data-hui-reveal":     "",
 		"aria-pressed":        "false",
-		"aria-label":          p.Seams.W().ShowPassword,
-		"data-hui-show-label": p.Seams.W().ShowPassword,
-		"data-hui-hide-label": p.Seams.W().HidePassword,
-		"data-hui-show-text":  p.Seams.W().RevealShow,
-		"data-hui-hide-text":  p.Seams.W().RevealHide,
+		"aria-label":          p.Strings.Resolve().ShowPassword,
+		"data-hui-show-label": p.Strings.Resolve().ShowPassword,
+		"data-hui-hide-label": p.Strings.Resolve().HidePassword,
+		"data-hui-show-text":  p.Strings.Resolve().RevealShow,
+		"data-hui-hide-text":  p.Strings.Resolve().RevealHide,
 	}
 	Flag(reveal, "disabled", p.Disabled)
 
@@ -305,7 +308,7 @@ func Password(p PasswordProps, s Skin) render.HTML {
 
 	return b.El("div", PartRoot, shell,
 		b.El("input", PartControl, input),
-		b.El("button", PartAffixButton, reveal, render.Text(p.Seams.W().RevealShow)),
+		b.El("button", PartAffixButton, reveal, render.Text(p.Strings.Resolve().RevealShow)),
 	)
 }
 
@@ -323,9 +326,12 @@ type ColorProps struct {
 	Extra       html.Attrs
 	DescribedBy string
 
-	// Seams: overrides and binds on the shell, the hex input and the
-	// swatch. Words ride here too (the swatch's name).
-	Seams
+	// Parts: attrs and binds on the shell, the hex input and the
+	// swatch. Strings carry the swatch's name.
+	Parts Parts
+	// Strings are the strings this component says. Nil means the English
+	// defaults; a layer above sets them from the request's language.
+	Strings *Strings
 }
 
 // Color renders the colour control as an affix shell: the native
@@ -340,7 +346,7 @@ type ColorProps struct {
 // type=color always has a value; a required field that cannot bite
 // would be a lie.
 func Color(p ColorProps, s Skin) render.HTML {
-	b := p.Seams.Box(s)
+	b := p.Parts.Box(s)
 	if p.Name == "" {
 		panic("headless: Color requires Name — the hex field is what submits, and without a name it sends nothing")
 	}
@@ -366,7 +372,7 @@ func Color(p ColorProps, s Skin) render.HTML {
 		"type":                  "color",
 		"value":                 value,
 		"tabindex":              "-1",
-		"aria-label":            fmt.Sprintf(p.Seams.W().PickColor, p.Name),
+		"aria-label":            fmt.Sprintf(p.Strings.Resolve().PickColor, p.Name),
 	}
 	if p.ID != "" {
 		swatch["id"] = p.ID + "-picker"
@@ -427,8 +433,8 @@ func isHexColor(s string) bool {
 
 func init() {
 	Register(Spec{
-		Name:  "Input",
-		Parts: []Part{PartRoot},
+		Name:    "Input",
+		Anatomy: []Part{PartRoot},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			// The hint and the error are rendered beside the control
@@ -455,8 +461,8 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "Textarea",
-		Parts: []Part{PartRoot},
+		Name:    "Textarea",
+		Anatomy: []Part{PartRoot},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
@@ -468,8 +474,8 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "Select",
-		Parts: []Part{PartRoot, PartOption},
+		Name:    "Select",
+		Anatomy: []Part{PartRoot, PartOption},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
@@ -484,12 +490,12 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "Password",
-		Parts: []Part{PartRoot, PartControl, PartAffixButton},
+		Name:    "Password",
+		Anatomy: []Part{PartRoot, PartControl, PartAffixButton},
 		Hooks: []string{"data-hui-affix", "data-hui-affix-input", "data-hui-reveal",
 			"data-hui-show-label", "data-hui-hide-label", "data-hui-show-text", "data-hui-hide-text"},
-		WithSeams: func(s Skin, seams Seams) render.HTML {
-			return Password(PasswordProps{Name: "token", ID: "token", Seams: seams}, s)
+		WithParts: func(s Skin, parts Parts) render.HTML {
+			return Password(PasswordProps{Name: "token", ID: "token", Parts: parts}, s)
 		},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
@@ -505,11 +511,11 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "Color",
-		Parts: []Part{PartRoot, PartControl, PartAffixSwatch},
-		Hooks: []string{"data-hui-affix", "data-hui-color", "data-hui-affix-input", "data-hui-affix-swatch"},
-		WithSeams: func(s Skin, seams Seams) render.HTML {
-			return Color(ColorProps{Name: "accent", ID: "accent", Value: "#10b981", Seams: seams}, s)
+		Name:    "Color",
+		Anatomy: []Part{PartRoot, PartControl, PartAffixSwatch},
+		Hooks:   []string{"data-hui-affix", "data-hui-color", "data-hui-affix-input", "data-hui-affix-swatch"},
+		WithParts: func(s Skin, parts Parts) render.HTML {
+			return Color(ColorProps{Name: "accent", ID: "accent", Value: "#10b981", Parts: parts}, s)
 		},
 		Cases: func(k Kit) []Case {
 			s := k.Skin

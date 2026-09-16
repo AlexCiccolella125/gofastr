@@ -118,8 +118,8 @@ func Skeleton(p SkeletonProps, s Skin) render.HTML {
 
 func init() {
 	Register(Spec{
-		Name:  "Spinner",
-		Parts: []Part{PartRoot, PartSpinnerRing, PartVisuallyHidden},
+		Name:    "Spinner",
+		Anatomy: []Part{PartRoot, PartSpinnerRing, PartVisuallyHidden},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
@@ -131,9 +131,9 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "Skeleton",
-		Parts: []Part{PartRoot, PartSkeleton, PartVisuallyHidden},
-		Hooks: []string{"data-hui-lines", "data-hui-skeleton-last"},
+		Name:    "Skeleton",
+		Anatomy: []Part{PartRoot, PartSkeleton, PartVisuallyHidden},
+		Hooks:   []string{"data-hui-lines", "data-hui-skeleton-last"},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{

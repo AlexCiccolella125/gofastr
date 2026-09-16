@@ -156,8 +156,8 @@ func Group(p GroupProps, s Skin, items ...render.HTML) render.HTML {
 
 func init() {
 	Register(Spec{
-		Name:  "Choice",
-		Parts: []Part{PartRoot, PartControl, PartText, PartHint},
+		Name:    "Choice",
+		Anatomy: []Part{PartRoot, PartControl, PartText, PartHint},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
@@ -174,8 +174,8 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "Switch",
-		Parts: []Part{PartRoot, PartControl, PartText},
+		Name:    "Switch",
+		Anatomy: []Part{PartRoot, PartControl, PartText},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
@@ -187,8 +187,8 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "Group",
-		Parts: []Part{PartRoot, PartLabel},
+		Name:    "Group",
+		Anatomy: []Part{PartRoot, PartLabel},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{

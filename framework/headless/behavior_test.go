@@ -1,0 +1,280 @@
+package headless
+
+// The behaviour module gates. The registration and the module are two
+// halves of one contract, and each gate below catches the way one half
+// drifts from the other: a marker nothing declares, a hook nothing
+// binds, a skin-only list that outlived its hooks, a sentence said in
+// a language the caller did not choose, and a kernel contract left
+// half-kept. The gates read the module's source rather than executing
+// it, so they hold everywhere the package's tests run, browser or not.
+
+import (
+	"regexp"
+	"sort"
+	"strings"
+	"testing"
+
+	uiregistry "github.com/DonaldMurillo/gofastr/core-ui/registry"
+	"github.com/DonaldMurillo/gofastr/core-ui/runtime"
+)
+
+// jsWithoutComments strips the // and /* */ comments from the module's
+// source, so a name mentioned only in prose cannot count as bound and
+// a sentence in a comment cannot count as said. It is a blunt
+// instrument on purpose: the file it reads is this package's own,
+// carries no URL and no string with a comment marker inside it, and a
+// future gate failing loudly on one is cheaper than a JavaScript
+// parser that silently passes.
+var jsBlockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
+var jsLineComment = regexp.MustCompile(`//[^\n]*`)
+
+func jsWithoutComments() string {
+	return jsLineComment.ReplaceAllString(jsBlockComment.ReplaceAllString(behaviorJS, " "), " ")
+}
+
+// moduleHook matches a data-hui-* name written out in the source (a
+// selector, an attribute string); datasetHook matches the camel-case
+// spelling a dataset access reads the same attribute by.
+var moduleHook = regexp.MustCompile(`data-hui-[a-z0-9-]+`)
+var datasetHook = regexp.MustCompile(`dataset\.(hui[A-Za-z0-9]*)`)
+
+// kebabHook maps a dataset property to its attribute: huiWhenValue
+// back to data-hui-when-value.
+func kebabHook(camel string) string {
+	var b strings.Builder
+	b.WriteString("data-hui")
+	for _, r := range strings.TrimPrefix(camel, "hui") {
+		if r >= 'A' && r <= 'Z' {
+			b.WriteByte('-')
+			b.WriteRune(r + ('a' - 'A'))
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// camelHook is kebabHook backwards: data-hui-when-off to huiWhenOff.
+func camelHook(name string) string {
+	var b strings.Builder
+	b.WriteString("hui")
+	for _, seg := range strings.Split(strings.TrimPrefix(name, "data-hui-"), "-") {
+		if seg == "" {
+			continue
+		}
+		b.WriteString(strings.ToUpper(seg[:1]))
+		b.WriteString(seg[1:])
+	}
+	return b.String()
+}
+
+// moduleBoundHooks is every data-hui-* name the module binds, in
+// either spelling.
+func moduleBoundHooks(src string) map[string]bool {
+	bound := map[string]bool{}
+	for _, m := range moduleHook.FindAllString(src, -1) {
+		bound[m] = true
+	}
+	for _, m := range datasetHook.FindAllStringSubmatch(src, -1) {
+		bound[kebabHook(m[1])] = true
+	}
+	return bound
+}
+
+// declaredHooks is every hook every Spec declares.
+func declaredHooks() map[string]bool {
+	out := map[string]bool{}
+	for _, sp := range Specs() {
+		for _, h := range sp.Hooks {
+			out[h] = true
+		}
+	}
+	return out
+}
+
+// runtimeOwned reports whether the script WRITES this attribute as
+// well as reading it. Detected rather than listed, because a list of
+// exceptions is a list that outlives its reasons: a write is a
+// setAttribute or removeAttribute of the name, or the dataset property
+// assigned or deleted.
+func runtimeOwned(src, name string) bool {
+	q := regexp.QuoteMeta(name)
+	if regexp.MustCompile(`(?:set|remove)Attribute\(\s*['"]` + q + `['"]`).MatchString(src) {
+		return true
+	}
+	camel := camelHook(name)
+	if regexp.MustCompile(`dataset\.` + camel + `\s*=[^=]`).MatchString(src) {
+		return true
+	}
+	return regexp.MustCompile(`delete\s+[^;]*dataset\.` + camel + `\b`).MatchString(src)
+}
+
+// TestBehaviorIsRegisteredWithItsMarkers catches a registration that
+// drifted from the markers it claims: a marker dropped here is a page
+// whose controls are dead DOM, because the module never loads, and a
+// marker for a hook no Spec declares is the kernel fetching a module
+// for markup this package cannot render.
+func TestBehaviorIsRegisteredWithItsMarkers(t *testing.T) {
+	e, ok := uiregistry.LookupBehavior(BehaviorName)
+	if !ok {
+		t.Fatalf("%q is not registered: every data-hui-* hook this package renders would be bound to nothing", BehaviorName)
+	}
+	if len(e.Markers) != len(behaviorMarkers) {
+		t.Fatalf("%q registers %d markers, behaviorMarkers lists %d: the two lists have drifted",
+			BehaviorName, len(e.Markers), len(behaviorMarkers))
+	}
+	registered := map[string]bool{}
+	for _, m := range e.Markers {
+		registered[m] = true
+	}
+	declared := declaredHooks()
+	for _, m := range behaviorMarkers {
+		if !registered[m] {
+			t.Errorf("marker %s is listed in behaviorMarkers and not registered: a page carrying it loads nothing", m)
+		}
+		if !declared[strings.Trim(m, "[]")] {
+			t.Errorf("marker %s is not a hook any Spec declares: the kernel would load the module for markup this package cannot render", m)
+		}
+	}
+}
+
+// TestEveryHookTheModuleBindsIsDeclared catches the rename that loses
+// a behaviour without a single failure: the module looks for an
+// attribute no component renders, an attribute selector that matches
+// nothing and reports nothing. The only names exempt are the module's
+// own writes, detected in the source rather than excused by a list.
+func TestEveryHookTheModuleBindsIsDeclared(t *testing.T) {
+	src := jsWithoutComments()
+	declared := declaredHooks()
+	bound := moduleBoundHooks(src)
+	names := make([]string, 0, len(bound))
+	for n := range bound {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		if declared[n] {
+			continue
+		}
+		if runtimeOwned(src, n) {
+			continue
+		}
+		t.Errorf("%s is bound by the module and declared by no Spec: a rename on either side fails silently", n)
+	}
+}
+
+// skinHooks are the declared hooks no script reads, each with the
+// reason it needs no module. The reason is load-bearing: the gate
+// refuses an empty one, because an unexplained exemption is an
+// exemption nobody re-reads.
+var skinHooks = map[string]string{
+	"data-hui-grow":          "the spacer's flex factor: the stylesheet sizes the spacer from the number, and no script ever reads it",
+	"data-hui-lines":         "the skeleton's line count: the stylesheet draws as many bars as the root says",
+	"data-hui-skeleton-last": "the short final line of a multi-line skeleton: a shape decision a stylesheet makes and a script never touches",
+}
+
+// TestEveryDeclaredHookIsBoundOrForTheSkin catches the other direction
+// of the same drift: a hook every Spec declares that neither the
+// module nor a stylesheet reads is an attribute the markup carries for
+// no one. The list itself is checked both ways so it cannot rot: a
+// hook the module grew to read must leave it, and a hook no Spec
+// declares means it outlived its reason.
+func TestEveryDeclaredHookIsBoundOrForTheSkin(t *testing.T) {
+	src := jsWithoutComments()
+	read := moduleBoundHooks(src)
+	declared := declaredHooks()
+	for _, sp := range Specs() {
+		for _, h := range sp.Hooks {
+			if read[h] {
+				continue
+			}
+			if _, ok := skinHooks[h]; !ok {
+				t.Errorf("%s (declared by %s) is read by neither the module nor a stylesheet: a hook nothing binds is an attribute the markup carries for no one", h, sp.Name)
+			}
+		}
+	}
+	for h, reason := range skinHooks {
+		if reason == "" {
+			t.Errorf("%s carries no reason: an unexplained exemption is one nobody re-reads", h)
+		}
+		if !declared[h] {
+			t.Errorf("%s is listed as skin-only but no Spec declares it: the list has outlived its hook", h)
+		}
+		if read[h] {
+			t.Errorf("%s is listed as skin-only but the module reads it: the list is wrong today, not just stale", h)
+		}
+	}
+}
+
+func isAsciiLetter(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'
+}
+
+// TestModuleSaysNothingInEnglish catches a sentence the module says
+// itself. Every string it writes must have arrived as a data-hui-*
+// attribute the component rendered from its Words, because a sentence
+// hardcoded here is a sentence every translated page says in English.
+func TestModuleSaysNothingInEnglish(t *testing.T) {
+	src := jsWithoutComments()
+	text := regexp.MustCompile(`textContent\s*=\s*'([^']*)'|textContent\s*=\s*"([^"]*)"`)
+	for _, m := range text.FindAllStringSubmatch(src, -1) {
+		lit := m[1]
+		if m[2] != "" {
+			lit = m[2]
+		}
+		if strings.ContainsFunc(lit, isAsciiLetter) {
+			t.Errorf("the module writes the literal %q as text: a sentence it says itself is a sentence a translated page says in English", lit)
+		}
+	}
+	label := regexp.MustCompile(`setAttribute\(\s*'aria-label'\s*,\s*'([^']*)'|setAttribute\(\s*"aria-label"\s*,\s*"([^"]*)"`)
+	for _, m := range label.FindAllStringSubmatch(src, -1) {
+		lit := m[1] + m[2]
+		if strings.ContainsFunc(lit, isAsciiLetter) {
+			t.Errorf("the module sets aria-label to the literal %q: an accessible name it invents is one the caller never chose", lit)
+		}
+	}
+}
+
+// TestModuleKeepsTheKernelContract catches a module that attaches but
+// cannot be re-armed: without the loadedModules flag the kernel
+// fetches it again on every insertion, and without the registered
+// scanner markup that arrives after load is never handed to it, which
+// is exactly the arrival the contract exists for.
+func TestModuleKeepsTheKernelContract(t *testing.T) {
+	if body := strings.TrimSpace(jsWithoutComments()); !strings.HasPrefix(body, "(function () {") {
+		t.Fatal("the module does not open with the IIFE the kernel contract requires")
+	}
+	for _, want := range []string{
+		"'use strict';",
+		"loadedModules[NAME] = true",
+		"_moduleScanners[NAME] = scan",
+	} {
+		if !strings.Contains(behaviorJS, want) {
+			t.Errorf("the module lost %q: half the kernel contract is a module that cannot be re-armed", want)
+		}
+	}
+}
+
+// TestPageWithAMarkerPreloadsTheModule catches a marker the preload
+// scan cannot see: without the preload the module arrives after the
+// page instead of with it, so the first click on a reveal button finds
+// nothing bound. The reverse is the waste: a page with no marker
+// fetching a module it cannot use. It imports core-ui/runtime to prove
+// that a headless test can: the runtime sits below this package and
+// must never import it.
+func TestPageWithAMarkerPreloadsTheModule(t *testing.T) {
+	has := func(html string) bool {
+		for _, n := range runtime.NeededModules(html) {
+			if n == BehaviorName {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(string(Password(PasswordProps{Name: "token", ID: "token"}, nil))) {
+		t.Errorf("a rendered Password does not preload %s: the module arrives after the page instead of with it", BehaviorName)
+	}
+	if has(string(Badge(BadgeProps{Label: "running"}, nil))) {
+		t.Errorf("a rendered Badge preloads %s: a page with no marker fetches a module it cannot use", BehaviorName)
+	}
+}

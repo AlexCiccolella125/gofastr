@@ -42,6 +42,14 @@ type FileUploadProps struct {
 	// DescribedBy is an extra id to reference, from a Field.
 	DescribedBy string
 
+	// Parts: attrs and binds on the root, the zone, the input, the
+	// list and the status. Strings carry the sentences the
+	// runtime says when files are chosen.
+	Parts Parts
+	// Strings are the strings this component says. Nil means the English
+	// defaults; a layer above sets them from the request's language.
+	Strings *Strings
+
 	ExtraAttrs html.Attrs
 }
 
@@ -65,6 +73,7 @@ type FileUploadProps struct {
 // the input's value is not read back, and the list of names appears
 // silently.
 func FileUpload(p FileUploadProps, s Skin) render.HTML {
+	b := p.Parts.Box(s)
 	if p.Name == "" {
 		panic("headless: FileUpload requires Name")
 	}
@@ -96,27 +105,35 @@ func FileUpload(p FileUploadProps, s Skin) render.HTML {
 	}
 
 	zoneKids := []render.HTML{
-		El("span", s, PartText, nil, render.Text(p.Label)),
+		b.El("span", PartText, nil, render.Text(p.Label)),
 	}
 	if p.CTA != "" {
-		zoneKids = append(zoneKids, El("span", s, PartDropCTA, nil, render.Text(p.CTA)))
+		zoneKids = append(zoneKids, b.El("span", PartDropCTA, nil, render.Text(p.CTA)))
 	}
 	if p.Hint != "" {
-		zoneKids = append(zoneKids, El("span", s, PartDropHint,
+		zoneKids = append(zoneKids, b.El("span", PartDropHint,
 			Attrs(map[string]string{"id": hintID}), render.Text(p.Hint)))
 	}
 
-	own := Attrs(map[string]string{"data-hui-drop-input": p.ID})
+	// The two sentences the runtime substitutes the names and the
+	// count into when the reader has picked. They travel as data-*
+	// rather than being built by the module so a caller can localise
+	// them, the same way the reveal button's labels do.
+	own := Attrs(map[string]string{
+		"data-hui-drop-input": p.ID,
+		"data-hui-drop-one":   p.Strings.Resolve().FileSelected,
+		"data-hui-drop-many":  p.Strings.Resolve().FilesSelected,
+	})
 	own["data-hui-drop"] = ""
-	return El("div", s, PartRoot, own,
-		El("label", s, PartDropZone, Attrs(map[string]string{"for": p.ID}), zoneKids...),
-		El("input", s, PartDropInput, input),
+	return b.El("div", PartRoot, own,
+		b.El("label", PartDropZone, Attrs(map[string]string{"for": p.ID}), zoneKids...),
+		b.El("input", PartDropInput, input),
 		// Populated by the runtime as files are chosen, so the names
 		// are on screen as well as announced.
-		El("ul", s, PartDropList, Mark(Attrs(map[string]string{"role": "list"}), "data-hui-drop-list")),
+		b.El("ul", PartDropList, Mark(Attrs(map[string]string{"role": "list"}), "data-hui-drop-list")),
 		// role=status already means polite; stating it twice can
 		// announce twice.
-		El("span", s, PartStatus, Mark(Attrs(map[string]string{
+		b.El("span", PartStatus, Mark(Attrs(map[string]string{
 			"role": "status",
 		}), "data-hui-drop-status")),
 	)
@@ -136,9 +153,14 @@ func joinIDs(a, b string) string {
 
 func init() {
 	Register(Spec{
-		Name:  "FileUpload",
-		Parts: []Part{PartRoot, PartDropZone, PartText, PartDropCTA, PartDropHint, PartDropInput, PartDropList, PartStatus},
-		Hooks: []string{"data-hui-drop", "data-hui-drop-input", "data-hui-drop-list", "data-hui-drop-status"},
+		Name:    "FileUpload",
+		Anatomy: []Part{PartRoot, PartDropZone, PartText, PartDropCTA, PartDropHint, PartDropInput, PartDropList, PartStatus},
+		Hooks: []string{"data-hui-drop", "data-hui-drop-input", "data-hui-drop-list",
+			"data-hui-drop-status", "data-hui-drop-one", "data-hui-drop-many"},
+		WithParts: func(s Skin, parts Parts) render.HTML {
+			return FileUpload(FileUploadProps{Name: "seam-upload", ID: "seam-upload",
+				Label: "Drag an archive here, or ", CTA: "choose a file", Parts: parts}, s)
+		},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{

@@ -1339,11 +1339,14 @@ a label or a hook. The layer satisfies every hard rule above the same
 way `framework/ui` does: an in-page state change is an `Island` (the
 `data-fui-rpc` contract on the element that keeps its href for
 no-script), a request is a typed `Action`, and a signal is a typed
-`Bind`; `ExtraAttrs` cannot carry a `data-fui-*` key. No runtime
-module binds the `data-hui-*` hooks and no skin dresses the parts in
-this repository yet; `framework/ui` is today's styled layer and does
-not render through this package. Contract and invariants: `gofastr
-docs ui-headless`.
+`Bind`; `ExtraAttrs` cannot carry a `data-fui-*` key. The behaviour
+module now exists: `framework/headless/behavior.go` registers its
+JavaScript under the name `headless` through the same seam a
+stylesheet uses, and binds the `data-hui-*` hooks (see "Component
+behaviour: the same seam" below for the mechanism). No skin dresses
+the parts in this repository yet; `framework/ui` is today's styled
+layer and does not render through this package. Contract and
+invariants: `gofastr docs ui-headless`.
 
 ### Adding a styled component
 
@@ -1455,6 +1458,13 @@ is an attribute selector on a `data-` attribute (`[data-x]` or
 a no-op and a different one panics. A `data-fui-*` marker is admitted
 only when the attribute is already in the table above (hard rule 5
 through the seam, `TestRegisteredBehaviorDataFuiMarkersAreDocumented`).
+
+The module is held to the source lints every `src/*.js` module is held
+to (`core-ui/check`: no `var`, no selector or storage key built from a
+raw value, and the rest): the clean-tree tests reach it through the
+`//go:embed` directive beside the `RegisterBehavior` call
+(`check.RegisteredBehaviorSources`), so a module that lives beside its
+Go package is not a module outside the rules.
 
 The module keeps the contract every `src/*.js` module keeps: an IIFE
 that binds only its own markers by attribute, sets
@@ -1570,8 +1580,9 @@ framework/
   static/      : SSG builder (renders every screen at build time)
   headless/    : the structure half of a design system: components that
                  render tags, roles, labelling and data-hui-* hooks with
-                 no classes; a Skin maps parts to classes; seams (Slots,
-                 Overrides, Binds, Words, Island) are typed and checked;
+                 no classes; a Skin maps parts to classes; a caller's
+                 Parts (Attrs, Slots, Binds), Strings and Island are
+                 typed and checked;
                  a harness pins every component at the nil skin. See
                  `gofastr docs ui-headless`.
   ui/          : opinionated semantic components on top of core-ui

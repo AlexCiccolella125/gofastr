@@ -14,11 +14,10 @@ var systemTones = map[string]bool{
 	"info": true, "success": true, "warning": true, "danger": true,
 }
 
-// systemToneWord is the tone said before the title, from the words
-// seam: unlike an alert, whose title may already say which kind it is
+// systemToneWord is the tone said before the title, from Strings: unlike an alert, whose title may already say which kind it is
 // ("Deploy failed"), a system banner's title says WHAT is true of the
 // system and the tone is the only thing saying how serious it is.
-func systemToneWord(w *Words, tone string) string {
+func systemToneWord(w *Strings, tone string) string {
 	switch tone {
 	case "success":
 		return w.ToneSuccess
@@ -81,11 +80,14 @@ type SystemBannerProps struct {
 
 	ExtraAttrs html.Attrs
 
-	// Seams: overrides only. Nothing here is fillable — Action
+	// Parts: attrs only. Nothing here is fillable — Action
 	// already takes the page's own control, and everything else a
 	// banner draws is what a screen reader is given to tell one
 	// message from another.
-	Seams
+	Parts Parts
+	// Strings are the strings this component says. Nil means the English
+	// defaults; a layer above sets them from the request's language.
+	Strings *Strings
 }
 
 // SystemBanner renders the message.
@@ -101,7 +103,7 @@ type SystemBannerProps struct {
 // both, as the framework banner it replaces did, so either attribute
 // alone still says how urgent it is.
 func SystemBanner(p SystemBannerProps, s Skin) render.HTML {
-	b := p.Seams.Box(s)
+	b := p.Parts.Box(s)
 	if p.ID == "" {
 		panic("headless: SystemBanner requires ID — it is the message's identity, so the same message is not shown twice")
 	}
@@ -112,7 +114,7 @@ func SystemBanner(p SystemBannerProps, s Skin) render.HTML {
 	if _, known := systemTones[tone]; !known {
 		panic("headless: SystemBanner unknown Tone " + tone)
 	}
-	word := systemToneWord(p.Seams.W(), tone)
+	word := systemToneWord(p.Strings.Resolve(), tone)
 	if p.Offline && p.Shown {
 		panic("headless: SystemBanner Offline is the runtime's — it shows the banner when the connection is lost, so it cannot ship shown")
 	}
@@ -152,7 +154,7 @@ func SystemBanner(p SystemBannerProps, s Skin) render.HTML {
 	if p.Dismiss == nil || *p.Dismiss {
 		dismiss := Mark(Attrs(map[string]string{
 			"type":       "button",
-			"aria-label": orDefault(p.DismissLabel, fmt.Sprintf(p.Seams.W().DismissTitled, p.Title)),
+			"aria-label": orDefault(p.DismissLabel, fmt.Sprintf(p.Strings.Resolve().DismissTitled, p.Title)),
 		}), "data-hui-system-dismiss")
 		kids = append(kids, b.El("button", PartDismiss, dismiss, render.Text("×")))
 	}
@@ -162,13 +164,13 @@ func SystemBanner(p SystemBannerProps, s Skin) render.HTML {
 func init() {
 	Register(Spec{
 		Name: "SystemBanner",
-		Parts: []Part{PartRoot, PartTitle, PartText, PartActions,
+		Anatomy: []Part{PartRoot, PartTitle, PartText, PartActions,
 			PartDismiss, PartVisuallyHidden},
 		Hooks: []string{"data-hui-system", "data-hui-system-id",
 			"data-hui-system-dismiss", "data-hui-system-offline"},
-		WithSeams: func(s Skin, seams Seams) render.HTML {
+		WithParts: func(s Skin, parts Parts) render.HTML {
 			return SystemBanner(SystemBannerProps{
-				ID: "sys-seams", Title: "Deploy in progress", Shown: true, Seams: seams,
+				ID: "sys-parts", Title: "Deploy in progress", Shown: true, Parts: parts,
 			}, s)
 		},
 		Cases: func(k Kit) []Case {

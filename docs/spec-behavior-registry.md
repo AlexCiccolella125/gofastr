@@ -249,7 +249,7 @@ touches it, `framework/docs/content/ui-new-components.md` and
 1. This seam, with the tests above and no module moved.
 2. `framework/headless` registers its `data-hui-*` module: the first
    real client, and the proof the seam carries a whole design system's
-   behaviour.
+   behaviour. (Done 2026-09-15: `framework/headless/behavior.go`.)
 3. `framework/ui`, one package at a time: each module becomes a
    `RegisterBehavior` in the Go file that renders its markup; the
    kernel's table and `preload.go`'s mirror lose the entry; the `ui-*`

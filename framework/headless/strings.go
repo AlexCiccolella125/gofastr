@@ -1,6 +1,6 @@
 package headless
 
-// Words: every string a component says, behind one seam.
+// Strings: every string a component says, in one typed table.
 //
 // The headless layer is the accessibility half of the system, and a
 // surprising amount of what it guarantees is wording: the tone said
@@ -15,8 +15,8 @@ package headless
 // framework/i18nui as keys; a layer above this one resolves each
 // field from those keys once per request.
 //
-// The seam is Seams, which already reaches every component: nil Words
-// means the English defaults below, which is what the goldens pin.
+// The field is Strings on every component's props: nil means the
+// English defaults below, which is what the goldens pin.
 // Nothing here fetches, caches or guesses a language.
 //
 // Plurals are two fields, One and Many, chosen by the component and
@@ -29,7 +29,7 @@ import (
 	"strings"
 )
 
-// Words are the strings the components say. Every field defaults to
+// Strings are the strings the components say. Every field defaults to
 // the English the components rendered before this type existed, so a
 // nil or partially-set value is safe; DefaultWords returns them all
 // and ProbeWords returns one probe token per field.
@@ -38,7 +38,7 @@ import (
 // fmt.Sprintf at the site that owns the numbers. {n} is substituted
 // by the runtime, not the server: those strings travel as data-*
 // attributes and the count is written in when it is known.
-type Words struct {
+type Strings struct {
 	// ─── said by more than one component ───────────────────────────
 	//
 	// The same English word doing the same job in several components
@@ -101,6 +101,19 @@ type Words struct {
 	ToneWarning string
 	ToneDanger  string
 
+	// ─── Upload ──────────────────────────────────────────────────────
+
+	// FileSelected says one file was chosen, with {name} where the
+	// file's name goes. The runtime writes the name in when it knows
+	// it; the server never renders this string with a value in it,
+	// because before the reader picks there is no value to say.
+	FileSelected string
+	// FilesSelected says several files were chosen, with {n} for the
+	// count and {names} for the joined list. Substituted by the runtime
+	// like FileSelected's {name}, for the same reason: neither the
+	// count nor the names exist until the reader has picked.
+	FilesSelected string
+
 	// ─── ValidationSummary ──────────────────────────────────────────
 
 	// ThereIsAProblem heads the list a failed submit focuses. A short
@@ -108,9 +121,9 @@ type Words struct {
 	ThereIsAProblem string
 }
 
-// defaultWords is the English the components rendered before Words
+// defaultStrings is the English the components rendered before Strings
 // existed. The goldens pin these bytes.
-var defaultWords = Words{
+var defaultStrings = Strings{
 	DismissTitled:  "Dismiss: %s",
 	RemoveLabelled: "Remove %s",
 
@@ -131,21 +144,24 @@ var defaultWords = Words{
 	ToneWarning: "Warning",
 	ToneDanger:  "Error",
 
+	FileSelected:  "{name} selected.",
+	FilesSelected: "{n} files selected: {names}.",
+
 	ThereIsAProblem: "There is a problem",
 }
 
-// DefaultWords returns a fresh copy of the English defaults, every
+// DefaultStrings returns a fresh copy of the English defaults, every
 // field set. Fresh so a caller cannot mutate the package's copy
 // through it.
-func DefaultWords() *Words {
-	w := defaultWords
+func DefaultStrings() *Strings {
+	w := defaultStrings
 	return &w
 }
 
 // withDefaults returns w with every empty field filled from the
 // English defaults; w itself is left alone.
-func (w *Words) withDefaults() *Words {
-	out := DefaultWords()
+func (w *Strings) withDefaults() *Strings {
+	out := DefaultStrings()
 	src := reflect.ValueOf(w).Elem()
 	dst := reflect.ValueOf(out).Elem()
 	for i := 0; i < src.NumField(); i++ {
@@ -155,20 +171,20 @@ func (w *Words) withDefaults() *Words {
 		}
 		f := dst.Field(i)
 		if !f.CanSet() {
-			panic("headless: Words." + src.Type().Field(i).Name + " is not settable — every field of Words must be an exported string")
+			panic("headless: Strings." + src.Type().Field(i).Name + " is not settable — every field of Strings must be an exported string")
 		}
 		f.SetString(v)
 	}
 	return out
 }
 
-// ProbeWords returns a Words whose every field is its own name in
+// ProbeStrings returns a Strings whose every field is its own name in
 // angle brackets — formats as the name plus their placeholders, so
 // `<RemoveLabelled env=prod>` renders where "Remove env=prod" would. A render against it shows exactly which words came
-// through the seam; a real English word in one is a word that
+// through the table; a real English word in one is a word that
 // bypassed it.
-func ProbeWords() *Words {
-	w := DefaultWords()
+func ProbeStrings() *Strings {
+	w := DefaultStrings()
 	v := reflect.ValueOf(w).Elem()
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
@@ -179,7 +195,7 @@ func ProbeWords() *Words {
 		}
 		f := v.Field(i)
 		if !f.CanSet() {
-			panic("headless: Words." + t.Field(i).Name + " is not settable — every field of Words must be an exported string")
+			panic("headless: Strings." + t.Field(i).Name + " is not settable — every field of Strings must be an exported string")
 		}
 		f.SetString(probe + ">")
 	}
@@ -213,24 +229,25 @@ func placeholdersIn(s string) []string {
 	return out
 }
 
-// wordsProbe, when set, is what every component says instead of the
+// stringsProbe, when set, is what every component says instead of the
 // English defaults. Only the harness sets it, to render the whole
-// corpus through the words seam without editing every fixture; it is
-// nil in production and W() behaves as if it did not exist.
-var wordsProbe *Words
+// corpus through Strings without editing every fixture; it is
+// nil in production and Resolve behaves as if it did not exist.
+var stringsProbe *Strings
 
-// W is how a component reaches its words: the caller's when a layer
-// above resolved them from the request, the harness's probe when a
-// test is looking, and the English defaults otherwise. A caller's
-// Words may be partial: every empty field falls back to its English
-// default, so a Words that sets one string does not silently unname
-// the reveal button.
-func (s Seams) W() *Words {
-	if s.Words != nil {
-		return s.Words.withDefaults()
+// Resolve is how a component reaches its strings: the caller's when a
+// layer above resolved them from the request, the harness's probe
+// when a test is looking, and the English defaults otherwise. A
+// caller's Strings may be partial: every empty field falls back to
+// its English default, so a Strings that sets one string does not
+// silently unname the reveal button. Safe on a nil receiver, which is
+// what an unset prop is.
+func (s *Strings) Resolve() *Strings {
+	if s != nil {
+		return s.withDefaults()
 	}
-	if wordsProbe != nil {
-		return wordsProbe
+	if stringsProbe != nil {
+		return stringsProbe
 	}
-	return DefaultWords()
+	return DefaultStrings()
 }

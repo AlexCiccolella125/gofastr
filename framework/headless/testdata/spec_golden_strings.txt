@@ -132,7 +132,7 @@ two fields side by side are still two fields: the row adds layout and no semanti
 
 === FileUpload / with a hint ===
 the zone is a label around a real input, so the whole target opens the picker — and the call to action is styled text, because a button inside a label swallows the label's click
-<div data-hui-drop="" data-hui-drop-input="backup"><label for="backup"><span>Drag an archive here, or </span><span>choose a file</span><span id="backup-accept">.tar.gz up to 2 GB</span></label><input accept=".tar.gz" aria-describedby="backup-accept" id="backup" name="backup" type="file"><ul data-hui-drop-list="" role="list"></ul><span data-hui-drop-status="" role="status"></span></div>
+<div data-hui-drop="" data-hui-drop-input="backup" data-hui-drop-many="&lt;FilesSelected {n} {names}&gt;" data-hui-drop-one="&lt;FileSelected {name}&gt;"><label for="backup"><span>Drag an archive here, or </span><span>choose a file</span><span id="backup-accept">.tar.gz up to 2 GB</span></label><input accept=".tar.gz" aria-describedby="backup-accept" id="backup" name="backup" type="file"><ul data-hui-drop-list="" role="list"></ul><span data-hui-drop-status="" role="status"></span></div>
 
 === Form / a create form ===
 the fields land in the body and the submits in the actions row, and the method defaults to post so a create never rides a GET a browser may repeat on its own
@@ -144,7 +144,7 @@ errors set the hook that moves focus to the summary, so a screen reader hears wh
 
 === Form / with a file upload ===
 multipart sets the encoding a file input needs, because without it the browser submits the file's name and no contents, which looks like a server bug and is not one
-<form action="/apps/definition" enctype="multipart/form-data" method="post"><div><div data-hui-drop="" data-hui-drop-input="definition-file"><label for="definition-file"><span>Captain definition</span><span>Choose a file</span></label><input id="definition-file" name="definition" type="file"><ul data-hui-drop-list="" role="list"></ul><span data-hui-drop-status="" role="status"></span></div></div><div><button type="submit">Upload</button></div></form>
+<form action="/apps/definition" enctype="multipart/form-data" method="post"><div><div data-hui-drop="" data-hui-drop-input="definition-file" data-hui-drop-many="&lt;FilesSelected {n} {names}&gt;" data-hui-drop-one="&lt;FileSelected {name}&gt;"><label for="definition-file"><span>Captain definition</span><span>Choose a file</span></label><input id="definition-file" name="definition" type="file"><ul data-hui-drop-list="" role="list"></ul><span data-hui-drop-status="" role="status"></span></div></div><div><button type="submit">Upload</button></div></form>
 
 === Grid / minimum column and gap ===
 Min is a floor — a column never gets narrower than the named step before the grid gives one up — and the name is what keeps the floor wired: the framework's Grid took a free-form Min that nothing read, so every auto-fit grid was the default width whatever its author asked

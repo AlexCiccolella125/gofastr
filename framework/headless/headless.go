@@ -18,9 +18,10 @@
 // Skin renders the same markup with no classes at all, which is what
 // "headless" means and what the goldens pin. Seven things are named in
 // a component's contract, and the harness checks each: its Parts, its
-// runtime hooks (data-hui-*), and the seams a caller reaches in through
-// — Slots, Overrides, Binds, Words, and for a component that changes
-// in-page state, an Island. See box.go, words.go and island.go.
+// runtime hooks (data-hui-*), what a caller may set on its Parts
+// (Attrs, Slots, Binds), its Strings, and for a component that
+// changes in-page state, an Island. See box.go, strings.go and
+// island.go.
 //
 // The package is SSR-first and hydrates incrementally, the same model
 // as the rest of the framework (core-ui/ARCHITECTURE.md): first paint
@@ -31,13 +32,14 @@
 // attribute allow-list a Bind is checked against), plus the agents
 // inventory registration every framework subpackage carries.
 //
-// No runtime module binds the data-hui-* hooks in this repository yet,
-// and no skin dresses the parts: the hooks are the contract that
-// module will be written to, and every component renders markup that
-// is correct and usable without it. framework/ui is today's styled
-// layer and does not render through this package; the skin, the
-// stylesheet, the runtime module and that adoption follow in their
-// own changes.
+// The behaviour module exists: behavior.go registers it under the name
+// "headless" through the same seam a stylesheet uses
+// (registry.RegisterBehavior), the host serves it at
+// /__gofastr/runtime/headless.js, and the kernel loads it when one of
+// its markers is on the page. No skin dresses the parts yet: the skin,
+// the stylesheet and that adoption follow in their own changes, and
+// framework/ui remains today's styled layer, not rendering through
+// this package.
 package headless
 
 import (
@@ -163,7 +165,7 @@ func Flag(a html.Attrs, name string, on bool) html.Attrs {
 }
 
 // refused reports whether a caller-supplied attribute may never reach
-// the markup, whatever seam it came through. Attribute names are
+// the markup, whichever way it came in. Attribute names are
 // case-insensitive in HTML — the parser lowercases them, so
 // DATA-FUI-RPC is data-fui-rpc by the time the runtime looks — which
 // is why the key is folded before every check, and why a sanitiser
@@ -178,10 +180,10 @@ func Flag(a html.Attrs, name string, on bool) html.Attrs {
 // data-widget and data-component (island roots), data-bind (two-way
 // state), data-action and data-param-* (a compiled server action and
 // its arguments) and data-kiln-* (the legacy tool delegators). The
-// runtime re-checks some of their values; the seam's job is that they
+// runtime re-checks some of their values; the refusal's job is that they
 // never arrive. And every data-hui-* key, this package's own hooks: a
 // forged one binds behaviour to an element that was never built for
-// it. A component sets its own hooks after the seam, so nothing it
+// it. A component sets its own hooks after the refusal, so nothing it
 // renders is refused here.
 func refused(key string) bool {
 	k := strings.ToLower(key)
@@ -199,7 +201,7 @@ func refused(key string) bool {
 
 // Safe copies caller-supplied extras, dropping the keys a component
 // owns so no caller can break its structure or its labelling, and the
-// keys refused on every seam (see refused). Keys are stored folded,
+// keys refused wherever a caller's attributes come in (see refused). Keys are stored folded,
 // the way the browser reads them: NAME and name are one attribute, and
 // stored as written a caller's NAME sorted ahead of the component's
 // name, so the browser kept the caller's. One key under two spellings

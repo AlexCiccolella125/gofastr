@@ -98,16 +98,19 @@ type AlertProps struct {
 	ID         string
 	ExtraAttrs html.Attrs
 
-	// Seams: overrides and binds on every part. Nothing here is
+	// Parts: attrs and binds on every part. Nothing here is
 	// fillable — Actions already takes the page's own controls, and
 	// everything else an alert draws is what a screen reader is given
 	// to tell one alert from another.
-	Seams
+	Parts Parts
+	// Strings are the strings this component says. Nil means the English
+	// defaults; a layer above sets them from the request's language.
+	Strings *Strings
 }
 
 // Alert renders the message.
 func Alert(p AlertProps, s Skin) render.HTML {
-	b := p.Seams.Box(s)
+	b := p.Parts.Box(s)
 	if p.Title == "" {
 		panic("headless: Alert requires Title")
 	}
@@ -158,7 +161,7 @@ func Alert(p AlertProps, s Skin) render.HTML {
 		}
 		label := p.DismissLabel
 		if label == "" {
-			label = fmt.Sprintf(p.Seams.W().DismissTitled, p.Title)
+			label = fmt.Sprintf(p.Strings.Resolve().DismissTitled, p.Title)
 		}
 		// The same element is both destinations: the href is the page
 		// without script, the island contract is the region update
@@ -172,13 +175,13 @@ func Alert(p AlertProps, s Skin) render.HTML {
 
 func init() {
 	Register(Spec{
-		Name:  "Alert",
-		Parts: []Part{PartRoot, PartHeader, PartIcon, PartToneWord, PartTitle, PartDesc, PartFooter, PartDismiss},
-		WithSeams: func(s Skin, seams Seams) render.HTML {
+		Name:    "Alert",
+		Anatomy: []Part{PartRoot, PartHeader, PartIcon, PartToneWord, PartTitle, PartDesc, PartFooter, PartDismiss},
+		WithParts: func(s Skin, parts Parts) render.HTML {
 			return Alert(AlertProps{Title: "Deploy failed", Text: "Exit 1 in the test stage.", Tone: "danger",
 				ToneWord: "Error", Icon: SpecimenGlyph, Actions: render.HTML("<a href=\"/logs\">View logs</a>"),
 				DismissHref: "/apps?dismiss=1", Island: Island{Endpoint: "/island/alerts", Signal: "alerts"},
-				Seams: seams}, s)
+				Parts: parts}, s)
 		},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
@@ -206,8 +209,8 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "Button",
-		Parts: []Part{PartRoot, PartIcon},
+		Name:    "Button",
+		Anatomy: []Part{PartRoot, PartIcon},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{

@@ -134,9 +134,9 @@ func InputGroup(p InputGroupProps, s Skin, children ...render.HTML) render.HTML 
 
 func init() {
 	Register(Spec{
-		Name:  "Form",
-		Parts: []Part{PartRoot, PartFormBody, PartFormActions},
-		Hooks: []string{"data-hui-form-errors"},
+		Name:    "Form",
+		Anatomy: []Part{PartRoot, PartFormBody, PartFormActions},
+		Hooks:   []string{"data-hui-form-errors"},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			appName := Field(FieldProps{Label: "App name", For: "new-app-name"}, k.For("Field"),
@@ -185,8 +185,8 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "InputGroup",
-		Parts: []Part{PartRoot},
+		Name:    "InputGroup",
+		Anatomy: []Part{PartRoot},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{

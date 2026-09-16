@@ -20,14 +20,26 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
 - **`framework/headless`**: the structure half of a design system.
   Components render tags, roles, labelling relationships, state
   attributes and `data-hui-*` hooks with no classes at a nil skin; a
-  `Skin` maps parts to classes; the seams (Slots, Overrides, Binds,
-  Words, Island) are typed and sanitised; every component registers a
-  `Spec` that drives the nil-skin sweep, the seam gates and two goldens.
+  `Skin` maps parts to classes; what a caller sets on the parts
+  (`Parts`: `Attrs`, `Slots`, `Binds`), its `Strings` and an `Island`
+  are typed and sanitised; every component registers a `Spec` with its
+  `Anatomy` that drives the nil-skin sweep, the parts gates and two
+  goldens.
   An in-page state change is an `Island` at render time (hard rule 1):
   `Pagination`, `ToolbarSearch` and a dismissible `Tag` or `Alert`
-  refuse the link-only render; every href passes the anchor policy. Ships the vocabulary, the harness and the basic
-  components; no skin or runtime module binds the hooks yet.
+  refuse the link-only render; every href passes the anchor policy.
+  Ships the vocabulary, the harness and the basic components.
   `gofastr docs ui-headless`.
+- **`framework/headless` behaviour module**: the `data-hui-*` hooks
+  are bound. `behavior.go` registers the package's JavaScript as the
+  runtime module `headless` through `registry.RegisterBehavior`; the
+  kernel loads it on one of its seven markers (reveal, color, when,
+  form-errors, action, drop, system) and hands it inserted DOM. Every
+  sentence the module writes travels as a `data-hui-*` attribute from
+  `Strings` (Upload gains `FileSelected` and `FilesSelected`), and the
+  two attributes it writes back (`data-hui-when-off`,
+  `data-hui-drop-over`) are its own. Source gates in
+  `behavior_test.go`, browser coverage in `behavior_e2e_test.go`.
 
 ### Changed
 - **One home per helper.** A clone survey over the tree found the same
@@ -83,6 +95,14 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   hand edits, so they were left alone.
 
 ### Fixed
+- **`core-ui/check`: the JavaScript lints reach registered behaviours.**
+  Every clean-tree lint (no-var and the runtime-shape rules) walked
+  `core-ui/runtime` alone, so a module registered through
+  `registry.RegisterBehavior` beside its Go package was held to none of
+  them; `RegisteredBehaviorSources` finds each through its `//go:embed`
+  directive and the lints take a file root. The four shape lints that
+  had fixture tests only now run over the tree as well. The `headless`
+  and `site-ping` modules move from `var` to `const` and `let`.
 - **`framework/headless`**: `Safe` and the override sanitiser store
   attribute names folded, as the browser reads them. Stored as written, a
   caller's `NAME` sorted ahead of the component's `name` and the browser

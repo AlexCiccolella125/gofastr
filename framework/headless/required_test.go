@@ -181,11 +181,11 @@ func TestExtrasAndOverridesStoreKeysFolded(t *testing.T) {
 		Badge(BadgeProps{Label: "x", ExtraAttrs: html.Attrs{"data-testid": "a", "DATA-TESTID": "b"}}, nil)
 	})
 	for _, sp := range Specs() {
-		if sp.WithSeams == nil {
+		if sp.WithParts == nil {
 			continue
 		}
 		refuse(t, "two spellings", func() {
-			sp.WithSeams(Skin{PartRoot: "real"}, Seams{Overrides: Overrides{PartRoot: html.Attrs{"role": "a", "ROLE": "b"}}})
+			sp.WithParts(Skin{PartRoot: "real"}, Parts{Attrs: PartAttrs{PartRoot: html.Attrs{"role": "a", "ROLE": "b"}}})
 		})
 		break
 	}
