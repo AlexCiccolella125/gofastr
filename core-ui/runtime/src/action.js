@@ -64,11 +64,15 @@
   // setState paints one state. idle and done are the two label parts
   // (elements, from the spec): done is shown for pending and committed
   // — the optimistic flip paints the success label the moment the
-  // click lands — and idle otherwise. aria-busy and disabled live on
-  // pending only: the committed state is final but focusable, so an
-  // app can replace the DOM with an undo affordance. When the spec
-  // asked for pressed, aria-pressed mirrors committed, which is the
-  // pressed-toggle convention.
+  // click lands — and idle otherwise. aria-busy lives on pending only:
+  // the committed state is final but focusable, so an app can replace
+  // the DOM with an undo affordance. The element's disabled attribute
+  // is never touched: pending already ignores clicks (see bind), a
+  // disabled button drops keyboard focus to the body the moment it is
+  // disabled, and disabled has other owners (a hidden conditional
+  // region disables its controls) whose decision a settlement must not
+  // undo. When the spec asked for pressed, aria-pressed mirrors
+  // committed, which is the pressed-toggle convention.
   function setState(el, spec, state) {
     el.setAttribute('data-state', state);
     if (spec.idle && spec.done) {
@@ -82,22 +86,24 @@
     }
     if (state === 'pending') {
       el.setAttribute('aria-busy', 'true');
-      el.disabled = true;
     } else {
       el.removeAttribute('aria-busy');
-      el.disabled = false;
     }
     if (spec.pressed) el.setAttribute('aria-pressed', state === 'committed' ? 'true' : 'false');
   }
 
   // revokeGroupSiblings flips every other committed member of the group
   // back to idle, with no second request: the server stays the source
-  // of truth and a later navigation refreshes from it. Members whose
-  // elements left the document are pruned here, on iteration, which is
-  // the only pass that would otherwise hold them.
+  // of truth and a later navigation refreshes from it. It returns the
+  // members it revoked so a failed commit can put them back: the
+  // server never accepted the new member, so the old one is still the
+  // committed one. Members whose elements left the document are pruned
+  // here, on iteration, which is the only pass that would otherwise
+  // hold them.
   function revokeGroupSiblings(group, except) {
+    const revoked = [];
     const members = groups.get(group);
-    if (!members) return;
+    if (!members) return revoked;
     for (const other of members) {
       if (!other.isConnected) {
         members.delete(other);
@@ -106,9 +112,11 @@
       if (other === except) continue;
       if (other.getAttribute('data-state') === 'committed') {
         setState(other, specs.get(other), 'idle');
+        revoked.push(other);
       }
     }
     if (members.size === 0) groups.delete(group);
+    return revoked;
   }
 
   // bind attaches the lifecycle, once per element.
@@ -158,13 +166,21 @@
       }
       // idle or error: commit.
       setState(el, spec, 'pending');
-      if (spec.group) revokeGroupSiblings(spec.group, el);
+      const revoked = spec.group ? revokeGroupSiblings(spec.group, el) : [];
       el.dispatchEvent(new CustomEvent('action:start', { bubbles: true }));
       request(spec.endpoint, spec.method).then((ok) => {
         if (ok) {
           setState(el, spec, 'committed');
           el.dispatchEvent(new CustomEvent('action:committed', { bubbles: true }));
           return;
+        }
+        // The server refused the new member, so the sibling it
+        // displaced is still the committed one: put it back, unless
+        // something else moved it or it left the page meanwhile.
+        for (const other of revoked) {
+          if (other.isConnected && other.getAttribute('data-state') === 'idle') {
+            setState(other, specs.get(other), 'committed');
+          }
         }
         setState(el, spec, 'error');
         el.dispatchEvent(new CustomEvent('action:rolled-back', { bubbles: true }));

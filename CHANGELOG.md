@@ -56,7 +56,8 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   same-origin mutation with the CSRF header and resolves to a
   boolean, `window.__gofastr.action.bind(el, spec)` attaches the
   idle → pending → committed → error lifecycle, the label flip,
-  `aria-busy`/`disabled` while pending and the `action:*` events. No
+  `aria-busy` while pending (never `disabled`, which has other owners
+  and drops keyboard focus) and the `action:*` events. No
   marker: owners reach it through `Requires("action")`.
 
 ### Changed

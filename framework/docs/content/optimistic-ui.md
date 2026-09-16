@@ -57,7 +57,7 @@ capture previous projection
 | State | Meaning | Where it lives |
 |---|---|---|
 | `idle` | Resting; no mutation in flight. SSR ships here. | `data-state="idle"` |
-| `pending` | Optimistic projection is painted; the RPC is in flight. Control is `aria-busy="true"` and disabled. | `data-state="pending"` |
+| `pending` | Optimistic projection is painted; the RPC is in flight. Control is `aria-busy="true"` and ignores re-entry; it is not disabled, so keyboard focus stays on it. | `data-state="pending"` |
 | `committed` | The RPC returned 2xx. The projection is now authoritative. | `data-state="committed"` |
 | `conflicted` | A versioned 409. The runtime fetches fresh HTML from the conflict endpoint and replaces the affected region. (Sortable-specific today.) | `data-state` on the list, plus an `aria-live` announcement |
 | `failed` | The RPC returned non-2xx (or the network threw). The runtime rolls the projection back to `idle` and announces. `OptimisticAction` paints a brief `error` shake first. | `data-state="error"` (OptimisticAction) or direct revert to `idle` (ToggleAction) |
@@ -99,7 +99,7 @@ coherent.
 ### Out-of-order responses
 
 Each primitive keeps at most one in-flight request per trigger element.
-Because the trigger is disabled during `pending`, a second click cannot
+Because the trigger ignores clicks during `pending`, a second click cannot
 start a second fetch and arrive in a different order. The runtime does
 **not** coordinate across triggers: if two different buttons POST to the
 same handler, their responses reconcile independently against whatever
@@ -676,9 +676,12 @@ know where they agree and where they diverge.
 
 ### Agreed everywhere
 
-- **`pending` disables the trigger.** All three button primitives set
-  `disabled=true` and `aria-busy="true"` during `pending`, and clear both
-  on settlement. Re-entry during `pending` is a no-op.
+- **`pending` marks the trigger busy and ignores re-entry.** The action
+  primitive sets `aria-busy="true"` during `pending` and clears it on
+  settlement; a click while pending is a no-op. It never sets `disabled`:
+  a disabled button drops keyboard focus to the body, and `disabled` has
+  other owners (a hidden conditional region disables its controls) whose
+  decision a settlement must not undo.
 - **CSRF forwarding.** All fetches forward `<meta name="csrf-token">` as
   `X-CSRF-Token`. The handler is responsible for verifying the token; the
   runtime just makes it available without per-call-site plumbing.

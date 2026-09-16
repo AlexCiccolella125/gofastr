@@ -24,6 +24,7 @@ type actionSrv struct {
 	srv  *httptest.Server
 	ok   atomic.Int32
 	fail atomic.Int32
+	slow atomic.Int32
 }
 
 // actionPage is the arm script every test body appends its buttons
@@ -73,6 +74,12 @@ func startActionSrv(t *testing.T, body string) *actionSrv {
 	mux.HandleFunc("/fail", func(w http.ResponseWriter, r *http.Request) {
 		s.fail.Add(1)
 		http.Error(w, "no", http.StatusUnprocessableEntity)
+	})
+	// /slow holds the pending window open long enough to look at it.
+	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
+		s.slow.Add(1)
+		time.Sleep(700 * time.Millisecond)
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -325,5 +332,71 @@ func TestActionRequestRefusesCrossOrigin(t *testing.T) {
 	}
 	if raw != "[]" {
 		t.Fatalf("the refused request still fetched: %s", raw)
+	}
+}
+
+// Pending ignores re-entry without disabling the button: a second click
+// during the window sends nothing, the button stays focused (disabling
+// a focused button drops focus to the body), and disabled is left to
+// whoever else owns it.
+func TestActionPendingIgnoresReentryAndKeepsDisabledAlone(t *testing.T) {
+	s := startActionSrv(t, actionBtn)
+	ctx := actionPage(t, s)
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`window.__arm('b', { endpoint: '/slow', idle: document.getElementById('idle'), done: document.getElementById('done') })`, nil),
+		chromedp.Click(`#b`, chromedp.ByID),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if !pollTrue(ctx, `document.getElementById('b').getAttribute('data-state') === 'pending'`) {
+		t.Fatal("the click never reached pending")
+	}
+	var probe struct {
+		Busy     string `json:"busy"`
+		Disabled bool   `json:"disabled"`
+		Focused  bool   `json:"focused"`
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.Click(`#b`, chromedp.ByID),
+		chromedp.Evaluate(`(() => { const b = document.getElementById('b'); return { busy: b.getAttribute('aria-busy'), disabled: b.disabled, focused: document.activeElement === b }; })()`, &probe),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if probe.Busy != "true" || probe.Disabled || !probe.Focused {
+		t.Fatalf("pending: aria-busy=%q disabled=%v focused=%v, want busy, not disabled, and focused", probe.Busy, probe.Disabled, probe.Focused)
+	}
+	if !pollTrue(ctx, `document.getElementById('b').getAttribute('data-state') === 'committed'`) {
+		t.Fatal("the slow request never committed")
+	}
+	if n := s.slow.Load(); n != 1 {
+		t.Fatalf("endpoint hit %d times for two clicks, want 1: pending must ignore re-entry", n)
+	}
+}
+
+// A failed commit in a group puts the sibling it displaced back: the
+// server never accepted the new member, so the old one is still the
+// committed one, and only the clicked button rolls back.
+func TestActionGroupFailureRestoresTheSibling(t *testing.T) {
+	s := startActionSrv(t, `<button type="button" id="g1" data-state="committed">
+  <span id="g1i" hidden>Starter</span><span id="g1d">Starter ✓</span>
+</button>
+<button type="button" id="g2" data-state="idle">
+  <span id="g2i">Pro</span><span id="g2d" hidden>Pro ✓</span>
+</button>`)
+	ctx := actionPage(t, s)
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`window.__arm('g1', { endpoint: '/ok', group: 'plan', idle: document.getElementById('g1i'), done: document.getElementById('g1d') });
+            window.__arm('g2', { endpoint: '/fail', group: 'plan', idle: document.getElementById('g2i'), done: document.getElementById('g2d') });`, nil),
+		chromedp.Click(`#g2`, chromedp.ByID),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if !pollTrue(ctx, `document.getElementById('g2').getAttribute('data-state') === 'idle' && document.getElementById('g1').getAttribute('data-state') === 'committed'`) {
+		var states string
+		chromedp.Run(ctx, chromedp.Evaluate(`document.getElementById('g1').getAttribute('data-state') + '/' + document.getElementById('g2').getAttribute('data-state')`, &states))
+		t.Fatalf("after a failed commit the states were %s, want the sibling committed again and the clicked button idle", states)
+	}
+	if n := s.fail.Load(); n != 1 || s.ok.Load() != 0 {
+		t.Fatalf("endpoints hit fail=%d ok=%d, want one failed request and no request for the sibling", n, s.ok.Load())
 	}
 }

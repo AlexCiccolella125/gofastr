@@ -467,7 +467,7 @@ module is one — `window.__gofastr.action.request(url, method)` performs
 a same-origin mutation with the CSRF header and resolves to a boolean,
 and `window.__gofastr.action.bind(el, spec)` attaches the whole
 optimistic lifecycle (idle → pending → committed → error, the label
-flip, `aria-busy`/`disabled` while pending, the `action:*` events) to
+flip, `aria-busy` while pending, the `action:*` events) to
 an element from a spec of `endpoint`, `method`, `idle`, `done`,
 `group`, `untoggle` and `pressed`.
 

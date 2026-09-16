@@ -287,8 +287,12 @@ func TestE2E_Optimistic_Slow_PendingThenCommit(t *testing.T) {
 	if pendingBusy != "true" {
 		t.Errorf("aria-busy during pending = %q, want \"true\"", pendingBusy)
 	}
-	if !pendingDisabled {
-		t.Errorf("disabled during pending = false, want true")
+	// Pending never disables the trigger: the action primitive guards
+	// re-entry by ignoring clicks, so keyboard focus stays on the button
+	// and disabled keeps its other owners (optimistic-ui.md, "pending
+	// marks the trigger busy").
+	if pendingDisabled {
+		t.Errorf("disabled during pending = true, want false: pending is aria-busy and a click guard, never disabled")
 	}
 	if committedState != "committed" {
 		t.Errorf("state after slow RPC resolves = %q, want committed", committedState)

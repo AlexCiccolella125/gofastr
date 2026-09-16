@@ -216,8 +216,9 @@ interaction bridge), so dependencies live there and nowhere else.
   retry fetches again rather than returning a fulfilled promise for a
   module that is not there.
 - Preload follows requirements: `NeededModules` lists a needed
-  behaviour's requirements before it, so the primitive arrives with
-  its dependents. The static exporter includes them for the same
+  behaviour's requirements with it (the list is sorted, not ordered;
+  `loadModule` orders the loads), so the primitive arrives with its
+  dependents. The static exporter includes them for the same
   reason. Hover prefetch (`data-fui-prefetch`) prefetches them too,
   because it goes through `loadModule`.
 - A module with no marker of its own (a primitive) is reachable only
@@ -229,8 +230,8 @@ interaction bridge), so dependencies live there and nowhere else.
 The optimistic and toggle action modules were one machine written
 twice: a same-origin mutation request with the CSRF header and the
 invalidation hook, a state flip through idle, pending, committed and
-rolled back, `hidden` swapped between two label parts, `aria-busy` and
-`disabled` while pending, and an event at each step. Only the attribute
+rolled back, `hidden` swapped between two label parts, `aria-busy`
+while pending, and an event at each step. Only the attribute
 names they read, `aria-pressed` and the group mutex on the toggle, and
 the shake on the optimistic one were their own.
 
@@ -245,7 +246,9 @@ no marker and no attribute name of any package:
   parts (elements), and optionally `group` (a mutex key), `untoggle`
   (an endpoint, which makes the element a toggle) and `pressed`
   (whether to mirror `aria-pressed`). It sets `data-state`, swaps
-  `hidden`, sets `aria-busy` and `disabled` while pending, and
+  `hidden`, sets `aria-busy` while pending (never `disabled`: pending
+  ignores clicks, a disabled button drops keyboard focus, and
+  `disabled` has other owners), and
   dispatches `action:start`, `action:committed`, `action:rolled-back`
   and `action:untoggle` on the element, bubbling. Binding twice is a
   no-op.
