@@ -142,3 +142,27 @@ func TestMarkerSubstring(t *testing.T) {
 		}
 	}
 }
+
+// Requires records the modules a behaviour needs before it, in the
+// order named and deduplicated, reachable from the entry Lookup and
+// Behaviors hand out. A requirement that is not a module name, and a
+// requirement on itself, are panics with their reasons.
+func TestRegisterBehaviorRequires(t *testing.T) {
+	IsolateForTest(t)
+	mustPanic(t, "must match", func() { RegisterBehavior("bad-req", "x", Markers("[data-x]"), Requires("../evil")) })
+	mustPanic(t, "must match", func() { RegisterBehavior("bad-req", "x", Markers("[data-x]"), Requires("Bad Name")) })
+	mustPanic(t, "cannot require itself", func() { RegisterBehavior("selfish", "x", Markers("[data-x]"), Requires("selfish")) })
+	b := RegisterBehavior("needs", "x", Markers("[data-x]"), Requires("action", "action", "other"))
+	if strings.Join(b.Entry().Requires, ",") != "action,other" {
+		t.Fatalf("Requires = %v, want [action other] deduplicated", b.Entry().Requires)
+	}
+	if e, ok := LookupBehavior("needs"); !ok || len(e.Requires) != 2 {
+		t.Fatalf("LookupBehavior lost the requirements: %v %v", e, ok)
+	}
+	// A different requirement list is a different definition.
+	mustPanic(t, "duplicate name", func() { RegisterBehavior("needs", "x", Markers("[data-x]"), Requires("action")) })
+	// The same one re-registers as a no-op.
+	if again := RegisterBehavior("needs", "x", Markers("[data-x]"), Requires("action", "other")); again.Entry() != b.Entry() {
+		t.Fatal("identical re-registration with the same requirements did not return the existing entry")
+	}
+}

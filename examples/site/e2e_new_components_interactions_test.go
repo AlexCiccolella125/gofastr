@@ -3,8 +3,11 @@ package main
 import (
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	cdnetwork "github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
 )
@@ -536,5 +539,87 @@ func TestE2E_ToggleAction_GroupMutex(t *testing.T) {
 	}
 	if freeAfter != "idle" {
 		t.Errorf("Free data-state after sibling commit = %q, want idle (mutex)", freeAfter)
+	}
+}
+
+// --- Action rebind after an island swap ---------------------------------
+
+// The action modules are registered behaviours with scanners and
+// loaded flags, so markup that arrives after the module (an island
+// swap, a client navigation) is bound by the kernel's insertion scan.
+// Replace the button with a fresh copy of itself and the new node
+// must still commit.
+func TestE2E_ToggleAction_RebindAfterSwap(t *testing.T) {
+	base := startE2EServer(t)
+	ctx := newE2EBrowserCtx(t)
+	const btn = `document.querySelector('[data-fui-comp="ui-toggle-action"]:not([data-fui-toggle-group])')`
+	var state string
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(base+"/components/toggleaction"),
+		pageReady(),
+		waitModule(`!!(window.__gofastr && window.__gofastr.toggleaction)`),
+		chromedp.Evaluate(`(() => { const b = `+btn+`; b.outerHTML = b.outerHTML; })()`, nil),
+		// The insertion scan runs as a microtask after the swap; give
+		// it a beat before the click so the test exercises the rebind,
+		// not a race.
+		chromedp.Sleep(300*time.Millisecond),
+		chromedp.Evaluate(btn+`.click()`, nil),
+		settle(),
+		chromedp.Evaluate(btn+`.getAttribute('data-state')`, &state),
+	)
+	if err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if state != "committed" {
+		t.Errorf("data-state after swap-and-click = %q, want committed (the swapped-in button must rebind)", state)
+	}
+}
+
+func TestE2E_OptimisticAction_RebindAfterSwap(t *testing.T) {
+	base := startE2EServer(t)
+	ctx := newE2EBrowserCtx(t)
+	// The module must be fetched once and armed by its scanner: the
+	// loaded flag is what tells the kernel it is armed, and without it
+	// every inserted subtree refetches the module instead of handing it
+	// the DOM. Counting fetches pins that.
+	var fetches atomic.Int32
+	chromedp.ListenTarget(ctx, func(ev any) {
+		if req, ok := ev.(*cdnetwork.EventRequestWillBeSent); ok &&
+			strings.Contains(req.Request.URL, "/optimisticaction.js") {
+			fetches.Add(1)
+		}
+	})
+	const btn = `document.querySelector('[data-fui-optimistic-endpoint="/__site/optimistic/edit/ok"]')`
+	var state string
+	err := chromedp.Run(ctx,
+		cdnetwork.Enable(),
+		chromedp.Navigate(base+"/components/optimisticinlineedit"),
+		waitModule(`!!(window.__gofastr && window.__gofastr.optimisticaction)`),
+		chromedp.Evaluate(`(() => { const b = `+btn+`; b.outerHTML = b.outerHTML; })()`, nil),
+		// The insertion scan runs as a microtask after the swap; give
+		// it a beat before the click so the test exercises the rebind,
+		// not a race.
+		chromedp.Sleep(300*time.Millisecond),
+		chromedp.Evaluate(btn+`.click()`, nil),
+		settle(),
+		chromedp.Evaluate(btn+`.getAttribute('data-state')`, &state),
+	)
+	if err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if state != "committed" {
+		t.Errorf("data-state after swap-and-click = %q, want committed (the swapped-in button must rebind)", state)
+	}
+	var armed bool
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`!!(window.__gofastr.loadedModules && window.__gofastr.loadedModules.optimisticaction)`, &armed),
+	); err != nil {
+		t.Fatalf("reading the armed flag: %v", err)
+	}
+	if !armed {
+		t.Error("loadedModules.optimisticaction is unset: the kernel does not consider the module armed, so it refetches on every scan instead of handing inserted DOM to the scanner")
+	}
+	if n := fetches.Load(); n != 1 {
+		t.Errorf("optimisticaction.js fetched %d times across the swap, want 1: the module is armed, not refetched", n)
 	}
 }

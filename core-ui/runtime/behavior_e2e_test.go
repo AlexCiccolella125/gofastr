@@ -394,3 +394,205 @@ func TestBehaviorFetchCarriesManifestHash(t *testing.T) {
 		t.Fatalf("fetched module URL = %q, want %q", got, want)
 	}
 }
+
+// depBehaviorJS records, at its own evaluation time, whether its
+// requirement had already registered. The requirement is probe-dep,
+// whose own script is tiny and sets only its flag: what matters is
+// the ORDER, which the dependent observes rather than the test
+// inferring from network timing.
+const depBehaviorJS = `(function () {
+  'use strict';
+  var NS = window.__gofastr = window.__gofastr || {};
+  var lm = NS.loadedModules = NS.loadedModules || {};
+  window.__depReadyAtEval = !!(Object.prototype.hasOwnProperty.call(lm, 'probe-dep') && lm['probe-dep']);
+  lm['probe-beh'] = true;
+})();`
+
+const depRequirementJS = `(function () {
+  'use strict';
+  var NS = window.__gofastr = window.__gofastr || {};
+  (NS.loadedModules = NS.loadedModules || {})['probe-dep'] = true;
+})();`
+
+// depProbeServer counts fetches per module name, delays the
+// requirement's script by 300ms (so a dependent that does not wait
+// evaluates against a requirement still in flight), and can serve the
+// dependent a body that throws before registering.
+type depProbeServer struct {
+	srv    *httptest.Server
+	hits   map[string]*atomic.Int32
+	broken atomic.Bool
+}
+
+func startDepProbeServer(t *testing.T, head, body string) *depProbeServer {
+	t.Helper()
+	js, err := RuntimeJS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &depProbeServer{hits: map[string]*atomic.Int32{"probe-dep": {}, "probe-beh": {}}}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/__gofastr/runtime.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript")
+		w.Write([]byte(js))
+	})
+	mux.HandleFunc("/__gofastr/runtime/probe-dep.js", func(w http.ResponseWriter, r *http.Request) {
+		p.hits["probe-dep"].Add(1)
+		w.Header().Set("Content-Type", "application/javascript")
+		time.Sleep(300 * time.Millisecond)
+		w.Write([]byte(depRequirementJS))
+	})
+	mux.HandleFunc("/__gofastr/runtime/probe-beh.js", func(w http.ResponseWriter, r *http.Request) {
+		p.hits["probe-beh"].Add(1)
+		w.Header().Set("Content-Type", "application/javascript")
+		if p.broken.Load() {
+			w.Write([]byte(`throw new Error('probe exploded before registering');`))
+			return
+		}
+		w.Write([]byte(depBehaviorJS))
+	})
+	mux.HandleFunc("/__gofastr/runtime/", func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/__gofastr/runtime/"), ".js")
+		w.Header().Set("Content-Type", "application/javascript")
+		if src, ok := Module(name); ok {
+			w.Write([]byte(src))
+			return
+		}
+		http.NotFound(w, r)
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<!doctype html><html><head><title>deps</title>%s</head><body>
+  <main role="main"><span id="ready">ready</span>%s</main>
+  <script src="/__gofastr/runtime.js"></script>
+</body></html>`, head, body)
+	})
+	p.srv = httptest.NewServer(mux)
+	t.Cleanup(p.srv.Close)
+	return p
+}
+
+// A behaviour with Requires loads its requirement first: the
+// dependent's script evaluates only after the requirement registered,
+// however long the requirement's fetch took, and both are fetched
+// exactly once. The requirement's own marker is nowhere on the page,
+// so the requirement is reachable only through the declaration.
+func TestBehaviorRequiresLoadsTheRequirementFirst(t *testing.T) {
+	registry.IsolateForTest(t)
+	registry.RegisterBehavior("probe-dep", depRequirementJS, registry.Markers("[data-probe-dep]"))
+	registry.RegisterBehavior("probe-beh", depBehaviorJS,
+		registry.Markers("[data-probe]"), registry.Requires("probe-dep"))
+
+	p := startDepProbeServer(t, inlineBehaviorsBlock(t), `<p data-probe>dependent</p>`)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(60*time.Second))
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(p.srv.URL+"/"),
+		chromedp.WaitVisible(`#ready`, chromedp.ByID),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if !pollTrue(ctx, `window.__depReadyAtEval === true`) {
+		t.Fatal("the dependent evaluated before its requirement had registered")
+	}
+	if !pollTrue(ctx, `!!(window.__gofastr.loadedModules && window.__gofastr.loadedModules['probe-beh'])`) {
+		// This fixture's dependent sets no probe attribute; its
+		// registration flag is the attachment signal.
+		t.Fatal("the dependent never registered")
+	}
+	if n := p.hits["probe-dep"].Load(); n != 1 {
+		t.Fatalf("requirement fetched %d times, want 1", n)
+	}
+	if n := p.hits["probe-beh"].Load(); n != 1 {
+		t.Fatalf("dependent fetched %d times, want 1", n)
+	}
+}
+
+// A module whose script runs and never registers is not loaded: the
+// loader rejects with 'module failed to register', drops the cached
+// promise, and a retry after the server serves a good body fetches
+// again (hit count 2) and resolves.
+func TestBehaviorThatNeverRegistersRejectsAndRetries(t *testing.T) {
+	registry.IsolateForTest(t)
+	registry.RegisterBehavior("probe-beh", depBehaviorJS, registry.Markers("[data-probe]"))
+
+	// No marker on the page: the only loads are the two the test makes,
+	// so the fetch counts say exactly what the loader did.
+	p := startDepProbeServer(t, inlineBehaviorsBlock(t), `<p>no marker</p>`)
+	p.broken.Store(true)
+	var armed string
+	ctx := chromedptest.Context(t, chromedptest.Timeout(60*time.Second))
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(p.srv.URL+"/"),
+		chromedp.WaitVisible(`#ready`, chromedp.ByID),
+		chromedp.Evaluate(`(() => {
+            window.__gofastr.loadModule('probe-beh')
+              .then(() => { window.__retry = 'resolved'; },
+                    (e) => { window.__retry = 'rejected:' + e.message; });
+            return 'armed';
+        })()`, &armed),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if !pollTrue(ctx, `window.__retry === 'rejected:module failed to register'`) {
+		t.Fatal("a script that ran and never registered did not reject with 'module failed to register'")
+	}
+	if n := p.hits["probe-beh"].Load(); n != 1 {
+		t.Fatalf("module fetched %d times before the retry, want 1", n)
+	}
+	// Serve the good body and load again: the dropped cached promise
+	// means a fresh fetch, not a fulfilled promise for the missing
+	// module.
+	p.broken.Store(false)
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`(() => {
+            window.__retry = '';
+            window.__gofastr.loadModule('probe-beh')
+              .then(() => { window.__retry = 'resolved'; },
+                    (e) => { window.__retry = 'rejected:' + e.message; });
+            return 'armed';
+        })()`, &armed),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if !pollTrue(ctx, `window.__retry === 'resolved'`) {
+		t.Fatal("the retry after the server recovered did not resolve")
+	}
+	if n := p.hits["probe-beh"].Load(); n != 2 {
+		t.Fatalf("module fetched %d times after the retry, want 2", n)
+	}
+}
+
+// data-fui-prefetch on the dependent warms the requirement too,
+// because prefetch goes through loadModule and loadModule is where
+// dependencies live.
+func TestBehaviorPrefetchWarmsRequirements(t *testing.T) {
+	registry.IsolateForTest(t)
+	registry.RegisterBehavior("probe-dep", depRequirementJS, registry.Markers("[data-probe-dep]"))
+	registry.RegisterBehavior("probe-beh", depBehaviorJS,
+		registry.Markers("[data-probe]"), registry.Requires("probe-dep"))
+
+	p := startDepProbeServer(t, inlineBehaviorsBlock(t), ``)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(60*time.Second))
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(p.srv.URL+"/"),
+		chromedp.WaitVisible(`#ready`, chromedp.ByID),
+		chromedp.Evaluate(`(() => {
+            const btn = document.createElement('button');
+            btn.setAttribute('data-fui-prefetch', 'probe-beh');
+            btn.textContent = 'prefetch';
+            document.body.appendChild(btn);
+            btn.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+        })()`, nil),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if !pollTrue(ctx, `!!(window.__gofastr.loadedModules && window.__gofastr.loadedModules['probe-beh'])`) {
+		t.Fatal("hover prefetch never loaded the dependent")
+	}
+	if n := p.hits["probe-dep"].Load(); n != 1 {
+		t.Fatalf("requirement fetched %d times on hover prefetch, want 1", n)
+	}
+	if n := p.hits["probe-beh"].Load(); n != 1 {
+		t.Fatalf("dependent fetched %d times on hover prefetch, want 1", n)
+	}
+}

@@ -41,4 +41,10 @@ var behaviorMarkers = []string{
 var _ = uiregistry.RegisterBehavior(BehaviorName, behaviorJS,
 	uiregistry.Markers("[data-hui-reveal]", "[data-hui-color]", "[data-hui-when]",
 		"[data-hui-form-errors]", "[data-hui-action]", "[data-hui-drop]",
-		"[data-hui-system]"))
+		"[data-hui-system]"),
+	// The action hooks bind through the kernel's action primitive
+	// (core-ui/runtime/src/action.js): the loader has it registered
+	// before this module evaluates, so armActions below can call
+	// window.__gofastr.action.bind without a guard for a primitive
+	// that is still in flight.
+	uiregistry.Requires("action"))

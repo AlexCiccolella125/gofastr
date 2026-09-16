@@ -40,6 +40,24 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   two attributes it writes back (`data-hui-when-off`,
   `data-hui-drop-over`) are its own. Source gates in
   `behavior_test.go`, browser coverage in `behavior_e2e_test.go`.
+- **`registry.Requires` and loader readiness**: a behaviour may name
+  the modules that must be loaded before it; the behaviours block
+  carries them as `r`, and `loadModule` loads requirements before the
+  module's script on every load path. Readiness is registration: a
+  module's promise resolves only when `loadedModules[name]` is set
+  after its script ran, and a script that ran and never registered
+  rejects with "module failed to register" and drops its cached
+  promise so a retry fetches again. Preload and the static export
+  list a needed behaviour's requirements with it. Spec:
+  `docs/spec-behavior-registry.md` "Dependencies and readiness".
+- **The action primitive** (`core-ui/runtime/src/action.js`): the
+  optimistic mutation machine written once —
+  `window.__gofastr.action.request(url, method)` performs the
+  same-origin mutation with the CSRF header and resolves to a
+  boolean, `window.__gofastr.action.bind(el, spec)` attaches the
+  idle → pending → committed → error lifecycle, the label flip,
+  `aria-busy`/`disabled` while pending and the `action:*` events. No
+  marker: owners reach it through `Requires("action")`.
 
 ### Changed
 - **One home per helper.** A clone survey over the tree found the same
@@ -93,6 +111,29 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   error text is byte-identical. The ecommerce example was regenerated;
   meridian's generated files predate the current templates and carry
   hand edits, so they were left alone.
+- **The two action modules live in `framework/ui`**: `optimisticaction`
+  and `toggleaction` are registered behaviours beside the Go that
+  renders their markup, built on the action primitive, dispatching
+  the documented `optimistic-action:*` / `toggle-action:*` events
+  alongside the primitive's. Their `data-fui-optimistic-*` and
+  `data-fui-toggle-*` attributes are unchanged; the kernel's marker
+  table lost the two entries.
+
+- **The action modules re-arm after an island swap.** They set their
+  loaded flags and register their scanners now, so markup that
+  arrives after the module loaded is bound by the kernel's insertion
+  scan; before, a swapped-in OptimisticAction or ToggleAction button
+  was dead DOM. Eleven other modules that never set their flags
+  gained them, which the loader's new readiness gate requires.
+- **`framework/headless` actions have their own hooks.** The buttons
+  no longer borrow `data-fui-comp="ui-optimistic-action"` /
+  `ui-toggle-action`, which are also the stylesheet's identity (a
+  headless button could pull `framework/ui` CSS). They render
+  `data-hui-action-endpoint`, `-method`, `-group`, `-untoggle` and
+  the `data-hui-action-idle` / `-done` label parts; the headless
+  module binds them through the primitive (`Requires("action")`), so
+  a failed toggle commit now announces its failure sentence too,
+  where the old module reverted in silence.
 
 ### Fixed
 - **`core-ui/check`: the JavaScript lints reach registered behaviours.**

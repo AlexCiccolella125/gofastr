@@ -470,7 +470,10 @@ helpful pre-flight read for human reviewers.
 9. **Behaviour registers like style**: when a module is warranted, it
    lives in your package, embedded beside the Go, and registers with
    its markers: `registry.RegisterBehavior("<name>", js,
-   registry.Markers("[data-<prefix>-x]"))`. The host serves it at
+   registry.Markers("[data-<prefix>-x]"))`. It may also
+   `registry.Requires("action")` (or any embedded module or registered
+   behaviour): the loader has the requirement registered before the
+   module's script runs, on every load path. The host serves it at
    `/__gofastr/runtime/<name>.js`, the kernel scans the markers, and
    the module loads once when one appears. Keep the module contract
    (`window.__gofastr.loadedModules[name] = true` on attach, a scanner

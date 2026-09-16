@@ -1,11 +1,27 @@
 package ui
 
 import (
+	_ "embed"
+
 	"github.com/DonaldMurillo/gofastr/core-ui/html"
 	"github.com/DonaldMurillo/gofastr/core-ui/registry"
 	"github.com/DonaldMurillo/gofastr/core-ui/style"
 	"github.com/DonaldMurillo/gofastr/core/render"
 )
+
+// The component's behaviour registers the way its stylesheet does:
+// the module is embedded beside the Go that renders the markup it
+// binds, and Requires("action") puts the kernel's action primitive
+// (core-ui/runtime/src/action.js) on the page before this module
+// evaluates. The markers are spelled as literals because the
+// hard-rule-5 gate reads every registry.Markers call in the tree.
+//
+//go:embed optimisticaction.js
+var optimisticActionJS string
+
+var _ = registry.RegisterBehavior("optimisticaction", optimisticActionJS,
+	registry.Markers("[data-fui-comp=\"ui-optimistic-action\"]"),
+	registry.Requires("action"))
 
 // ─── OptimisticAction ───────────────────────────────────────────────
 //

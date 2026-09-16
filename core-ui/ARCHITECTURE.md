@@ -194,9 +194,9 @@ server side and the runtime does the work.
 | `data-fui-banner-dismiss` | On the X button inside a `framework/ui.Banner`: clicking sets `hidden` on the nearest `[data-fui-comp="ui-banner"]` ancestor. The runtime delegates the click globally so dismissal survives partial-island swaps. |
 | `data-fui-scrollspy` | Marks a scrollspy wrapper (`core-ui/patterns/scrollspy.Wrap` emits a `<div>` around a nav of `<a href="#id">` anchors). The runtime demand-loads the scrollspy module, which IntersectionObserves the anchored targets inside the configured region and tags the link whose target is in the active band with `aria-current="true"` + `.is-active`. The `activelink` module leaves these links alone: scrollspy owns their current-state. |
 | `data-fui-scrollspy-target` | On the scrollspy wrapper: a CSS selector for ADDITIONAL target elements when sections aren't headings (default `h2[id], h3[id]`, e.g. `section[id]`). Only anchors whose `href="#id"` resolves to an element inside the observed region participate; the active link is still whichever anchored target is in view. |
-| `data-fui-optimistic-idle` / `data-fui-optimistic-success` / `data-fui-optimistic-endpoint` / `data-fui-optimistic-method` | On an OptimisticAction button: the runtime flips the visible label between the idle and success copy as it dispatches a fetch to the endpoint+method, rolling back on error. Used by `framework/ui.OptimisticAction` for "Save / Saved!" patterns without per-button JS. |
-| `data-fui-toggle-endpoint` / `data-fui-toggle-method` / `data-fui-toggle-allow-untoggle` / `data-fui-toggle-untoggle-endpoint` | On a three-state ToggleAction button (`framework/ui.ToggleAction`, `framework/ui/toggleaction.go`): `endpoint`+`method` (default POST) hit when toggling from idle → committed; `allow-untoggle="true"` lets a second click reverse the action, hitting `untoggle-endpoint` (same method) if set. With NO untoggle endpoint configured the button flips back to idle locally without issuing any request. Driven by `runtime/src/toggleaction.js` with a three-state mutex so rapid clicks can't race. |
-| `data-fui-toggle-idle` / `data-fui-toggle-committed` | Markers on the two label spans inside a ToggleAction button. The runtime shows/hides them as the button transitions between idle and committed states. SSR ships the initial visible state. |
+| `data-fui-optimistic-idle` / `data-fui-optimistic-success` / `data-fui-optimistic-endpoint` / `data-fui-optimistic-method` | On an OptimisticAction button: the adapter flips the visible label between the idle and success copy as it dispatches a fetch to the endpoint+method, rolling back on error. Bound by the registered behaviour `framework/ui/optimisticaction.js` (Requires the kernel's `action` primitive) for `framework/ui.OptimisticAction`, "Save / Saved!" patterns without per-button JS. |
+| `data-fui-toggle-endpoint` / `data-fui-toggle-method` / `data-fui-toggle-allow-untoggle` / `data-fui-toggle-untoggle-endpoint` | On a three-state ToggleAction button (`framework/ui.ToggleAction`, `framework/ui/toggleaction.go`): `endpoint`+`method` (default POST) hit when toggling from idle → committed; `allow-untoggle="true"` lets a second click reverse the action, hitting `untoggle-endpoint` (same method) if set. With NO untoggle endpoint configured the button flips back to idle locally without issuing any request. Driven by the registered behaviour `framework/ui/toggleaction.js` (Requires the kernel's `action` primitive), whose three-state mutex keeps rapid clicks from racing. |
+| `data-fui-toggle-idle` / `data-fui-toggle-committed` | Markers on the two label spans inside a ToggleAction button. The adapter shows/hides them as the button transitions between idle and committed states. SSR ships the initial visible state. |
 | `data-fui-toggle-group="<key>"` | Joins a ToggleAction button to a client-side mutex: committing any button with the same group key optimistically reverts the previously-committed sibling (no extra RPC: the server stays the source of truth and a later navigation refreshes from server state). Maps from `ToggleActionConfig.Group`. |
 | `data-fui-network-retry-threshold` / `data-fui-network-retry-health` / `data-fui-network-retry-button` / `data-fui-network-retry-sse-silence` | On a NetworkRetryBanner element: threshold = number of consecutive fetch failures before the banner shows; health = the URL the runtime probes to detect recovery; button = the retry trigger; sse-silence = grace period (ms) after the last SSE frame before the banner considers the link unhealthy. The runtime polls `window.__gofastr.sseStatus.lastEventAt` (kept current by the SSE module on every frame) and, on a `gofastr:sse-status` reconnect, re-probes `health` so the banner can dismiss. |
 | `data-fui-network-retry-demo-trigger` / `data-fui-network-retry-demo-recover` | Demo-only attributes (`examples/site` NetworkRetryBanner page): trigger forces the banner into the failed state for screenshot/dev purposes; recover restores it. Not used in production wiring. |
@@ -1472,6 +1472,28 @@ that binds only its own markers by attribute, sets
 registers `window.__gofastr._moduleScanners[<name>] = fn(root)`,
 idempotent, so the kernel can hand it inserted DOM and the document
 after a navigation. Design and sequence: `docs/spec-behavior-registry.md`.
+
+**Dependencies and readiness.** A behaviour may declare the modules
+that must be registered before it: `registry.Requires(names...)`,
+carried in the behaviours block as `r`. The names are embedded kernel
+modules or registered behaviours; a name that is neither, or a cycle,
+panics where the block is built. The loader is the one place every
+load goes through (marker scan, idle queue, hover prefetch, the
+interaction bridge), so it is where dependencies live: `loadModule`
+loads a module's requirements first, in parallel, and only then
+appends its script. Readiness is registration, not transport: the
+loader resolves a module's promise when `loadedModules[name]` is an
+own truthy property after the script ran, and a script that ran and
+never set its flag rejects with "module failed to register" and drops
+its cached promise, so a retry fetches again. Preload follows
+requirements (`NeededModules` lists them with their dependents) and
+the static exporter dumps them, so the primitive arrives with its
+adapters. A module with no marker of its own (a primitive, like the
+kernel's `action`) is reachable only through `Requires` or an explicit
+`loadModule`, and is served, hashed, budgeted and linted like the
+rest; `window.__gofastr.action` (request, bind) is the primitive the
+two action adapters and `framework/headless` bind their buttons
+through.
 
 ### What about widgets?
 

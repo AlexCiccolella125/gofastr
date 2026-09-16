@@ -451,6 +451,26 @@ value, and the rest): the clean-tree tests find every registered
 behaviour through its `//go:embed` directive. Contract and rules:
 `core-ui/ARCHITECTURE.md` "Component behaviour".
 
+A behaviour may declare dependencies:
+`registry.Requires("action")` names the modules that must be loaded and
+registered before it, embedded kernel modules or other registered
+behaviours; the behaviours block carries them as `r`, and the loader
+honours them on every load path, requirements first, then the module's
+script. Readiness is registration: the loader resolves a module's
+promise only when `loadedModules[name]` is set after its script ran,
+and a script that ran and never registered rejects with "module failed
+to register", drops its cached promise, and a retry fetches again.
+Preload and the static export list a needed behaviour's requirements
+beside it. A module with no marker (a primitive) is reachable only
+through `Requires` or an explicit `loadModule`; the kernel's `action`
+module is one — `window.__gofastr.action.request(url, method)` performs
+a same-origin mutation with the CSRF header and resolves to a boolean,
+and `window.__gofastr.action.bind(el, spec)` attaches the whole
+optimistic lifecycle (idle → pending → committed → error, the label
+flip, `aria-busy`/`disabled` while pending, the `action:*` events) to
+an element from a spec of `endpoint`, `method`, `idle`, `done`,
+`group`, `untoggle` and `pressed`.
+
 The framework's own `headless` module is registered this way by
 `framework/headless/behavior.go`, binding that package's `data-hui-*`
 hooks with the markers `[data-hui-reveal]`, `[data-hui-color]`,

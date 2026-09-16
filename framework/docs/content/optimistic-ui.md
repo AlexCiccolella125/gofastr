@@ -604,19 +604,24 @@ network is slow, the server is down, or the response never comes. This
 recipe is not a separate component; it is the failure path every other
 recipe must survive.
 
-**Primitive:** the `error`/`idle` revert path in `optimisticaction.js`,
-the silent revert in `toggleaction.js`, the rollback in `sortablelist.js`,
-and `ui.NetworkRetryBanner` for the global "you appear to be offline"
-surface.
+**Primitive:** the `error`/`idle` revert path in the kernel's
+`action` module (bound by the `framework/ui` adapters
+`optimisticaction.js` and `toggleaction.js`), the rollback in
+`sortablelist.js`, and `ui.NetworkRetryBanner` for the global "you
+appear to be offline" surface.
 
 **What happens on failure:**
 
 - `OptimisticAction` paints the `error` state (shake animation, disabled
   by `prefers-reduced-motion`), then reverts to `idle` after ~600 ms. It
   dispatches `optimistic-action:rolled-back` so app code can hook in.
-- `ToggleAction` reverts directly to the prior state (`committed` →
-  `idle` on a failed untoggle; `idle` → `idle` on a failed commit). No
-  shake; see [Consistency notes](#consistency-notes).
+- `ToggleAction` fails the same way now that both ride the kernel's
+  `action` primitive: a failed commit paints `error`, dispatches
+  `action:rolled-back`, and reverts to `idle` after ~600 ms. A failed
+  untoggle is the one silent path: the state stays `committed`,
+  because the revert was refused and there is nothing to roll back to.
+  The `ui-toggle-action` stylesheet ships no shake keyframes, so the
+  toggle's `error` window is a pause, not a shake.
 - `sortablelist` restores the destination column from its captured
   snapshot. With `Version` set, a 409 takes the conflict-refresh path
   instead; without it, any non-2xx rolls back.
@@ -691,26 +696,26 @@ These are real gaps. They are documented here rather than silently
 papered over; each is a medium-sized change (runtime + Go + tests) that
 should be undertaken deliberately, not as a side effect of a docs pass.
 
-1. **`ToggleAction` has no failure indication.** On a non-2xx response,
-   `ToggleAction` silently reverts to the prior state. `OptimisticAction`
-   paints an `error` shake first, then reverts. A user who clicks
-   `ToggleAction`, sees it flip, and then sees it flip back gets no
-   explanation; they have to infer "the RPC failed." A future revision
-   should give `ToggleAction` the same `error` state + shake
-   (`data-state="error"`, the `ui-optimistic-action-shake` keyframes,
-   `prefers-reduced-motion` guard) and announce the rollback.
+1. **`ToggleAction`'s failure indication stops short of a shake.** Both
+   buttons ride the kernel's `action` primitive, so a failed commit on
+   either paints `data-state="error"`, dispatches `action:rolled-back`
+   and reverts after ~600 ms — but only the `ui-optimistic-action`
+   stylesheet ships shake keyframes, so a failed `ToggleAction` pauses
+   where a failed `OptimisticAction` shakes. `framework/headless`'s
+   buttons announce the rollback in a status span either way; the
+   styled pair still rely on the visible flip.
 
-2. **No spoken announcement of commit / rollback.** `sortablelist`
+2. **No spoken announcement of commit in the styled layer.** `sortablelist`
    announces grab/move/rollback/conflict through a polite `aria-live`
-   region. `OptimisticAction` and `ToggleAction` do not; they rely on
-   the visible label flip and `aria-busy` toggling. Sightless users
-   perceive pending state but not "Saved ✓" or "Rolled back." The
-   custom events (`optimistic-action:committed`,
-   `optimistic-action:rolled-back`, `toggle-action:commit`,
-   `toggle-action:untoggle`) are available for app code to write into an
-   `aria-live` span today; a future revision should ship that span
-   inside the component so every optimistic surface is announced
-   consistently.
+   region. `OptimisticAction` and `ToggleAction` do not announce the
+   commit; they rely on the visible label flip and `aria-busy`
+   toggling. The custom events are available for app code to write
+   into an `aria-live` span: the primitive's `action:start`,
+   `action:committed`, `action:rolled-back` and `action:untoggle` on
+   every bound button, plus the component names `optimistic-action:*`
+   and `toggle-action:commit` / `toggle-action:untoggle` the adapters
+   re-dispatch. `framework/headless`'s failure span is the shipped
+   version of that pattern for the headless pair.
 
 3. **`OptimisticAction` is fire-and-forget; `ToggleAction` is too.**
    Neither serializes form data. For mutations that must transmit a

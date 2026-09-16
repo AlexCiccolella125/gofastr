@@ -31,7 +31,9 @@ func (behaviorMarkerScreen) Render() render.HTML {
 // kernel reads, because exports must be self-contained files.
 func TestBuildEmitsRegisteredBehavior(t *testing.T) {
 	registry.IsolateForTest(t)
-	registry.RegisterBehavior("static-probe", `(function(){})();`, registry.Markers("[data-static-probe]"))
+	registry.RegisterBehavior("static-probe-dep", `(function(){})();`, registry.Markers("[data-static-probe-dep]"))
+	registry.RegisterBehavior("static-probe", `(function(){})();`, registry.Markers("[data-static-probe]"),
+		registry.Requires("static-probe-dep"))
 
 	a := coreapp.NewApp("SSGBehavior")
 	a.Register("/", &behaviorMarkerScreen{}, nil)
@@ -62,5 +64,15 @@ func TestBuildEmitsRegisteredBehavior(t *testing.T) {
 	}
 	if !strings.Contains(string(page), `"static-probe"`) {
 		t.Error("exported behaviours block does not list the registered behaviour")
+	}
+	// A requirement rides the block as r, and the required module is
+	// dumped like every other: an export is self-contained, so the
+	// primitive must ship with the adapter that needs it even though
+	// no marker of its own appears on any page.
+	if !strings.Contains(string(page), `"s":["[data-static-probe]"],"r":["static-probe-dep"]`) {
+		t.Error("exported behaviours block does not carry the requirement as r")
+	}
+	if _, err := os.Stat(filepath.Join(out, "__gofastr", "runtime", "static-probe-dep.js")); err != nil {
+		t.Errorf("required behaviour module not dumped: %v", err)
 	}
 }

@@ -99,6 +99,16 @@ func startBehaviorServer(t *testing.T, body string) *behaviorServer {
 		w.Header().Set("Content-Type", "application/javascript")
 		w.Write([]byte(js))
 	})
+	// Mutation endpoints for the action tests: a real 204 commits, a
+	// real 422 rolls back. The action primitive forwards these the
+	// way it forwards any app endpoint, so the announcement is driven
+	// by a genuine response, not a synthetic event.
+	mux.HandleFunc("/__hui/ok", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/__hui/fail", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "no", http.StatusUnprocessableEntity)
+	})
 	mux.HandleFunc("/__gofastr/runtime/headless.js", func(w http.ResponseWriter, r *http.Request) {
 		b.hits.Add(1)
 		w.Header().Set("Content-Type", "application/javascript")
@@ -585,32 +595,103 @@ func TestE2E_DropListsFilesAndSaysHowMany(t *testing.T) {
 
 // A rolled-back optimistic mutation announces its failure sentence in
 // the polite status span, the words coming from the root's
-// data-hui-action-failed.
+// data-hui-action-failed. The 422 is a real response from the test
+// server: the primitive's fetch, rollback and event all run, and the
+// announcement is what a reader hears of the whole chain.
 func TestE2E_ActionFailureIsAnnounced(t *testing.T) {
 	b := startBehaviorServer(t, string(OptimisticAction(OptimisticActionProps{
-		Endpoint: "/follow", IdleLabel: "Follow", SuccessLabel: "Following",
+		Endpoint: "/__hui/fail", IdleLabel: "Follow", SuccessLabel: "Following",
 	}, nil)))
 	ctx := behaviorPage(t, b)
 	if !pollTrue(ctx, moduleLoadedExpr) {
 		t.Fatal("the module never loaded")
 	}
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
-		document.querySelector('[data-hui-action]')
-			.dispatchEvent(new CustomEvent('optimistic-action:rolled-back', {bubbles: true}));
-	})()`, nil)); err != nil {
-		t.Fatalf("dispatching the rollback: %v", err)
+	if err := chromedp.Run(ctx,
+		chromedp.Click(`[data-hui-action]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("clicking the action: %v", err)
 	}
 	const said = `document.querySelector('[data-hui-action-status]').textContent === document.querySelector('[data-hui-action]').getAttribute('data-hui-action-failed')`
 	if !pollTrue(ctx, said) {
 		t.Fatal("the status span never said the failure sentence from the root")
 	}
-	var sentence string
-	if err := chromedp.Run(ctx, chromedp.Evaluate(
-		`document.querySelector('[data-hui-action-status]').textContent`, &sentence)); err != nil {
-		t.Fatalf("reading the sentence: %v", err)
+	var sentence, state string
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`document.querySelector('[data-hui-action-status]').textContent`, &sentence),
+		chromedp.Evaluate(`document.querySelector('[data-hui-action]').getAttribute('data-state')`, &state),
+	); err != nil {
+		t.Fatalf("reading the outcome: %v", err)
 	}
 	if sentence != "Could not save. Try again." {
 		t.Fatalf("the failure sentence was %q, want the Words default", sentence)
+	}
+	// The rollback passes through error and returns to idle, so the
+	// button can be tried again.
+	if !pollTrue(ctx, `document.querySelector('[data-hui-action]').getAttribute('data-state') === 'idle'`) {
+		t.Fatalf("the rolled-back button stayed in %q", state)
+	}
+}
+
+// A failed toggle announces too: the primitive dispatches
+// action:rolled-back for a failed commit on either button, where the
+// old toggle module reverted in silence.
+func TestE2E_ToggleFailureIsAnnounced(t *testing.T) {
+	b := startBehaviorServer(t, string(ToggleAction(ToggleActionProps{
+		Endpoint: "/__hui/fail", IdleLabel: "Watch", CommittedLabel: "Watching",
+	}, nil)))
+	ctx := behaviorPage(t, b)
+	if !pollTrue(ctx, moduleLoadedExpr) {
+		t.Fatal("the module never loaded")
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.Click(`[data-hui-action]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("clicking the toggle: %v", err)
+	}
+	const said = `document.querySelector('[data-hui-action-status]').textContent === document.querySelector('[data-hui-action]').getAttribute('data-hui-action-failed')`
+	if !pollTrue(ctx, said) {
+		t.Fatal("a failed toggle never announced its failure sentence")
+	}
+	if !pollTrue(ctx, `document.querySelector('[data-hui-action]').getAttribute('data-state') === 'idle'`) {
+		t.Fatal("the failed toggle never returned to idle")
+	}
+}
+
+// An action button that arrives after load is bound by the kernel's
+// insertion scan, the arrival the module's registered scanner exists
+// for: replace the region through innerHTML, click the new button,
+// and it commits against the real endpoint.
+func TestE2E_ActionRebindsAfterSwap(t *testing.T) {
+	b := startBehaviorServer(t, `<div id="region">`+string(OptimisticAction(OptimisticActionProps{
+		Endpoint: "/__hui/ok", IdleLabel: "Follow", SuccessLabel: "Following",
+	}, nil))+`</div>`)
+	ctx := behaviorPage(t, b)
+	if !pollTrue(ctx, moduleLoadedExpr) {
+		t.Fatal("the module never loaded")
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`document.getElementById('region').innerHTML = `+"`"+string(OptimisticAction(OptimisticActionProps{
+			Endpoint: "/__hui/ok", IdleLabel: "Join", SuccessLabel: "Joined",
+		}, nil))+"`", nil),
+	); err != nil {
+		t.Fatalf("swapping the region: %v", err)
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.Click(`[data-hui-action]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("clicking the new button: %v", err)
+	}
+	if !pollTrue(ctx, `document.querySelector('[data-hui-action]').getAttribute('data-state') === 'committed'`) {
+		t.Fatal("the swapped-in action button never committed")
+	}
+	var label string
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`document.querySelector('[data-hui-action-done]').textContent`, &label),
+	); err != nil {
+		t.Fatalf("reading the committed label: %v", err)
+	}
+	if label != "Joined" {
+		t.Fatalf("the committed label was %q, want the swapped-in button's own", label)
 	}
 }
 

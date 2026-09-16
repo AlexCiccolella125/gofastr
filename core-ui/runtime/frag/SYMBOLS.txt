@@ -10,6 +10,7 @@
 #   GOFASTR_UPDATE_RUNTIME_SYMBOLS=1 go test ./core-ui/runtime/ -run TestComposedRuntimeIsSymbolComplete
 #
 boot	10	cfg
+boot	10	lm2
 boot	2	_bootstrapComponentCSS
 boot	2	_initialPass
 boot	2	_injectSignalAria
@@ -75,7 +76,7 @@ boot	6	name
 boot	6	names
 boot	6	node
 boot	6	o
-boot	6	s
+boot	6	reqs
 boot	6	script
 boot	6	sub
 boot	6	target
@@ -86,6 +87,7 @@ boot	8	lb
 boot	8	lbId
 boot	8	node
 boot	8	params
+boot	8	s
 boot-embed	4	PROTO
 boot-embed	4	REQUEST_TIMEOUT_MS
 boot-embed	4	_fetch

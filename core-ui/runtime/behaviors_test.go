@@ -146,6 +146,55 @@ func TestBehaviorsJSON(t *testing.T) {
 	}
 }
 
+// mustPanicNames runs fn and fails when it does not panic with a
+// message containing want.
+func mustPanicNames(t *testing.T, want string, fn func()) {
+	t.Helper()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatalf("no panic, want one naming %q", want)
+		}
+		if msg, ok := r.(string); !ok || !strings.Contains(msg, want) {
+			t.Fatalf("panic %v does not name %q", r, want)
+		}
+	}()
+	fn()
+}
+
+// A valid requirement rides the behaviours block as r, so the kernel
+// loads the primitive before the behaviour that needs it. A
+// requirement that is neither an embedded module nor a registered
+// behaviour, and a cycle, panic at BehaviorsJSON time with the names,
+// which is a startup failure rather than a module that waits forever.
+func TestBehaviorsJSONRequirements(t *testing.T) {
+	registry.IsolateForTest(t)
+	registry.RegisterBehavior("dep", probeJS, registry.Markers("[data-dep]"))
+	registry.RegisterBehavior("user", probeJS, registry.Markers("[data-user]"), registry.Requires("dep", "copy"))
+	var got map[string]struct {
+		R []string `json:"r"`
+	}
+	if err := json.Unmarshal(BehaviorsJSON(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got["user"].R, ",") != "dep,copy" {
+		t.Fatalf("requirements = %v, want dep,copy", got["user"].R)
+	}
+	if len(got["dep"].R) != 0 {
+		t.Fatalf("a behaviour with no requirements carried r: %v", got["dep"].R)
+	}
+
+	registry.IsolateForTest(t)
+	registry.RegisterBehavior("user", probeJS, registry.Markers("[data-user]"), registry.Requires("no-such-module"))
+	mustPanicNames(t, "no-such-module", func() { BehaviorsJSON() })
+
+	registry.IsolateForTest(t)
+	registry.RegisterBehavior("aa", probeJS, registry.Markers("[data-aa]"), registry.Requires("bb"))
+	registry.RegisterBehavior("bb", probeJS, registry.Markers("[data-bb]"), registry.Requires("cc"))
+	registry.RegisterBehavior("cc", probeJS, registry.Markers("[data-cc]"), registry.Requires("aa"))
+	mustPanicNames(t, "aa -> bb -> cc -> aa", func() { BehaviorsJSON() })
+}
+
 // A behaviour registered under an embedded module's name is refused
 // twice: at registration, by the names this package reserved at init,
 // and where the two sets meet, for a registration that ran before the

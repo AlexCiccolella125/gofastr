@@ -28,7 +28,8 @@ func (behMarkerScreen) Render() render.HTML {
 func registerTestBehavior(t *testing.T) {
 	t.Helper()
 	registry.IsolateForTest(t)
-	registry.RegisterBehavior("beh", `(function(){});`, registry.Markers("[data-x]"))
+	registry.RegisterBehavior("beh", `(function(){});`, registry.Markers("[data-x]"),
+		registry.Requires("action"))
 }
 
 // manifest.js carries the behaviours global with the registered
@@ -43,7 +44,7 @@ func TestManifestJSCarriesBehaviors(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("status %d", w.Code)
 	}
-	want := `window.__gofastr_behaviors={"beh":{"s":["[data-x]"]}}`
+	want := `window.__gofastr_behaviors={"beh":{"s":["[data-x]"],"r":["action"]}}`
 	if !strings.Contains(w.Body.String(), want) {
 		t.Errorf("manifest.js missing %q; body: %s", want, w.Body.String())
 	}

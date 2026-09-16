@@ -150,11 +150,23 @@
   // module itself for back-compat with external callers.
 
   // === MODULE LOADER ===================================================
-  // loadModule(name) returns a cached Promise that resolves once the
-  // named split-runtime module is loaded. Multiple callers for the
-  // same name share one fetch. Modules self-register by setting
-  // window.__gofastr.loadedModules[name] = true; the loader polls that
-  // flag while the <script> downloads.
+  // loadModule(name) returns a cached Promise covering the module AND
+  // its requirements. Multiple callers for the same name share one
+  // fetch. A module that declared requirements (the behaviours block
+  // carries them as r) has every requirement loadModule'd first, in
+  // parallel, and only then is its own script appended, so the
+  // dependent evaluates with its primitive already registered; a
+  // requirement's own requirements load the same way.
+  //
+  // Readiness is registration, not transport. A module announces
+  // itself by setting window.__gofastr.loadedModules[name] to a truthy
+  // value, so the promise resolves only when that flag is an own,
+  // truthy property after the script's load event. A script that ran
+  // and never registered rejects with 'module failed to register' and
+  // drops the cached promise, so a retry fetches again rather than
+  // handing out a fulfilled promise for a module that is not there.
+  // A fetch error rejects the same way, and so does a failed
+  // requirement: the dependent's cached promise is dropped too.
   //
   // Cache-busting: the host SSRs the per-module hash into a JSON
   // manifest under <script id="gofastr-runtime-modules">. The loader
@@ -195,17 +207,40 @@
       if (!/^[\w-]+$/.test(name)) return reject(new Error('module failed'));
       const v = _moduleManifest[name] || '';
       const url = '/__gofastr/runtime/' + name + '.js' + (v ? '?v=' + v : '');
-      const s = document.createElement('script');
-      s.src = url;
-      s.async = false;
-      s.onload = () => resolve();
-      s.onerror = () => {
-        // Drop the cached promise so a retry fires a fresh request.
+      // Requirements live in the registered descriptors only:
+      // embedded modules have no channel to declare one. Looked up
+      // here rather than at scan time so every load path (marker scan,
+      // idle queue, hover prefetch, the interaction bridge) honors
+      // them without each knowing about the block.
+      const reqs = (_registered.find((m) => m.name === name) || {}).requires || [];
+      Promise.all(reqs.map(loadModule)).then(() => {
+        const s = document.createElement('script');
+        s.src = url;
+        s.async = false;
+        s.onload = () => {
+          const lm2 = window.__gofastr.loadedModules;
+          if (!(lm2 && own(lm2, name) && lm2[name])) {
+            // The script ran and never registered: not loaded. Drop
+            // the cached promise so a retry fetches again.
+            _modulePromises.delete(name);
+            reject(new Error('module failed to register'));
+            return;
+          }
+          resolve();
+        };
+        s.onerror = () => {
+          // Drop the cached promise so a retry fires a fresh request.
+          _modulePromises.delete(name);
+          reject(new Error('module failed'));
+        };
+        document.head.appendChild(s);
+      }, () => {
         _modulePromises.delete(name);
         reject(new Error('module failed'));
-      };
-      document.head.appendChild(s);
+      });
     });
+    // One promise per name covers the requirements and the module, so
+    // every caller of this load shares the single fetch above.
     _modulePromises.set(name, modPromise);
     return modPromise;
   }
@@ -431,10 +466,6 @@
     { name: 'toc',             selector: '[data-fui-toc]' },
     // ScrollSpy: generic IntersectionObserver section tracking for any nav with in-page anchors.
     { name: 'scrollspy',       selector: '[data-fui-scrollspy]' },
-    // OptimisticAction: SSR-declared success state flips on click, RPC fires underneath, rolls back on non-2xx.
-    { name: 'optimisticaction', selector: '[data-fui-comp="ui-optimistic-action"]' },
-    // ToggleAction: three-state mutex toggle (idle ↔ committed with optional untoggle, mutually exclusive within data-fui-toggle-group).
-    { name: 'toggleaction', selector: '[data-fui-comp="ui-toggle-action"]' },
     // DragDismiss: pointer drag-to-close for BottomSheet-style widgets.
     { name: 'dragdismiss', selector: '[data-fui-drag-dismiss="true"]' },
     // NetworkRetryBanner: persistent banner gated by RPC-failure threshold / SSE silence. Health-check retry.
@@ -551,7 +582,9 @@
         JSON.parse((document.getElementById('gofastr-behaviors') || {}).textContent || '{}');
       // Own entries only: the block is JSON from the host, but the
       // kernel never reads a registry through the prototype chain.
-      return Object.entries(o).map(([n, v]) => ({ name: n, selector: v.s.join(','), idle: !!v.i }));
+      // requires is the r array: the modules loadModule'd before this
+      // one (see the loader above).
+      return Object.entries(o).map(([n, v]) => ({ name: n, selector: v.s.join(','), idle: !!v.i, requires: v.r || [] }));
     } catch (_) { return []; }
   })();
   function _scanForModules(root) {

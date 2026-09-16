@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/DonaldMurillo/gofastr/core-ui/registry"
 
 	"github.com/DonaldMurillo/gofastr/internal/chromedptest"
 	"github.com/chromedp/chromedp"
@@ -31,6 +34,21 @@ func invalidationSrv(t *testing.T) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// toggleaction left the embedded modules for the behaviour seam:
+	// framework/ui registers it beside the Go that renders its markup,
+	// and this package's test binary cannot link framework/ui (an
+	// import cycle), so the adapter is registered from its real
+	// source on disk, in an isolated registry, and the page carries
+	// the inline behaviours block the kernel reads. The bytes are the
+	// ones the host serves; only the registration's origin differs.
+	registry.IsolateForTest(t)
+	toggleJS, err := os.ReadFile("../../framework/ui/toggleaction.js")
+	if err != nil {
+		t.Fatalf("reading framework/ui/toggleaction.js: %v", err)
+	}
+	registry.RegisterBehavior("toggleaction", string(toggleJS),
+		registry.Markers("[data-fui-comp=\"ui-toggle-action\"]"), registry.Requires("action"))
+	behaviorsBlock := string(BehaviorsJSON())
 
 	var mu sync.Mutex
 	counts := map[string]int{}
@@ -119,7 +137,7 @@ func invalidationSrv(t *testing.T) *httptest.Server {
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `<!doctype html><html><head><title>inval</title>%s</head><body>
+		fmt.Fprintf(w, `<!doctype html><html><head><title>inval</title>%s<script type="application/json" id="gofastr-behaviors">%s</script></head><body>
   <main role="main" tabindex="-1">
     <a id="open" href="/items?view=open">open</a>
     <a id="closed" href="/items?view=closed">closed</a>
@@ -139,7 +157,7 @@ func invalidationSrv(t *testing.T) *httptest.Server {
   </main>
   <span id="ready">ready</span>
   <script src="/__gofastr/runtime.js"></script>
-</body></html>`, routesJSON)
+</body></html>`, routesJSON, behaviorsBlock)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
