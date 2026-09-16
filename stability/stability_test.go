@@ -133,3 +133,19 @@ func TestClassifyInternalAlwaysWins(t *testing.T) {
 		}
 	}
 }
+
+// goStderr is what turns "exit status 1" into a reason: both branches
+// have a case, so removing either would show here rather than in a CI
+// log that says nothing.
+func TestGoStderrReportsWhatTheCommandWrote(t *testing.T) {
+	_, err := exec.Command("sh", "-c", "echo '  it broke  ' >&2; exit 1").Output()
+	if err == nil {
+		t.Fatal("the command was meant to fail")
+	}
+	if got := goStderr(err); got != "it broke" {
+		t.Fatalf("goStderr(ExitError) = %q, want the trimmed stderr", got)
+	}
+	if got := goStderr(errors.New("not an exit error")); got != "" {
+		t.Fatalf("goStderr(plain error) = %q, want empty", got)
+	}
+}

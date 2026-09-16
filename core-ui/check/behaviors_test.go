@@ -68,7 +68,7 @@ const registeringGo = `package a
 import (
 	_ "embed"
 
-	"example.com/registry"
+	"github.com/DonaldMurillo/gofastr/core-ui/registry"
 )
 
 //go:embed beh.js
@@ -165,7 +165,7 @@ func TestRegisteredBehaviorSources_ReadsADirectiveAsGoDoes(t *testing.T) {
 import (
 	_ "embed"
 
-	reg "example.com/registry"
+	reg "github.com/DonaldMurillo/gofastr/core-ui/registry"
 )
 
 var (
@@ -198,13 +198,13 @@ func TestRegisteredBehaviorSources_RefusesWhatItCannotRead(t *testing.T) {
 	cases := map[string]string{
 		"a literal source": `package a
 
-import "example.com/registry"
+import "github.com/DonaldMurillo/gofastr/core-ui/registry"
 
 var _ = registry.RegisterBehavior("a", "(function () {})()")
 `,
 		"a variable with no directive": `package a
 
-import "example.com/registry"
+import "github.com/DonaldMurillo/gofastr/core-ui/registry"
 
 var js = "(function () {})()"
 
@@ -215,7 +215,7 @@ var _ = registry.RegisterBehavior("a", js)
 import (
 	_ "embed"
 
-	"example.com/registry"
+	"github.com/DonaldMurillo/gofastr/core-ui/registry"
 )
 
 //go:embed gone.js
@@ -232,6 +232,130 @@ var _ = registry.RegisterBehavior("a", js)
 				t.Fatalf("%s returned no error: a module the lints cannot read is one they cannot hold", name)
 			}
 		})
+	}
+}
+
+// TestRegisteredBehaviorSources_ResolvesTheRegistryImport pins that
+// only the registry's RegisterBehavior counts, however the file names
+// it: an alias and a dot import are followed; a same-named function
+// from another package, a local one, and a file that never imports
+// the registry are not registrations, so their arguments are never
+// judged and never fail the lint.
+func TestRegisteredBehaviorSources_ResolvesTheRegistryImport(t *testing.T) {
+	root, write := scratchTree(t)
+	write("alias/beh.go", `package alias
+
+import (
+	_ "embed"
+
+	reg "github.com/DonaldMurillo/gofastr/core-ui/registry"
+)
+
+//go:embed beh.js
+var js string
+
+var _ = reg.RegisterBehavior("alias", js)
+`)
+	write("alias/beh.js", "")
+	write("dot/beh.go", `package dot
+
+import (
+	_ "embed"
+
+	. "github.com/DonaldMurillo/gofastr/core-ui/registry"
+)
+
+//go:embed beh.js
+var js string
+
+var _ = RegisterBehavior("dot", js)
+`)
+	write("dot/beh.js", "")
+	write("other/beh.go", `package other
+
+import "example.com/elsewhere/registry"
+
+var _ = registry.RegisterBehavior("other", "(function () {})()")
+`)
+	write("local/beh.go", `package local
+
+func RegisterBehavior(name, src string) int { return 0 }
+
+var _ = RegisterBehavior("local", "(function () {})()")
+`)
+	write("noimport/beh.go", `package noimport
+
+type r struct{}
+
+func (r) RegisterBehavior(name, src string) int { return 0 }
+
+var _ = r{}.RegisterBehavior("method", "(function () {})()")
+`)
+	files, err := RegisteredBehaviorSources(root)
+	if err != nil {
+		t.Fatalf("a same-named function outside the registry was judged as a registration: %v", err)
+	}
+	got := relSet(t, root, files)
+	if len(got) != 2 || !got["alias/beh.js"] || !got["dot/beh.js"] {
+		t.Fatalf("found %v, want the aliased and dot-imported registrations and nothing else", files)
+	}
+}
+
+// TestRegisteredBehaviorSources_ParsesPastACommentBeforeTheParen pins
+// the prefilter: a registration written as RegisterBehavior /* why */
+// (...) is valid Go, and a prefilter on the name plus its paren would
+// skip the file before the parse ever saw it.
+func TestRegisteredBehaviorSources_ParsesPastACommentBeforeTheParen(t *testing.T) {
+	root, write := scratchTree(t)
+	write("a/beh.go", `package a
+
+import (
+	_ "embed"
+
+	"github.com/DonaldMurillo/gofastr/core-ui/registry"
+)
+
+//go:embed beh.js
+var js string
+
+var _ = registry.RegisterBehavior /* the seam */ ("a", js)
+`)
+	write("a/beh.js", "")
+	files, err := RegisteredBehaviorSources(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("a comment between the name and its paren hid the registration: %v", files)
+	}
+}
+
+// TestRegisteredBehaviorSources_StripsTheAllPrefix pins the embed
+// prefix Go itself strips: all:.behavior.js names a dotfile the
+// default pattern would exclude, and the prefix is not part of the path.
+func TestRegisteredBehaviorSources_StripsTheAllPrefix(t *testing.T) {
+	root, write := scratchTree(t)
+	write("a/beh.go", `package a
+
+import (
+	_ "embed"
+
+	"github.com/DonaldMurillo/gofastr/core-ui/registry"
+)
+
+//go:embed all:.behavior.js
+var js string
+
+var _ = registry.RegisterBehavior("a", js)
+`)
+	write("a/.behavior.js", "")
+	files, err := RegisteredBehaviorSources(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := relSet(t, root, files)
+	if len(got) != 1 || !got["a/.behavior.js"] {
+		t.Fatalf("found %v, want a/.behavior.js through the all: prefix", files)
 	}
 }
 

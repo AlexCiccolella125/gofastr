@@ -59,7 +59,9 @@ func RegisteredBehaviorSources(root string) ([]string, error) {
 			return err
 		}
 		// The cheap test first: most files in the tree never register.
-		if !strings.Contains(string(raw), "RegisterBehavior(") {
+		// The name alone, not the name and its paren, so a comment
+		// between them cannot slip a registration past the parse.
+		if !strings.Contains(string(raw), "RegisterBehavior") {
 			return nil
 		}
 		files, err := behaviorSourcesInFile(fset, path, raw)
@@ -89,6 +91,12 @@ func behaviorSourcesInFile(fset *token.FileSet, path string, raw []byte) ([]stri
 		return nil, fmt.Errorf("registered behaviour: %w", err)
 	}
 	embeds := embedDirectives(f)
+	pkgName, dot := registryImport(f)
+	if pkgName == "" && !dot {
+		// The file does not import the registry: a RegisterBehavior it
+		// mentions belongs to some other package and is not a module.
+		return nil, nil
+	}
 	var out []string
 	var walkErr error
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -96,7 +104,7 @@ func behaviorSourcesInFile(fset *token.FileSet, path string, raw []byte) ([]stri
 			return false
 		}
 		call, ok := n.(*ast.CallExpr)
-		if !ok || !isRegisterBehaviorCall(call) {
+		if !ok || !isRegisterBehaviorCall(call, pkgName, dot) {
 			return true
 		}
 		if len(call.Args) < 2 {
@@ -114,6 +122,9 @@ func behaviorSourcesInFile(fset *token.FileSet, path string, raw []byte) ([]stri
 			return false
 		}
 		for _, pat := range patterns {
+			// Go strips the all: prefix (which admits dotfiles and
+			// underscore files) before matching; so does this.
+			pat = strings.TrimPrefix(pat, "all:")
 			matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), pat))
 			if err != nil {
 				walkErr = fmt.Errorf("registered behaviour at %s: embed pattern %q: %w", pos, pat, err)
@@ -133,14 +144,45 @@ func behaviorSourcesInFile(fset *token.FileSet, path string, raw []byte) ([]stri
 	return out, nil
 }
 
-// isRegisterBehaviorCall matches registry.RegisterBehavior(...) under
-// any import alias, and a dot-imported RegisterBehavior(...).
-func isRegisterBehaviorCall(call *ast.CallExpr) bool {
+// registryImportPath is the package whose RegisterBehavior makes a
+// module. A same-named function anywhere else is not one.
+const registryImportPath = "github.com/DonaldMurillo/gofastr/core-ui/registry"
+
+// registryImport reports how the file names the registry package: the
+// identifier it is imported as (an alias, or the last path segment),
+// or dot for a dot import. Empty and false means the file does not
+// import it.
+func registryImport(f *ast.File) (name string, dot bool) {
+	for _, imp := range f.Imports {
+		p, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || p != registryImportPath {
+			continue
+		}
+		if imp.Name == nil {
+			return "registry", false
+		}
+		switch imp.Name.Name {
+		case ".":
+			return "", true
+		case "_":
+			continue
+		}
+		return imp.Name.Name, false
+	}
+	return "", false
+}
+
+// isRegisterBehaviorCall matches the registry's RegisterBehavior as
+// the file imports it: pkg.RegisterBehavior under the import's name,
+// or a bare RegisterBehavior after a dot import. A local function or
+// another package's function of the same name is not a registration.
+func isRegisterBehaviorCall(call *ast.CallExpr, pkgName string, dot bool) bool {
 	switch fn := call.Fun.(type) {
 	case *ast.SelectorExpr:
-		return fn.Sel.Name == "RegisterBehavior"
+		x, ok := fn.X.(*ast.Ident)
+		return ok && pkgName != "" && x.Name == pkgName && fn.Sel.Name == "RegisterBehavior"
 	case *ast.Ident:
-		return fn.Name == "RegisterBehavior"
+		return dot && fn.Name == "RegisterBehavior"
 	}
 	return false
 }
