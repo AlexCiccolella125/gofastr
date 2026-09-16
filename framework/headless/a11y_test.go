@@ -452,14 +452,14 @@ func TestToggleActionPressedMatchesItsShippedState(t *testing.T) {
 	idle := ToggleAction(ToggleActionProps{
 		Endpoint: "/watch", IdleLabel: "Watch", CommittedLabel: "Watching"}, nil)
 	has(t, idle, `aria-pressed="false"`, "an idle toggle does not say it is unpressed")
-	has(t, idle, `data-fui-toggle-committed="" hidden=""`, "the committed label is not hidden behind the idle one")
-	has(t, idle, `data-fui-toggle-idle="">Watch</span>`, "the idle label is hidden at rest")
+	has(t, idle, `data-hui-action-done="" hidden=""`, "the committed label is not hidden behind the idle one")
+	has(t, idle, `data-hui-action-idle="">Watch</span>`, "the idle label is hidden at rest")
 
 	committed := ToggleAction(ToggleActionProps{
 		Endpoint: "/watch", IdleLabel: "Watch", CommittedLabel: "Watching", Committed: true}, nil)
 	has(t, committed, `aria-pressed="true"`, "a committed toggle does not say it is pressed")
-	has(t, committed, `data-fui-toggle-idle="" hidden=""`, "the idle label is not hidden behind the committed one")
-	has(t, committed, `data-fui-toggle-committed="">Watching</span>`, "the committed label is hidden when it ships committed")
+	has(t, committed, `data-hui-action-idle="" hidden=""`, "the idle label is not hidden behind the committed one")
+	has(t, committed, `data-hui-action-done="">Watching</span>`, "the committed label is hidden when it ships committed")
 
 	// One-shot: OptimisticAction commits once and is not a pressed
 	// control, so claiming pressed would announce a toggle contract
@@ -470,7 +470,7 @@ func TestToggleActionPressedMatchesItsShippedState(t *testing.T) {
 	// The done label is hidden and the idle one is not: SSR is idle.
 	has(t, OptimisticAction(OptimisticActionProps{
 		Endpoint: "/follow", IdleLabel: "Follow", SuccessLabel: "Following"}, nil),
-		`data-fui-optimistic-success="" hidden=""`, "the success label ships unhidden")
+		`data-hui-action-done="" hidden=""`, "the success label ships unhidden")
 }
 
 // The framework's runtime shakes the button on failure and announces
@@ -582,9 +582,9 @@ func TestAnActionRefusesAnEndpointItCanNeverFire(t *testing.T) {
 func TestTheLabelChangeIsTheSignalNotTheColour(t *testing.T) {
 	got := string(OptimisticAction(OptimisticActionProps{
 		Endpoint: "/follow", IdleLabel: "Follow", SuccessLabel: "Following"}, nil))
-	has(t, render.HTML(got), `data-fui-optimistic-idle="">Follow</span>`,
+	has(t, render.HTML(got), `data-hui-action-idle="">Follow</span>`,
 		"the idle label is not the fixture's own text")
-	has(t, render.HTML(got), `data-fui-optimistic-success="" hidden="">Following</span>`,
+	has(t, render.HTML(got), `data-hui-action-done="" hidden="">Following</span>`,
 		"the done label does not differ from the idle one — colour alone would carry the state")
 }
 

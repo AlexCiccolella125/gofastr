@@ -27,7 +27,6 @@ const (
 	// The merged bundle measures 13205 at level 6; the line carries 8
 	// bytes of clearance, the same margin every raise here uses.
 	// Re-measure after a merge, not before.
-	//
 	// 13305, raised 92 bytes from 13213 on 2026-09-15 (the behaviour
 	// registry, docs/spec-behavior-registry.md), same rule: measured,
 	// not skipped. One SOURCE change that cannot be a demand module,
@@ -39,7 +38,24 @@ const (
 	//     package now ships its module (registry.RegisterBehavior) and
 	//     the kernel finds it without a table edit.
 	// The merged bundle measures 13297 at level 6; 8 bytes of clearance.
-	coreGoalGZ = 12*1024 + 1017
+	//
+	// 13372, raised 67 bytes from 13305 on 2026-09-16 (loader
+	// dependencies and readiness, docs/spec-behavior-registry.md
+	// "Dependencies and readiness"), same rule: measured, not skipped.
+	// One SOURCE change that cannot be a demand module, because it is
+	// the machinery every demand load goes through:
+	//   - frag/boot.js's loadModule: requirements (the r array the
+	//     behaviours block carries) load before the module's script, the
+	//     cached-promise tail that covers both, and resolution on
+	//     registration (loadedModules[name] set) rather than on the
+	//     script's load event, rejecting and dropping the cached promise
+	//     when a script ran and never registered. The two action modules
+	//     leaving the kernel's marker table for the behaviour seam bought
+	//     a few bytes back; the net is the number above.
+	// The merged bundle measures 13364 at level 6; the line carries 8
+	// bytes of clearance, the same margin every raise here uses.
+	// Re-measure after a merge, not before.
+	coreGoalGZ = 12*1024 + 1084
 	// 14.7 KB, not the 14 KB initial congestion window it started as.
 	//
 	// The window is still the constraint that matters, and the artifact still
@@ -128,7 +144,13 @@ const (
 	// the real bundle 15238 → 15341. The line keeps 8 bytes of
 	// clearance; the bracket was re-verified by running
 	// TestCoreBudgetRejectsCliffOverflow, not by arithmetic.
-	coreCongestionWindowGZ = 14*1024 + 1013
+	// 15446, raised 97 bytes from 15349 on 2026-09-16 (loader
+	// dependencies and readiness, the same loadModule change as the
+	// level-6 raise above): the real bundle 15341 → 15438. The line
+	// keeps 8 bytes of clearance; the bracket was re-verified by
+	// running TestCoreBudgetRejectsCliffOverflow against the padded
+	// fixture, not by arithmetic.
+	coreCongestionWindowGZ = 14*1024 + 1110
 )
 
 func coreBudgetViolation(t *testing.T, src string, budget int) (level, got, limit int) {

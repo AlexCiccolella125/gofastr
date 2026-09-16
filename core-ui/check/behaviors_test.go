@@ -14,7 +14,7 @@ import (
 // into the runtime-only walk it replaced, and one that returns an
 // asset beside the module lints a file no kernel ever loads.
 
-// TestRegisteredBehaviorSources_FindsTheTreesModules pins the two
+// TestRegisteredBehaviorSources_FindsTheTreesModules pins the
 // registrations the tree carries today, by path, so a refactor that
 // moves a module or renames its directive cannot slip out of the walk.
 func TestRegisteredBehaviorSources_FindsTheTreesModules(t *testing.T) {
@@ -37,6 +37,8 @@ func TestRegisteredBehaviorSources_FindsTheTreesModules(t *testing.T) {
 	for _, want := range []string{
 		"framework/headless/behavior.js",
 		"examples/site/behavior_ping.js",
+		"framework/ui/optimisticaction.js",
+		"framework/ui/toggleaction.js",
 	} {
 		if !rel[want] {
 			t.Errorf("%s is a registered behaviour and the enumerator did not find it; found %v", want, files)

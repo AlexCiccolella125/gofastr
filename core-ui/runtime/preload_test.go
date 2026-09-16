@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/DonaldMurillo/gofastr/core-ui/registry"
 )
 
 func TestNeededModules_EmptyPage(t *testing.T) {
@@ -150,5 +152,30 @@ func TestComputedDoesNotPreloadCompute(t *testing.T) {
 		if m == "compute" {
 			t.Fatalf("computed-only page preloaded compute: %v", got)
 		}
+	}
+}
+
+// A needed behaviour's requirements are preloaded with it,
+// transitively: the primitive arrives with the adapters that bind
+// through it, and a requirement of a requirement arrives too.
+func TestNeededModulesIncludesRequirements(t *testing.T) {
+	registry.IsolateForTest(t)
+	registry.RegisterBehavior("grandparent", probeJS, registry.Markers("[data-gp]"))
+	registry.RegisterBehavior("parent", probeJS, registry.Markers("[data-parent]"), registry.Requires("grandparent"))
+	registry.RegisterBehavior("child", probeJS, registry.Markers("[data-child]"), registry.Requires("parent"))
+
+	got := NeededModules(`<button data-child></button>`)
+	if strings.Join(got, ",") != "child,grandparent,parent" {
+		t.Fatalf("NeededModules = %v, want child,grandparent,parent", got)
+	}
+	// A page with only the parent's marker pulls the parent and its
+	// requirement, not the dependent that needs the parent.
+	got = NeededModules(`<div data-parent></div>`)
+	if strings.Join(got, ",") != "grandparent,parent" {
+		t.Fatalf("NeededModules = %v, want grandparent,parent", got)
+	}
+	// A page with neither marker preloads neither.
+	if got = NeededModules(`<p>nothing</p>`); len(got) != 0 {
+		t.Fatalf("NeededModules = %v, want none", got)
 	}
 }

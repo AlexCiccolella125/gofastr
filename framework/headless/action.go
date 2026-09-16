@@ -193,13 +193,6 @@ type ToggleActionProps struct {
 // both, and a component that drifted would work until the page it was
 // on was read by the other one's test.
 type action struct {
-	comp string // data-fui-comp: which runtime module drives it
-	// wire is the attribute prefix that module reads its endpoint and
-	// method from: "data-fui-optimistic" or "data-fui-toggle".
-	wire     string
-	idleAttr string // presence hook the runtime's setState flips hidden between
-	doneAttr string
-
 	endpoint string
 	method   string // "" means POST and renders no attribute
 
@@ -232,9 +225,11 @@ type action struct {
 	strings    *Strings
 }
 
-// OptimisticAction renders the button. The framework's runtime binds
-// on [data-fui-comp="ui-optimistic-action"]; everything it needs —
-// endpoint, method, both labels — is in the markup below.
+// OptimisticAction renders the button. The headless module binds it
+// through the kernel's action primitive: endpoint, method and both
+// label parts are the data-hui-action-* hooks below, and a non-2xx
+// rolls everything back with the shake the skin's stylesheet may hang
+// on data-state="error".
 func OptimisticAction(p OptimisticActionProps, s Skin) render.HTML {
 	checkActionEndpoint("OptimisticAction", "Endpoint", p.Endpoint)
 	if p.IdleLabel == "" {
@@ -245,10 +240,6 @@ func OptimisticAction(p OptimisticActionProps, s Skin) render.HTML {
 	}
 	checkLabelsDiffer("OptimisticAction", p.IdleLabel, p.SuccessLabel)
 	return renderAction(action{
-		comp:       "ui-optimistic-action",
-		wire:       "data-fui-optimistic",
-		idleAttr:   "data-fui-optimistic-idle",
-		doneAttr:   "data-fui-optimistic-success",
 		endpoint:   p.Endpoint,
 		method:     actionMethod("OptimisticAction", p.Method),
 		idleLabel:  p.IdleLabel,
@@ -267,8 +258,8 @@ func OptimisticAction(p OptimisticActionProps, s Skin) render.HTML {
 	}, s)
 }
 
-// ToggleAction renders the button. The framework's runtime binds on
-// [data-fui-comp="ui-toggle-action"], ships nothing itself but the
+// ToggleAction renders the button. The headless module binds it
+// through the kernel's action primitive, ships nothing itself but the
 // initial state below, and mirrors committed onto aria-pressed from
 // then on.
 func ToggleAction(p ToggleActionProps, s Skin) render.HTML {
@@ -288,10 +279,6 @@ func ToggleAction(p ToggleActionProps, s Skin) render.HTML {
 		state, pressed = "committed", "true"
 	}
 	return renderAction(action{
-		comp:      "ui-toggle-action",
-		wire:      "data-fui-toggle",
-		idleAttr:  "data-fui-toggle-idle",
-		doneAttr:  "data-fui-toggle-committed",
 		endpoint:  p.Endpoint,
 		method:    actionMethod("ToggleAction", p.Method),
 		idleLabel: p.IdleLabel,
@@ -302,7 +289,7 @@ func ToggleAction(p ToggleActionProps, s Skin) render.HTML {
 		pressed:   pressed,
 		group:     p.Group,
 		// Setting an untoggle endpoint is itself the request to be
-		// untoggleable, the same implication the framework makes.
+		// untoggleable, the same implication the primitive makes.
 		allowUntoggle: p.AllowUntoggle || p.UntoggleEndpoint != "",
 		untoggle:      p.UntoggleEndpoint,
 		variant:       p.Variant,
@@ -317,36 +304,36 @@ func ToggleAction(p ToggleActionProps, s Skin) render.HTML {
 }
 
 // renderAction draws the button both components are: the lifecycle
-// attributes the framework's runtime reads, the announcement hooks
+// hooks the action primitive's binder reads, the announcement hooks
 // ours writes to, and two label spans of which exactly the one
 // matching the shipped state is visible.
 func renderAction(a action, s Skin) render.HTML {
 	own := Merge(safeActionExtras(a.extra), Attrs(map[string]string{
-		"id":            a.id,
-		"type":          "button",
-		"data-fui-comp": a.comp,
+		"id": a.id,
+		// The binder reads endpoint and method off the root; the
+		// untoggle hook doubles as the allow flag, present whenever
+		// the button may revert and empty when the revert is a local
+		// flip with no request of its own.
+		"type":                     "button",
+		"data-hui-action-endpoint": a.endpoint,
 	}))
-	own[a.wire+"-endpoint"] = a.endpoint
 	if a.method != "" {
-		own[a.wire+"-method"] = a.method
+		own["data-hui-action-method"] = a.method
 	}
 	if a.group != "" {
-		own["data-fui-toggle-group"] = a.group
+		own["data-hui-action-group"] = a.group
 	}
 	if a.allowUntoggle {
-		own["data-fui-toggle-allow-untoggle"] = "true"
-	}
-	if a.untoggle != "" {
-		own["data-fui-toggle-untoggle-endpoint"] = a.untoggle
+		own["data-hui-action-untoggle"] = a.untoggle
 	}
 	own["data-state"] = a.state
 	if a.pressed != "" {
 		own["aria-pressed"] = a.pressed
 	}
-	// The sentence, on the root: the runtime's rolled-back listener
-	// finds the button, and the span it writes to is inside it, so
-	// the announcement never has to reach for anything the flip
-	// already moved.
+	// The sentence, on the root: the rolled-back listener finds the
+	// button, and the span it writes to is inside it, so the
+	// announcement never has to reach for anything the flip already
+	// moved.
 	own["data-hui-action-failed"] = orDefault(a.failedText, a.strings.Resolve().ActionFailed)
 	Mark(own, "data-hui-action")
 	Flag(own, "disabled", a.disabled)
@@ -359,9 +346,9 @@ func renderAction(a action, s Skin) render.HTML {
 
 	b := a.parts.Box(s)
 	kids := []render.HTML{
-		actionSpan(b, PartActionIdle, a.idleAttr, a.state == "committed", a.idleLabel, a.idleIcon),
-		actionSpan(b, PartActionDone, a.doneAttr, a.state != "committed", a.doneLabel, a.doneIcon),
-		// The accessibility the framework's runtime does not ship.
+		actionSpan(b, PartActionIdle, a.state == "committed", a.idleLabel, a.idleIcon),
+		actionSpan(b, PartActionDone, a.state != "committed", a.doneLabel, a.doneIcon),
+		// The accessibility the action lifecycle does not ship.
 		// A polite status region — role=status already means polite,
 		// and stating it twice can announce twice: the flip is
 		// visible, and this is how the rollback reaches anyone who
@@ -374,10 +361,14 @@ func renderAction(a action, s Skin) render.HTML {
 }
 
 // actionSpan renders one of the two labels. hidden decides which of
-// the pair carries it: the runtime flips that attribute and nothing
+// the pair carries it: the primitive flips that attribute and nothing
 // else, so the server ships exactly the opposite pair and the first
 // paint already agrees with the state attribute above it.
-func actionSpan(b Box, part Part, hook string, hidden bool, label string, icon render.HTML) render.HTML {
+func actionSpan(b Box, part Part, hidden bool, label string, icon render.HTML) render.HTML {
+	hook := "data-hui-action-idle"
+	if part == PartActionDone {
+		hook = "data-hui-action-done"
+	}
 	attrs := html.Attrs{hook: ""}
 	if hidden {
 		Mark(attrs, "hidden")
@@ -395,7 +386,7 @@ func init() {
 	Register(Spec{
 		Name:    "OptimisticAction",
 		Anatomy: []Part{PartRoot, PartIcon, PartActionIdle, PartActionDone, PartVisuallyHidden},
-		Hooks:   []string{"data-hui-action", "data-hui-action-failed", "data-hui-action-status"},
+		Hooks:   []string{"data-hui-action", "data-hui-action-endpoint", "data-hui-action-method", "data-hui-action-idle", "data-hui-action-done", "data-hui-action-failed", "data-hui-action-status"},
 		WithParts: func(s Skin, parts Parts) render.HTML {
 			return OptimisticAction(OptimisticActionProps{
 				Endpoint: "/follow", IdleLabel: "Follow", SuccessLabel: "Following",
@@ -445,7 +436,7 @@ func init() {
 	Register(Spec{
 		Name:    "ToggleAction",
 		Anatomy: []Part{PartRoot, PartIcon, PartActionIdle, PartActionDone, PartVisuallyHidden},
-		Hooks:   []string{"data-hui-action", "data-hui-action-failed", "data-hui-action-status"},
+		Hooks:   []string{"data-hui-action", "data-hui-action-endpoint", "data-hui-action-method", "data-hui-action-group", "data-hui-action-untoggle", "data-hui-action-idle", "data-hui-action-done", "data-hui-action-failed", "data-hui-action-status"},
 		WithParts: func(s Skin, parts Parts) render.HTML {
 			return ToggleAction(ToggleActionProps{
 				Endpoint: "/watch", IdleLabel: "Watch", CommittedLabel: "Watching",
@@ -471,6 +462,15 @@ func init() {
 					Endpoint: "/apps/blog/watch", IdleLabel: "Watch", CommittedLabel: "Watching",
 					IdleIcon: SpecimenGlyph, DoneIcon: SpecimenGlyph,
 					Committed: true, Variant: "secondary",
+				}, s),
+			}, {
+				Name: "unwatch, not post",
+				Why: "a method other than POST is published as an attribute, because the primitive defaults " +
+					"to POST and an unstated DELETE would fire the wrong request entirely — the same rule " +
+					"the optimistic button's delete case states",
+				HTML: ToggleAction(ToggleActionProps{
+					Endpoint: "/apps/blog/watch", Method: "DELETE",
+					IdleLabel: "Watch", CommittedLabel: "Watching", Committed: true,
 				}, s),
 			}, {
 				Name: "two in a mutex group",

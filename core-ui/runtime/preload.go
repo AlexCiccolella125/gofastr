@@ -3,6 +3,8 @@ package runtime
 import (
 	"sort"
 	"strings"
+
+	"github.com/DonaldMurillo/gofastr/core-ui/registry"
 )
 
 // demandLoadMarker is one entry in the server-side mirror of the
@@ -46,8 +48,6 @@ var demandLoadMarkers = []demandLoadMarker{
 	{"data-fui-animated-counter", "animatedcounter"},
 	{"data-fui-toc", "toc"},
 	{"data-fui-scrollspy", "scrollspy"},
-	{`data-fui-comp="ui-optimistic-action"`, "optimisticaction"},
-	{`data-fui-comp="ui-toggle-action"`, "toggleaction"},
 	{`data-fui-comp="ui-network-retry-banner"`, "networkretrybanner"},
 	{"data-fui-sortable", "sortablelist"},
 	{"data-fui-shortcut-focus", "shortcut"},
@@ -72,34 +72,49 @@ var demandLoadMarkers = []demandLoadMarker{
 }
 
 // NeededModules returns the deduplicated, sorted list of demand-load
-// runtime modules whose marker substring appears in pageHTML. Used
-// by the framework's UI host to emit <link rel="preload" as="script"> tags
-// in <head> per page, kicking off module fetches in parallel with the
-// initial paint.
+// runtime modules whose marker substring appears in pageHTML, plus
+// every such module's requirements, transitively: a needed behaviour
+// arrives with the primitive it binds through. Used by the framework's
+// UI host to emit <link rel="preload" as="script"> tags in <head> per
+// page, kicking off module fetches in parallel with the initial paint.
 //
 // Matches are substring containment with an attribute-name boundary
 // check, not a real HTML parse. The boundary check keeps one marker
 // from matching inside a longer attribute name (data-fui-compute must
 // not fire on data-fui-computed). The cost of a residual false positive
-// is one wasted module fetch (no correctness impact).
+// is one wasted module fetch (no correctness impact). The list is
+// sorted, not dependency-ordered: a preload link only warms a cache,
+// and loadModule in the kernel is what orders the loads, requirements
+// before dependents, when the marker actually appears.
 func NeededModules(pageHTML string) []string {
 	seen := map[string]bool{}
-	for _, m := range demandLoadMarkers {
-		if seen[m.Module] {
-			continue
+	out := make([]string, 0, len(demandLoadMarkers))
+	// add walks a module's requirements before the module itself, so
+	// a behaviour's primitive is always in the list beside it. Only a
+	// registered behaviour carries requirements; an embedded module
+	// has nowhere to declare one, and LookupBehavior says no.
+	var add func(name string)
+	add = func(name string) {
+		if seen[name] {
+			return
 		}
+		seen[name] = true
+		if e, ok := registry.LookupBehavior(name); ok {
+			for _, r := range e.Requires {
+				add(r)
+			}
+		}
+		out = append(out, name)
+	}
+	for _, m := range demandLoadMarkers {
 		if markerPresent(pageHTML, m.Marker) {
-			seen[m.Module] = true
+			add(m.Module)
 		}
 	}
 	// Registered behaviours preload by the same rule, from the markers
 	// they declared rather than from the table.
 	for _, name := range neededBehaviors(pageHTML) {
-		seen[name] = true
-	}
-	out := make([]string, 0, len(seen))
-	for k := range seen {
-		out = append(out, k)
+		add(name)
 	}
 	sort.Strings(out)
 	return out

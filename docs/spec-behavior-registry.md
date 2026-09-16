@@ -191,6 +191,85 @@ The gate gains one clause: a registered behaviour's markers must be
 documented table. A registered behaviour is not an owner in
 `fragments.go`; it owns its own prefix.
 
+### Dependencies and readiness
+
+A behaviour may need another module before it can bind: the action
+adapters need the action primitive. The loader is the one place every
+load goes through (marker scan, idle queue, hover prefetch, the
+interaction bridge), so dependencies live there and nowhere else.
+
+- `registry.Requires(names...)` declares the modules that must be
+  loaded before this one. A name is an embedded kernel module or a
+  registered behaviour. The manifest carries it as `r`; the inline
+  block and `window.__gofastr_behaviors` both do.
+- `loadModule(name)` loads a module's requirements first, in parallel,
+  and only then appends the module's script. A requirement's own
+  requirements load the same way. A cycle is refused at
+  `BehaviorsJSON` time with a panic that names it; a requirement that
+  is neither embedded nor registered is refused the same way.
+- Readiness is registration, not transport. A module says it is ready
+  by setting `window.__gofastr.loadedModules[name] = true` at the end
+  of its IIFE (the contract every module already keeps). The loader
+  resolves the module's promise when that flag is set after the script
+  has run; a script that ran and never set its flag rejects with
+  "module failed to register" and drops its cached promise, so a
+  retry fetches again rather than returning a fulfilled promise for a
+  module that is not there.
+- Preload follows requirements: `NeededModules` lists a needed
+  behaviour's requirements with it (the list is sorted, not ordered;
+  `loadModule` orders the loads), so the primitive arrives with its
+  dependents. The static exporter includes them for the same
+  reason. Hover prefetch (`data-fui-prefetch`) prefetches them too,
+  because it goes through `loadModule`.
+- A module with no marker of its own (a primitive) is reachable only
+  through `Requires` or an explicit `loadModule`. It is still a module:
+  served, hashed, budgeted and linted like the rest.
+
+### The action primitive
+
+The optimistic and toggle action modules were one machine written
+twice: a same-origin mutation request with the CSRF header and the
+invalidation hook, a state flip through idle, pending, committed and
+rolled back, `hidden` swapped between two label parts, `aria-busy`
+while pending, and an event at each step. Only the attribute
+names they read, `aria-pressed` and the group mutex on the toggle, and
+the shake on the optimistic one were their own.
+
+`core-ui/runtime/src/action.js` is that machine once, kernel-side, with
+no marker and no attribute name of any package:
+
+- `window.__gofastr.action.request(url, method)` performs the
+  mutation: origin check, CSRF header (rpc.js's `_csrf`), invalidation
+  on success, and resolves to `true` on 2xx and `false` otherwise.
+- `window.__gofastr.action.bind(el, spec)` binds the lifecycle to an
+  element. `spec` names `endpoint`, `method`, the `idle` and `done`
+  parts (elements), and optionally `group` (a mutex key), `untoggle`
+  (an endpoint, which makes the element a toggle) and `pressed`
+  (whether to mirror `aria-pressed`). It sets `data-state`, swaps
+  `hidden`, sets `aria-busy` while pending (never `disabled`: pending
+  ignores clicks, a disabled button drops keyboard focus, and
+  `disabled` has other owners), and
+  dispatches `action:start`, `action:committed`, `action:rolled-back`
+  and `action:untoggle` on the element, bubbling. Binding twice is a
+  no-op.
+
+Owners bind their own markup to it:
+
+- `framework/ui`'s `optimisticaction` and `toggleaction` become
+  registered behaviours in the Go files that render their markup,
+  `Requires("action")`, read their `data-fui-optimistic-*` and
+  `data-fui-toggle-*` attributes, and call `bind`. They dispatch the
+  documented `optimistic-action:*` and `toggle-action:*` events
+  alongside the primitive's, because those names are public. The shake
+  is a class the optimistic adapter adds on `action:rolled-back`. They
+  register a scanner and set their loaded flag, which the originals
+  did not.
+- `framework/headless` binds `[data-hui-action]` with its own hooks
+  (`data-hui-action-endpoint`, `-method`, `-group`, `-untoggle`) and
+  drops the borrowed `data-fui-comp` markers, which were also the
+  stylesheet's identity. Its failure announcement listens to
+  `action:rolled-back`, so a failed toggle speaks.
+
 ## What must be tested
 
 Unit, in `core-ui/registry`:
@@ -244,18 +323,50 @@ CSS" gains "Component behaviour"), the `data-fui-*` table if any marker
 touches it, `framework/docs/content/ui-new-components.md` and
 `runtime-minification.md`, and `runtime-contract.md`.
 
+Dependencies and the primitive add:
+
+- a registered behaviour with `Requires` loads its requirement first
+  and binds only after it (browser test with a delayed requirement);
+- a requirement that does not exist, and a cycle, panic at
+  `BehaviorsJSON` with the names;
+- a module whose script runs and never registers rejects the load and
+  a retry fetches again (browser test with a probe that throws);
+- `NeededModules` and the static export list a needed behaviour's
+  requirements;
+- the primitive: a real POST that succeeds commits, a real 422 rolls
+  back with the event, a group revokes its sibling, an untoggle
+  reverts, binding twice binds once, and an island swap of the button
+  rebinds the new element (browser tests against a test server, not
+  synthetic events);
+- the two framework/ui adapters keep every existing test in
+  `framework/ui`, `examples/site` and `core-ui/runtime` green
+  unchanged, and gain a rebind-after-swap test each.
+
 ## Sequence
 
 1. This seam, with the tests above and no module moved.
 2. `framework/headless` registers its `data-hui-*` module: the first
    real client, and the proof the seam carries a whole design system's
    behaviour. (Done 2026-09-15: `framework/headless/behavior.go`.)
-3. `framework/ui`, one package at a time: each module becomes a
-   `RegisterBehavior` in the Go file that renders its markup; the
-   kernel's table and `preload.go`'s mirror lose the entry; the `ui-*`
-   literals leave the runtime with it.
-4. `core-ui/patterns`, the same way. What remains in `core-ui/runtime`
-   is the kernel, its fragments, and the six kernel-side modules.
+3. Dependencies and readiness in the loader, the action primitive, and
+   the two action adapters through the seam as the first modules moved:
+   the hardest clients first, with their existing tests intact. Then
+   `framework/headless` binds its own action hooks and drops the
+   borrowed `data-fui-comp` markers. (Order set on 2026-09-16 after an
+   outside evaluation found the action modules never re-armed after an
+   island swap and the borrowed markers collided with the stylesheet
+   identity.)
+4. A thin skin and one real mixed screen on the docs site before any
+   bulk move: form validation, Password and FileUpload, nested
+   conditions, an optimistic action, an island-backed pager.
+5. `framework/ui`'s remaining modules in small groups by ownership,
+   each a `RegisterBehavior` in the Go file that renders its markup;
+   the kernel's table and `preload.go`'s mirror lose the entry; the
+   `ui-*` literals leave the runtime with it. The interaction bridge
+   reads registered descriptors too before lightbox moves.
+6. `core-ui/patterns`, the same way. What remains in `core-ui/runtime`
+   is the kernel, its fragments, and the kernel-side modules: the
+   primitives, the manifest-driven loaders and the widget internals.
 
 ## Open questions
 

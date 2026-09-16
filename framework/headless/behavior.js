@@ -172,14 +172,50 @@
 
   // ─── action (OptimisticAction / ToggleAction) ───────────────────
 
-  // The framework's optimistic runtime rolls a failed mutation back
-  // and dispatches optimistic-action:rolled-back from the button, but
-  // says nothing while doing so. This writes the sentence the
-  // component carried on its root into the polite status span inside
-  // it, one frame after clearing it, so a reader who already heard a
-  // previous sentence hears this one as new. The toggle module
-  // dispatches nothing on failure; its rollback stays silent here on
-  // purpose until it grows an event of its own.
+  // The buttons bind through the kernel's action primitive, which the
+  // loader has registered before this module evaluates (the
+  // registration Requires it): the primitive owns the request, the
+  // state machine and the label flip; this module owns the hooks the
+  // components render. pressed is read off the aria-pressed the
+  // component ships, which is present exactly when the button is a
+  // ToggleAction (OptimisticAction commits once and claims no pressed
+  // state, and a caller cannot inject the attribute: safeActionExtras
+  // refuses it), so the rule needs no second attribute to say what
+  // the markup already says.
+
+  function armActions(root) {
+    const btns = within(root, '[data-hui-action]');
+    for (let i = 0; i < btns.length; i++) {
+      const btn = btns[i];
+      const idle = btn.querySelector('[data-hui-action-idle]');
+      const done = btn.querySelector('[data-hui-action-done]');
+      const endpoint = btn.getAttribute('data-hui-action-endpoint');
+      if (!idle || !done || !endpoint) continue;
+      const spec = {
+        endpoint: endpoint,
+        method: btn.getAttribute('data-hui-action-method') || 'POST',
+        idle: idle,
+        done: done,
+        pressed: btn.getAttribute('aria-pressed') !== null,
+      };
+      const group = btn.getAttribute('data-hui-action-group');
+      if (group) spec.group = group;
+      // The untoggle hook is present whenever the button may revert:
+      // its value is the revert endpoint, empty for the local flip
+      // with no request of its own.
+      if (btn.hasAttribute('data-hui-action-untoggle')) {
+        spec.untoggle = btn.getAttribute('data-hui-action-untoggle') || '';
+      }
+      window.__gofastr.action.bind(btn, spec);
+    }
+  }
+
+  // A rolled-back mutation announces its failure sentence in the
+  // polite status span, the words coming from the root's
+  // data-hui-action-failed. The primitive dispatches action:rolled-back
+  // for a failed commit on either button, so a failed toggle speaks
+  // too; it stays silent on a failed untoggle, where the state simply
+  // stayed and nothing was rolled back.
   function announceFailure(btn) {
     const status = btn.querySelector('[data-hui-action-status]');
     if (!status) return;
@@ -249,6 +285,7 @@
       input.dispatchEvent(new Event('change', { bubbles: true }));
     });
   }
+
 
   function armDrops(root) {
     const roots = within(root, '[data-hui-drop]');
@@ -326,7 +363,7 @@
     for (let i = 0; i < regions.length; i++) syncWhen(regions[i]);
   });
 
-  document.addEventListener('optimistic-action:rolled-back', function (e) {
+  document.addEventListener('action:rolled-back', function (e) {
     const btn = e.target && e.target.closest && e.target.closest('[data-hui-action]');
     if (btn) announceFailure(btn);
   });
@@ -347,13 +384,15 @@
   // ─── the arrival pass ───────────────────────────────────────────
 
   // scan arms what arrival alone cannot: the summary focus, the drag
-  // listeners, the when-regions' first sync, the dismissed banners.
-  // It is what the kernel calls on every inserted subtree and over the
-  // document after a client navigation, and it is idempotent through
-  // the once() guard above.
+  // listeners, the when-regions' first sync, the dismissed banners,
+  // the action buttons' bind. It is what the kernel calls on every
+  // inserted subtree and over the document after a client navigation,
+  // and it is idempotent: once() guards what binds a listener, and
+  // the primitive's own WeakSet guards the buttons.
   function scan(root) {
     const scope = root && root.querySelectorAll ? root : document;
     armFormErrors(scope);
+    armActions(scope);
     armDrops(scope);
     const regions = within(scope, '[data-hui-when]');
     for (let i = 0; i < regions.length; i++) syncWhen(regions[i]);

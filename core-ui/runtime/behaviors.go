@@ -124,10 +124,12 @@ func embeddedModuleNames() []string {
 }
 
 // behaviorManifest is the shape of one entry in the behaviours block:
-// the markers the kernel scans for and whether the load defers to idle.
+// the markers the kernel scans for, whether the load defers to idle,
+// and the modules loaded before this one.
 type behaviorManifest struct {
 	Selectors []string `json:"s"`
 	Idle      bool     `json:"i,omitempty"`
+	Requires  []string `json:"r,omitempty"`
 }
 
 // BehaviorsJSON returns the behaviours block the kernel reads to learn
@@ -145,13 +147,58 @@ func BehaviorsJSON() []byte {
 		if _, shadowed := embeddedModule(e.Name); shadowed {
 			panic("runtime: behaviour " + e.Name + " shadows an embedded runtime module of the same name")
 		}
-		out[e.Name] = behaviorManifest{Selectors: append([]string(nil), e.Markers...), Idle: e.Idle}
+		out[e.Name] = behaviorManifest{Selectors: append([]string(nil), e.Markers...), Idle: e.Idle, Requires: append([]string(nil), e.Requires...)}
 	}
+	validateRequirements(all)
 	buf, err := json.Marshal(out)
 	if err != nil {
 		return nil
 	}
 	return buf
+}
+
+// validateRequirements refuses a dependency graph the loader could
+// never satisfy, here at manifest time so the failure is a startup
+// panic naming the culprit rather than a page whose module waits
+// forever. A requirement must be an embedded module (embedded modules
+// declare no requirements of their own, so they are the graph's
+// leaves) or another registered behaviour; a cycle among registered
+// behaviours is refused with its path.
+func validateRequirements(all []*registry.BehaviorEntry) {
+	byName := make(map[string]*registry.BehaviorEntry, len(all))
+	for _, e := range all {
+		byName[e.Name] = e
+	}
+	const (
+		white = 0
+		gray  = 1
+		black = 2
+	)
+	color := make(map[string]int, len(all))
+	var visit func(e *registry.BehaviorEntry, path []string)
+	visit = func(e *registry.BehaviorEntry, path []string) {
+		switch color[e.Name] {
+		case gray:
+			panic("runtime: requirement cycle: " + strings.Join(append(path, e.Name), " -> "))
+		case black:
+			return
+		}
+		color[e.Name] = gray
+		for _, r := range e.Requires {
+			req, ok := byName[r]
+			if !ok {
+				if _, embedded := embeddedModule(r); !embedded {
+					panic("runtime: behaviour " + e.Name + " requires " + r + ", which is neither an embedded runtime module nor a registered behaviour")
+				}
+				continue
+			}
+			visit(req, append(path, e.Name))
+		}
+		color[e.Name] = black
+	}
+	for _, e := range all {
+		visit(e, nil)
+	}
 }
 
 // neededBehaviors returns the registered behaviours whose markers

@@ -4,7 +4,13 @@ The headless layer renders a component's tags, roles, labelling
 relationships, state attributes and runtime hooks, and nothing else: no
 classes at a nil skin, no CSS, no script. A skin (a flat map from part
 to class) dresses it; the behaviour module (behavior.go, served as the
-runtime module "headless") binds its `data-hui-*` hooks. The harness
+runtime module "headless") binds its `data-hui-*` hooks. The action
+buttons carry their own hooks — `data-hui-action-endpoint`, `-method`,
+`-group`, `-untoggle`, and the `data-hui-action-idle` / `-done` label
+parts — and bind through the kernel's `action` primitive, which the
+module's registration `Requires`; nothing here borrows a
+`data-fui-comp` marker, so a headless button can never pull
+`framework/ui`'s stylesheet. The harness
 proves every registered component against the same contract, so a skin
 can be replaced without a single accessibility guarantee moving. No
 skin or stylesheet ships in this repository yet; `framework/ui` is

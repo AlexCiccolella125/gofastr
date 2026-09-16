@@ -44,4 +44,12 @@
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
   });
+
+  // Loader contract (runtime.js loadModule): a module announces
+  // itself by setting loadedModules[name], and the loader resolves
+  // its promise only when that flag is an own truthy property after
+  // the script ran. This module never set it, which the loader's
+  // transport-only resolution used to tolerate; readiness is
+  // registration now, so the flag is load-bearing.
+  (window.__gofastr.loadedModules ||= {}).numberinput = true;
 })();

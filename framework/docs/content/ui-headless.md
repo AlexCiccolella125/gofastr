@@ -191,9 +191,13 @@ What it does, one line per behaviour:
   runtime-owned `data-hui-when-off` mark so only those re-enable.
 - **form-errors** moves focus to the summary inside
   `data-hui-form-errors`, once per form element.
-- **action** answers the framework's `optimistic-action:rolled-back`
-  event by writing the root's `data-hui-action-failed` sentence into
-  the `data-hui-action-status` span.
+- **action** binds `[data-hui-action]` buttons through the kernel's
+  `action` primitive (`window.__gofastr.action.bind`), reading the
+  endpoint, method, group and untoggle hooks and the two label parts;
+  the module's registration `Requires("action")`, so the primitive is
+  there first. A rolled-back mutation — on the optimistic button or a
+  failed toggle commit — writes the root's `data-hui-action-failed`
+  sentence into the `data-hui-action-status` span.
 - **drop** lists the chosen files and says the sentence, both built
   from the words the root carries (`data-hui-drop-one` and
   `data-hui-drop-many`, from `Strings.FileSelected` and

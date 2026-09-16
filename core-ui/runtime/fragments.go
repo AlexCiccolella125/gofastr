@@ -62,11 +62,16 @@ type fragmentDef struct {
 // is triggered by <meta name="gofastr-embed"> and owns one attribute,
 // data-fui-embed-state, which reports the frame's lifecycle.
 //
+// The action module is the same shape reached the other way: no
+// marker, no data-fui-* attribute (the adapters that bind through it
+// read their own), loaded because a registered behaviour declared
+// Requires("action") and the loader honours the declaration on every
+// path. It is also a public API, window.__gofastr.action.
+//
 // The ws module also owns zero data-fui-* attributes and has no marker
 // at all: it is a pure API module an application loads explicitly with
 // __gofastr.loadModule('ws') (connectWebSocket /
 // createSequencedReducer). Nothing scans the DOM for it.
-//
 // boot-embed depends on kernel. RPC requests inside an embed route through
 // boot's delegation bridge and load src/rpc.js at interaction time. It also
 // relies on boot's mutation observer to hydrate injected content, but boot is
@@ -343,12 +348,10 @@ var moduleAttrs = map[string][]string{
 		"data-fui-number-step",
 		"data-fui-number-for",
 	},
-	"optimisticaction": {
-		"data-fui-optimistic-idle",
-		"data-fui-optimistic-success",
-		"data-fui-optimistic-endpoint",
-		"data-fui-optimistic-method",
-	},
+	// OptimisticAction's wiring (data-fui-optimistic-*) moved to
+	// framework/ui/optimisticaction.js, a registered behaviour: its
+	// attributes are read by a registered source, not by anything in
+	// this package, so they left this table.
 	"panehost": {
 		"data-fui-pane-host",
 		"data-fui-pane",
@@ -447,15 +450,10 @@ var moduleAttrs = map[string][]string{
 		"data-fui-toc-levels",
 		"data-fui-toc-for",
 	},
-	"toggleaction": {
-		"data-fui-toggle-endpoint",
-		"data-fui-toggle-method",
-		"data-fui-toggle-allow-untoggle",
-		"data-fui-toggle-untoggle-endpoint",
-		"data-fui-toggle-idle",
-		"data-fui-toggle-committed",
-		"data-fui-toggle-group",
-	},
+	// ToggleAction's wiring (data-fui-toggle-*) moved to
+	// framework/ui/toggleaction.js, a registered behaviour: its
+	// attributes are read by a registered source, not by anything in
+	// this package, so they left this table.
 	"tabs": {
 		"data-fui-tabs-state",
 		"data-fui-tabs-vacate",

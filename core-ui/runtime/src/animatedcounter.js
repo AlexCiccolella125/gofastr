@@ -60,6 +60,13 @@
   scan(document);
   window.addEventListener('gofastr:navigate', function () { scan(document); });
 
+  // Loader contract (runtime.js loadModule): a module announces
+  // itself by setting loadedModules[name], and the loader resolves
+  // its promise only when that flag is an own truthy property after
+  // the script ran. This module never set it, which the loader's
+  // transport-only resolution used to tolerate; readiness is
+  // registration now, so the flag is load-bearing.
+  (window.__gofastr.loadedModules ||= {}).animatedcounter = true;
   window.__gofastr = window.__gofastr || {};
   window.__gofastr.animatedCounter = { rescan: scan };
 })();

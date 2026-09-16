@@ -49,6 +49,10 @@ type BehaviorEntry struct {
 	// Idle defers the load to idle time after first paint, as the
 	// kernel's `idle: true` modules do.
 	Idle bool
+	// Requires are the modules loaded before this one, in the order
+	// they were named, deduplicated. They may be embedded kernel
+	// modules or other registered behaviours.
+	Requires []string
 
 	sourceHash string
 }
@@ -73,6 +77,18 @@ func Markers(selectors ...string) BehaviorOption {
 // LoadIdle defers the load to idle time after first paint. The
 // default loads as soon as the marker is seen.
 func LoadIdle() BehaviorOption { return func(e *BehaviorEntry) { e.Idle = true } }
+
+// Requires names the modules that must be loaded and registered
+// before this one: the action adapters need the action primitive, and
+// a dependency declared here is a dependency the loader honors on
+// every path that loads the module (marker scan, idle queue, hover
+// prefetch, the interaction bridge). A name is an embedded kernel
+// module or another registered behaviour; the manifest carries it and
+// core-ui/runtime refuses a name that is neither, or a cycle, when it
+// builds the block. A module may not require itself.
+func Requires(names ...string) BehaviorOption {
+	return func(e *BehaviorEntry) { e.Requires = append(e.Requires, names...) }
+}
 
 // Behavior is the handle RegisterBehavior returns. Authors keep it in a
 // package var; nothing on it is needed at render time, because the
@@ -147,6 +163,24 @@ func RegisterBehavior(name, js string, opts ...BehaviorOption) *Behavior {
 			panic(fmt.Sprintf("registry.RegisterBehavior(%s): marker %q must be an attribute selector on a data- attribute, [data-x] or [data-x=\"v\"]", name, m))
 		}
 	}
+	// A requirement is a module name: the same shape rule the
+	// behaviour's own name keeps, because it names the same URL shape.
+	// A self-requirement is a cycle of one and is refused here rather
+	// than by the graph check, where its path would read as noise.
+	// Repeats collapse, keeping the first position.
+	deduped := e.Requires[:0]
+	for _, r := range e.Requires {
+		if r == name {
+			panic("registry.RegisterBehavior(" + name + "): a behaviour cannot require itself — the loader would wait on its own registration")
+		}
+		if !behaviorName.MatchString(r) {
+			panic(fmt.Sprintf("registry.RegisterBehavior(%s): requirement %q must match ^[a-z][a-z0-9-]{0,63}$ — it names a runtime module", name, r))
+		}
+		if !slices.Contains(deduped, r) {
+			deduped = append(deduped, r)
+		}
+	}
+	e.Requires = deduped
 	sum := sha256.Sum256([]byte(js))
 	e.sourceHash = hex.EncodeToString(sum[:8])
 
@@ -158,9 +192,9 @@ func RegisterBehavior(name, js string, opts ...BehaviorOption) *Behavior {
 	if existing, ok := behaviors[name]; ok {
 		if !sameBehavior(existing, e) {
 			panic(fmt.Sprintf("registry.RegisterBehavior: duplicate name %q with a different definition. Pick a unique name in one of the two call sites\n"+
-				"  existing: source=%s markers=%v idle=%v\n"+
-				"  new:      source=%s markers=%v idle=%v",
-				name, existing.sourceHash, existing.Markers, existing.Idle, e.sourceHash, e.Markers, e.Idle))
+				"  existing: source=%s markers=%v idle=%v requires=%v\n"+
+				"  new:      source=%s markers=%v idle=%v requires=%v",
+				name, existing.sourceHash, existing.Markers, existing.Idle, existing.Requires, e.sourceHash, e.Markers, e.Idle, e.Requires))
 		}
 		return &Behavior{e: existing}
 	}
@@ -206,5 +240,5 @@ func MarkerSubstring(selector string) string {
 }
 
 func sameBehavior(a, b *BehaviorEntry) bool {
-	return a.Name == b.Name && a.sourceHash == b.sourceHash && a.Idle == b.Idle && slices.Equal(a.Markers, b.Markers)
+	return a.Name == b.Name && a.sourceHash == b.sourceHash && a.Idle == b.Idle && slices.Equal(a.Markers, b.Markers) && slices.Equal(a.Requires, b.Requires)
 }

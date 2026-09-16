@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DonaldMurillo/gofastr/core-ui/check"
 	"github.com/DonaldMurillo/gofastr/core-ui/registry"
 )
 
@@ -52,6 +53,39 @@ var privilegedAttrs = []string{
 // rpc-stub, widgets-boot-static, appeared in no scanned file and was
 // invisible to the ownership and documentation gates below. Permanently: the
 // gate could never fail for it. data-fui-embed-state shipped that way.
+// registeredBehaviorAttrs is the data-fui-* attributes read by every
+// registered behaviour's source in the tree, found through the
+// //go:embed beside each RegisterBehavior call (check.RegisteredBehaviorSources),
+// so a module that lives beside its Go package is held to the same
+// rules as one under src/.
+func registeredBehaviorAttrs(t *testing.T) []string {
+	t.Helper()
+	files, err := check.RegisteredBehaviorSources(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("registered behaviours: %v", err)
+	}
+	set := map[string]struct{}{}
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		for _, m := range attrPattern.FindAllString(string(raw), -1) {
+			m = strings.TrimRight(m, "-")
+			if m == "data-fui" {
+				continue
+			}
+			set[m] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(set))
+	for a := range set {
+		out = append(out, a)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func runtimeJSAttrs(t *testing.T) []string {
 	t.Helper()
 	files := []string{"runtime.js"}
@@ -205,9 +239,6 @@ func stripGoLineComments(src string) string {
 // New CSS-only additions must be documented here, that's intentional friction
 // to keep the list honest.
 func TestGoInteractiveAttrsMatchRuntime(t *testing.T) {
-	// Attributes emitted by Go but never read by JS logic: they are CSS
-	// attribute selectors, SSR-output-only markers, or runtime-written keys
-	// that the Go side emits as initial values but JS never getAttribute()s.
 	cssOnlyAttrs := map[string]bool{
 		// Marks which styled component a DOM node belongs to.
 		// The runtime's CSS scanner reads data-fui-comp values (for loadComponentCSS),
@@ -216,8 +247,15 @@ func TestGoInteractiveAttrsMatchRuntime(t *testing.T) {
 		// listed here only for documentation.
 	}
 
+	// The JS side is the runtime's own sources and every registered
+	// behaviour's source: an attribute Go emits may be read by a module
+	// that lives beside its package (the action adapters in
+	// framework/ui), and that module is found, not listed.
 	jsAttrs := map[string]struct{}{}
 	for _, a := range runtimeJSAttrs(t) {
+		jsAttrs[a] = struct{}{}
+	}
+	for _, a := range registeredBehaviorAttrs(t) {
 		jsAttrs[a] = struct{}{}
 	}
 
@@ -269,7 +307,9 @@ func TestGoInteractiveAttrs_F3NameAbsent(t *testing.T) {
 func TestRuntimeAttrsAreDocumented(t *testing.T) {
 	doc := documentedAttrs(t)
 	var missing []string
-	for _, a := range runtimeJSAttrs(t) {
+	// The runtime's own sources and every registered behaviour's: a
+	// module that moved out of this package keeps hard rule 5 with it.
+	for _, a := range append(runtimeJSAttrs(t), registeredBehaviorAttrs(t)...) {
 		if _, ok := doc[a]; !ok {
 			missing = append(missing, a)
 		}
