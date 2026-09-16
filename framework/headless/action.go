@@ -37,7 +37,7 @@ const (
 	PartActionDone Part = "action-done"
 )
 
-// The failed-mutation sentence lives in Words.ActionFailed; a
+// The failed-mutation sentence lives in Strings.ActionFailed; a
 // sentence and not a bare "Error" is the point — see that field.
 
 // checkActionEndpoint refuses the two endpoints that look wired and
@@ -126,10 +126,13 @@ type OptimisticActionProps struct {
 	ID         string
 	ExtraAttrs html.Attrs
 
-	// Seams: overrides only. Nothing is fillable — the two labels are
+	// Parts: attrs only. Nothing is fillable — the two labels are
 	// the state, and a slot that replaced one could make the button
 	// say it did something it did not.
-	Seams
+	Parts Parts
+	// Strings are the strings this component says. Nil means the English
+	// defaults; a layer above sets them from the request's language.
+	Strings *Strings
 }
 
 // ToggleActionProps is the three-state cousin: idle → pending →
@@ -176,9 +179,12 @@ type ToggleActionProps struct {
 	ID         string
 	ExtraAttrs html.Attrs
 
-	// Seams: overrides only, for the same reason as
+	// Parts: attrs only, for the same reason as
 	// OptimisticActionProps.
-	Seams
+	Parts Parts
+	// Strings are the strings this component says. Nil means the English
+	// defaults; a layer above sets them from the request's language.
+	Strings *Strings
 }
 
 // action is the half of the contract the two buttons share, so the
@@ -222,7 +228,8 @@ type action struct {
 	failedText string
 	id         string
 	extra      html.Attrs
-	seams      Seams
+	parts      Parts
+	strings    *Strings
 }
 
 // OptimisticAction renders the button. The framework's runtime binds
@@ -255,7 +262,8 @@ func OptimisticAction(p OptimisticActionProps, s Skin) render.HTML {
 		failedText: p.FailedText,
 		id:         p.ID,
 		extra:      p.ExtraAttrs,
-		seams:      p.Seams,
+		parts:      p.Parts,
+		strings:    p.Strings,
 	}, s)
 }
 
@@ -303,7 +311,8 @@ func ToggleAction(p ToggleActionProps, s Skin) render.HTML {
 		failedText:    p.FailedText,
 		id:            p.ID,
 		extra:         p.ExtraAttrs,
-		seams:         p.Seams,
+		parts:         p.Parts,
+		strings:       p.Strings,
 	}, s)
 }
 
@@ -338,7 +347,7 @@ func renderAction(a action, s Skin) render.HTML {
 	// finds the button, and the span it writes to is inside it, so
 	// the announcement never has to reach for anything the flip
 	// already moved.
-	own["data-hui-action-failed"] = orDefault(a.failedText, a.seams.W().ActionFailed)
+	own["data-hui-action-failed"] = orDefault(a.failedText, a.strings.Resolve().ActionFailed)
 	Mark(own, "data-hui-action")
 	Flag(own, "disabled", a.disabled)
 	if cls := s.Variant(PartRoot, a.variant); cls != "" {
@@ -348,7 +357,7 @@ func renderAction(a action, s Skin) render.HTML {
 		own["class"] = joinClasses(own["class"], cls)
 	}
 
-	b := a.seams.Box(s)
+	b := a.parts.Box(s)
 	kids := []render.HTML{
 		actionSpan(b, PartActionIdle, a.idleAttr, a.state == "committed", a.idleLabel, a.idleIcon),
 		actionSpan(b, PartActionDone, a.doneAttr, a.state != "committed", a.doneLabel, a.doneIcon),
@@ -384,13 +393,13 @@ func actionSpan(b Box, part Part, hook string, hidden bool, label string, icon r
 
 func init() {
 	Register(Spec{
-		Name:  "OptimisticAction",
-		Parts: []Part{PartRoot, PartIcon, PartActionIdle, PartActionDone, PartVisuallyHidden},
-		Hooks: []string{"data-hui-action", "data-hui-action-failed", "data-hui-action-status"},
-		WithSeams: func(s Skin, seams Seams) render.HTML {
+		Name:    "OptimisticAction",
+		Anatomy: []Part{PartRoot, PartIcon, PartActionIdle, PartActionDone, PartVisuallyHidden},
+		Hooks:   []string{"data-hui-action", "data-hui-action-failed", "data-hui-action-status"},
+		WithParts: func(s Skin, parts Parts) render.HTML {
 			return OptimisticAction(OptimisticActionProps{
 				Endpoint: "/follow", IdleLabel: "Follow", SuccessLabel: "Following",
-				Seams: seams,
+				Parts: parts,
 			}, s)
 		},
 		Cases: func(k Kit) []Case {
@@ -434,13 +443,13 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "ToggleAction",
-		Parts: []Part{PartRoot, PartIcon, PartActionIdle, PartActionDone, PartVisuallyHidden},
-		Hooks: []string{"data-hui-action", "data-hui-action-failed", "data-hui-action-status"},
-		WithSeams: func(s Skin, seams Seams) render.HTML {
+		Name:    "ToggleAction",
+		Anatomy: []Part{PartRoot, PartIcon, PartActionIdle, PartActionDone, PartVisuallyHidden},
+		Hooks:   []string{"data-hui-action", "data-hui-action-failed", "data-hui-action-status"},
+		WithParts: func(s Skin, parts Parts) render.HTML {
 			return ToggleAction(ToggleActionProps{
 				Endpoint: "/watch", IdleLabel: "Watch", CommittedLabel: "Watching",
-				Seams: seams,
+				Parts: parts,
 			}, s)
 		},
 		Cases: func(k Kit) []Case {

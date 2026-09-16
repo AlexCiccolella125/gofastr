@@ -2,13 +2,13 @@ package headless
 
 // The words gates: that every field is defaulted, that every word is
 // reachable by some rendering, that the package says nothing in
-// English outside the seam, and a second golden at the probe words
+// English outside Strings, and a second golden at the probe strings
 // that proves every string on the page came through it.
 //
 // The mechanism for the corpus gates is wordsProbe (see W): the
 // harness sets it and every component's defaults resolve to their
-// probe tokens, so the whole fixture corpus renders through the seam
-// without editing every Case. Words set explicitly on a Seams still
+// probe tokens, so the whole fixture corpus renders through Strings
+// without editing every Case. Strings set explicitly on a props still
 // win, which is why WithSeams is rendered with its own probe too.
 
 import (
@@ -28,10 +28,10 @@ import (
 // so a probe render still applies its arguments and the verb check
 // below is the same comparison a translation will face.
 func TestEveryWordHasADefault(t *testing.T) {
-	w := DefaultWords()
+	w := DefaultStrings()
 	val := reflect.ValueOf(*w)
 	typ := val.Type()
-	probe := reflect.ValueOf(*ProbeWords())
+	probe := reflect.ValueOf(*ProbeStrings())
 	for i := range typ.NumField() {
 		name := typ.Field(i).Name
 		def := val.Field(i).String()
@@ -53,9 +53,9 @@ func TestEveryWordHasADefault(t *testing.T) {
 // markup.
 func probeCorpus(t *testing.T) string {
 	t.Helper()
-	prev := wordsProbe
-	wordsProbe = ProbeWords()
-	t.Cleanup(func() { wordsProbe = prev })
+	prev := stringsProbe
+	stringsProbe = ProbeStrings()
+	t.Cleanup(func() { stringsProbe = prev })
 
 	var b strings.Builder
 	for _, sp := range Specs() {
@@ -63,8 +63,8 @@ func probeCorpus(t *testing.T) string {
 			b.WriteString(string(c.HTML))
 			b.WriteString("\n")
 		}
-		if sp.WithSeams != nil {
-			b.WriteString(string(sp.WithSeams(nil, Seams{})))
+		if sp.WithParts != nil {
+			b.WriteString(string(sp.WithParts(nil, Parts{})))
 			b.WriteString("\n")
 		}
 	}
@@ -77,7 +77,7 @@ func probeCorpus(t *testing.T) string {
 func TestEveryWordIsSaidBySomeCase(t *testing.T) {
 	corpus := probeCorpus(t)
 
-	val := reflect.ValueOf(*ProbeWords())
+	val := reflect.ValueOf(*ProbeStrings())
 	typ := val.Type()
 	for i := range typ.NumField() {
 		name := typ.Field(i).Name
@@ -97,17 +97,17 @@ func TestEveryWordIsSaidBySomeCase(t *testing.T) {
 	}
 }
 
-// TestSpecGoldenWords is the second golden: the same fixtures, the
+// TestSpecGoldenStrings is the second golden: the same fixtures, the
 // same order, every case rendered with the probe words. A real
-// English word in it is a word that bypassed the seam — fixture
+// English word in it is a word that bypassed Strings — fixture
 // labels (the English a Case chose on purpose) excepted, and those
 // are the caller's strings, not the component's. Regenerate with
 // GOFASTR_UPDATE_GOLDEN=1 after an intended change and read it once,
 // end to end.
-func TestSpecGoldenWords(t *testing.T) {
-	prev := wordsProbe
-	wordsProbe = ProbeWords()
-	t.Cleanup(func() { wordsProbe = prev })
+func TestSpecGoldenStrings(t *testing.T) {
+	prev := stringsProbe
+	stringsProbe = ProbeStrings()
+	t.Cleanup(func() { stringsProbe = prev })
 
 	var b strings.Builder
 	for _, sp := range Specs() {
@@ -120,7 +120,7 @@ func TestSpecGoldenWords(t *testing.T) {
 	}
 	got := b.String()
 
-	const path = "testdata/spec_golden_words.txt"
+	const path = "testdata/spec_golden_strings.txt"
 	if os.Getenv("GOFASTR_UPDATE_GOLDEN") != "" {
 		if err := os.MkdirAll("testdata", 0o755); err != nil {
 			t.Fatal(err)
@@ -137,26 +137,26 @@ func TestSpecGoldenWords(t *testing.T) {
 	if string(golden) != got {
 		t.Fatalf("the words of one or more components changed.\n"+
 			"Every difference below is a string that stopped (or started) coming\n"+
-			"through the words seam. If it is intended, regenerate with\n"+
+			"through Strings. If it is intended, regenerate with\n"+
 			"GOFASTR_UPDATE_GOLDEN=1 and read the diff.\n\n%s",
 			firstDifference(string(golden), got))
 	}
 }
 
 // allowedEnglish is what the walk below may still say in English
-// outside the seam, each with its reason. Every entry must appear in
+// outside Strings, each with its reason. Every entry must appear in
 // the package's source or the test fails, so the list cannot outlive
 // its reasons.
 var allowedEnglish = map[string]string{}
 
-// TestHeadlessSaysNothingInEnglishOutsideWords: the go/ast walk from
+// TestHeadlessSaysNothingInEnglishOutsideStrings: the go/ast walk from
 // the inventory, now a gate. Outside init() (the fixtures, whose
 // English is chosen on purpose) and outside words.go (the defaults
 // themselves), no string literal that contains a space and a letter
 // may be passed to render.Text, orDefault, an aria-label, title,
 // placeholder or alt value, or fmt.Sprintf. A word that slips back in
 // is a word a French page will say in English with no test the wiser.
-func TestHeadlessSaysNothingInEnglishOutsideWords(t *testing.T) {
+func TestHeadlessSaysNothingInEnglishOutsideStrings(t *testing.T) {
 	fset := token.NewFileSet()
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -264,7 +264,7 @@ func report(t *testing.T, fset *token.FileSet, pos token.Pos, lit, offence strin
 		_ = reason
 		return
 	}
-	t.Errorf("%s: %q is English said outside the words seam (%s) — give it a Words field",
+	t.Errorf("%s: %q is English said outside Strings (%s) — give it a Strings field",
 		fset.Position(pos), lit, offence)
 }
 

@@ -38,10 +38,13 @@ both directions.
 - A **hook** is a `data-hui-*` attribute a runtime binds to. A component
   declares the hooks it publishes in its `Spec`; a runtime that binds
   to an undeclared hook is bound to nothing.
+What a caller may set on a component's parts travels as one `Parts`
+value on the props, with three maps keyed by part:
+
 - **Slots** replace the content of the parts a component lists as
   fillable. Most list none: a slot exists only where the component
   composes something no prop can express.
-- **Overrides** add attributes to a part, through a sanitiser that
+- **Attrs** add attributes to a part, through a sanitiser that
   refuses `id`, `style`, every `data-hui-*` hook, every `data-fui-*`
   key and the runtime's privileged unprefixed keys (`data-behavior`,
   `data-island`, `data-action` and their family), stores names folded
@@ -51,11 +54,14 @@ both directions.
 - **Binds** keep a part in step with a client signal (text, html or one
   attribute), refusing reserved signal names and attributes outside the
   runtime's own allow-list.
-- **Words** are the strings a component says: one typed struct, nil for
-  English, for a layer above to resolve once per request from the
-  framework's `i18nui` keys. A missing field is a compile error, not a
-  stray English word on a French page, and a partial value keeps the
-  English default for every field it leaves empty.
+
+**Strings** are the strings a component says, a prop of its own: one
+typed struct, nil for English, for a layer above to resolve once per
+request from the framework's `i18nui` keys. A missing field is a
+compile error, not a stray English word on a French page, and a
+partial value keeps the English default for every field it leaves
+empty. The list of parts a component draws is its `Spec.Anatomy`, the
+word Ark UI, Chakra and Radix use for the same list.
 
 Two more are not per part. A `Button` takes an **Action**, the
 framework's request contract, on itself; `ExtraAttrs` cannot carry one.
@@ -133,13 +139,13 @@ hold for every component:
 - every declared hook survives rendering;
 - every `aria-*` reference resolves inside the fixture, and every
   control has a name;
-- a filled slot and a hostile override cannot break the contract;
+- a filled slot and a hostile part attribute cannot break the contract;
 - every exported component has a spec.
 
 Two goldens pin the corpus: `testdata/spec_golden.txt` at the English
-words and `spec_golden_words.txt` with every word replaced by its own
-probe token, which proves that every string on the page came through
-the `Words` seam. `words_test.go` also walks the source and refuses an
+strings and `spec_golden_strings.txt` with every string replaced by its
+own probe token, which proves that every string on the page came
+through `Strings`. `strings_test.go` also walks the source and refuses an
 English phrase in the sinks it knows: text and HTML literals, format
 strings, defaults, and the attribute values a reader is told.
 
@@ -190,8 +196,8 @@ What it does, one line per behaviour:
   the `data-hui-action-status` span.
 - **drop** lists the chosen files and says the sentence, both built
   from the words the root carries (`data-hui-drop-one` and
-  `data-hui-drop-many`, from `Words.FileSelected` and
-  `Words.FilesSelected`), and takes a real drop on the zone with the
+  `data-hui-drop-many`, from `Strings.FileSelected` and
+  `Strings.FilesSelected`), and takes a real drop on the zone with the
   runtime-owned `data-hui-drop-over` state.
 - **system** keeps a dismissed banner hidden for the session, and
   shows the offline one (`data-hui-system-offline`) when the framework
@@ -216,7 +222,7 @@ through this package.
   module's scanner.
 - **Saying a sentence in the module.** Every string the module writes
   travels as a `data-hui-*` attribute the component rendered from its
-  `Words`, so a translated page announces in its own language; the
+  `Strings`, so a translated page announces in its own language; the
   gate in `behavior_test.go` refuses an English literal the module
   writes itself.
 - **Finding an element from script by its class.** The runtime binds to
@@ -229,7 +235,7 @@ through this package.
   drop every `data-fui-*` key. A request is `ButtonProps.Action`, a
   signal is a `Bind`, a region's refresh is an `Island`.
 - **One attribute under two spellings.** `NAME` and `name` are one
-  attribute to the browser, which keeps the first it reads. Both seams
+  attribute to the browser, which keeps the first it reads. Both ways in
   store names folded, so the component's own spelling wins, and a key
   given twice is refused at render.
 - **Building the hint's id by hand.** `Field` passes a `FieldControl`
@@ -239,8 +245,8 @@ through this package.
   `Attrs` drops empty values on purpose; `hidden`, `popover`, `open`
   and every `data-hui-*` hook go through `Mark`, and boolean HTML
   attributes through `Flag`.
-- **Adding an English string to a component.** Give it a `Words` field
-  with a doc comment saying its shape. The source walk in
-  `words_test.go` fails on a phrase said outside the seam.
+- **Adding an English string to a component.** Give it a `Strings`
+  field with a doc comment saying its shape. The source walk in
+  `strings_test.go` fails on a phrase said outside `Strings`.
 - **Regenerating a golden to make a test pass.** Regenerate only after
   every other test in the package is green, then read the diff.

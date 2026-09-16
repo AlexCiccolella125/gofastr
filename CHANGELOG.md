@@ -20,9 +20,11 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
 - **`framework/headless`**: the structure half of a design system.
   Components render tags, roles, labelling relationships, state
   attributes and `data-hui-*` hooks with no classes at a nil skin; a
-  `Skin` maps parts to classes; the seams (Slots, Overrides, Binds,
-  Words, Island) are typed and sanitised; every component registers a
-  `Spec` that drives the nil-skin sweep, the seam gates and two goldens.
+  `Skin` maps parts to classes; what a caller sets on the parts
+  (`Parts`: `Attrs`, `Slots`, `Binds`), its `Strings` and an `Island`
+  are typed and sanitised; every component registers a `Spec` with its
+  `Anatomy` that drives the nil-skin sweep, the parts gates and two
+  goldens.
   An in-page state change is an `Island` at render time (hard rule 1):
   `Pagination`, `ToolbarSearch` and a dismissible `Tag` or `Alert`
   refuse the link-only render; every href passes the anchor policy.
@@ -34,7 +36,7 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   kernel loads it on one of its seven markers (reveal, color, when,
   form-errors, action, drop, system) and hands it inserted DOM. Every
   sentence the module writes travels as a `data-hui-*` attribute from
-  `Words` (Upload gains `FileSelected` and `FilesSelected`), and the
+  `Strings` (Upload gains `FileSelected` and `FilesSelected`), and the
   two attributes it writes back (`data-hui-when-off`,
   `data-hui-drop-over`) are its own. Source gates in
   `behavior_test.go`, browser coverage in `behavior_e2e_test.go`.

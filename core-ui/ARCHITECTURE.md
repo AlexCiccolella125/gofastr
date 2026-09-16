@@ -1580,8 +1580,9 @@ framework/
   static/      : SSG builder (renders every screen at build time)
   headless/    : the structure half of a design system: components that
                  render tags, roles, labelling and data-hui-* hooks with
-                 no classes; a Skin maps parts to classes; seams (Slots,
-                 Overrides, Binds, Words, Island) are typed and checked;
+                 no classes; a Skin maps parts to classes; a caller's
+                 Parts (Attrs, Slots, Binds), Strings and Island are
+                 typed and checked;
                  a harness pins every component at the nil skin. See
                  `gofastr docs ui-headless`.
   ui/          : opinionated semantic components on top of core-ui

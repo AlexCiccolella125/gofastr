@@ -1,6 +1,6 @@
 package headless
 
-// Slots and overrides: the two ways a caller reaches inside a
+// Slots and part attributes: the two ways a caller reaches inside a
 // component without forking it.
 //
 // The problem this solves is the one every design system hits on its
@@ -15,11 +15,11 @@ package headless
 //
 //	skin[part]       what class does it carry
 //	slots[part]      what goes inside it
-//	overrides[part]  what attributes does it also carry
+//	attrs[part]      what attributes does it also carry
 //
 // One list of names, three things you can do to each. A part a skin
 // can style is a part a caller can fill and annotate, which means the
-// component author declares its seams once and cannot accidentally
+// component author declares its parts once and cannot accidentally
 // offer a hook to one layer and not the others.
 //
 // What a caller may NOT do is the whole reason this is a type and not
@@ -59,13 +59,14 @@ import (
 // declared slot filled with something hostile to prove it.
 type Slots map[Part]render.HTML
 
-// Overrides add attributes to named parts, subject to the rules above.
-type Overrides map[Part]html.Attrs
+// PartAttrs add attributes to named parts, subject to the rules above.
+type PartAttrs map[Part]html.Attrs
 
 // Bind keeps a part in step with one of the host framework's client
 // signals: its runtime rewrites the part's text, its HTML, or one
-// attribute whenever the signal changes. It is the third seam, beside
-// slots and overrides, because a binding is neither: an override may
+// attribute whenever the signal changes. It is the third thing a
+// caller may set on a part, beside slots and attrs, because a binding
+// is neither: an attribute may
 // not carry a data-fui-* key, on purpose, so the only way a part can
 // follow a signal is to say so here, where it is typed, reviewable,
 // lands on exactly one element, and cannot reach an attribute the
@@ -134,18 +135,18 @@ func checkSignalName(name string) {
 type Box struct {
 	Skin  Skin
 	Slots Slots
-	Over  Overrides
+	Over  PartAttrs
 	Binds Binds
 }
 
 // Boxed is the constructor a component calls with whatever its props
 // carry.
-func Boxed(s Skin, slots Slots, over Overrides) Box {
+func Boxed(s Skin, slots Slots, over PartAttrs) Box {
 	return Box{Skin: s, Slots: slots, Over: over}
 }
 
 // El renders one element with the part's class, the caller's
-// overrides for that part, then the component's own attrs — in that
+// attrs for that part, then the component's own attrs — in that
 // order, so the component wins.
 func (b Box) El(tag string, p Part, own html.Attrs, children ...render.HTML) render.HTML {
 	if len(b.Over) == 0 && len(b.Binds) == 0 {
@@ -160,7 +161,7 @@ func (b Box) El(tag string, p Part, own html.Attrs, children ...render.HTML) ren
 	for k := range own {
 		ownedKeys[strings.ToLower(k)] = true
 	}
-	for k, v := range allowedOverride(b.Over[p]) {
+	for k, v := range allowedPartAttrs(b.Over[p]) {
 		if strings.ToLower(k) == "class" {
 			extraClass = v
 			continue
@@ -204,17 +205,17 @@ func (b Box) Filled(p Part) bool {
 }
 
 // Child returns a Box for a nested component: the same skin, and none
-// of the slots or overrides. A slot named "footer" means this
+// of the slots or attrs. A slot named "footer" means this
 // component's footer, not the footer of everything it happens to
 // contain — passing them down would make one name reach an unbounded
 // set of elements.
 func (b Box) Child(s Skin) Box { return Box{Skin: s} }
 
-// allowedOverride drops what a caller may not set. It is a function
+// allowedPartAttrs drops what a caller may not set on a part. It is a function
 // rather than a method so the test can state the rule directly. Keys
 // are stored folded, as Safe stores them, and one key under two
 // spellings is refused for the same reason.
-func allowedOverride(a html.Attrs) html.Attrs {
+func allowedPartAttrs(a html.Attrs) html.Attrs {
 	out := html.Attrs{}
 	for k, v := range a {
 		lk := strings.ToLower(k)
@@ -222,34 +223,35 @@ func allowedOverride(a html.Attrs) html.Attrs {
 			continue
 		}
 		if _, twice := out[lk]; twice {
-			panic("headless: overrides repeat " + lk + " under two spellings")
+			panic("headless: part attrs repeat " + lk + " under two spellings")
 		}
 		out[lk] = v
 	}
 	return out
 }
 
-// Seams is embedded in the props of every component that offers slots
-// and overrides. It is a type rather than two loose fields so the
-// harness can find them: a component either has seams or does not, and
-// which parts they reach is a question with one answer per component.
-type Seams struct {
+// Parts is what a caller may set on a component's named parts: extra
+// attributes, replacement content for the parts the spec lists as
+// fillable, and a binding to a client signal. It is one value rather
+// than three loose fields so the harness can find it: a component
+// either offers its parts or does not, and which parts a caller can
+// reach is a question with one answer per component.
+type Parts struct {
+	// Attrs add attributes to named parts. An attribute the component
+	// owns is never beaten, and the keys refused on every way in are
+	// refused here too (see refused).
+	Attrs PartAttrs
 	// Slots replace named parts' content. Only the parts a component
 	// lists as fillable do anything; the rest are ignored rather than
 	// silently half-applied.
 	Slots Slots
-	// Overrides add attributes to named parts.
-	Overrides Overrides
 	// Binds keep named parts in step with client signals.
 	Binds Binds
-	// Words are the strings the component says. Nil means the English
-	// defaults; a layer above sets them from the request's language.
-	Words *Words
 }
 
-// Box builds the render box for a component's seams.
-func (s Seams) Box(skin Skin) Box {
-	b := Boxed(skin, s.Slots, s.Overrides)
+// Box builds the render box that applies a caller's Parts.
+func (s Parts) Box(skin Skin) Box {
+	b := Boxed(skin, s.Slots, s.Attrs)
 	b.Binds = s.Binds
 	return b
 }

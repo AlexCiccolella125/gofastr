@@ -38,10 +38,13 @@ type ValidationSummaryProps struct {
 	ID         string
 	ExtraAttrs html.Attrs
 
-	// Seams: overrides and binds on the root, the title, the list and
-	// its items. Words ride here too (the title a failed submit
+	// Parts: attrs and binds on the root, the title, the list and
+	// its items. Strings carry the title a failed submit
 	// focuses).
-	Seams
+	Parts Parts
+	// Strings are the strings this component says. Nil means the English
+	// defaults; a layer above sets them from the request's language.
+	Strings *Strings
 }
 
 // ValidationSummary renders the summary that goes above a form.
@@ -67,7 +70,7 @@ type ValidationSummaryProps struct {
 // Rendering it with no errors renders nothing: an empty "there is a
 // problem" box that announces itself is a lie that interrupts.
 func ValidationSummary(p ValidationSummaryProps, s Skin) render.HTML {
-	b := p.Seams.Box(s)
+	b := p.Parts.Box(s)
 	if len(p.Errors) == 0 {
 		return ""
 	}
@@ -94,7 +97,7 @@ func ValidationSummary(p ValidationSummaryProps, s Skin) render.HTML {
 	return b.El("div", PartRoot, own,
 		b.El(headingTag(p.Level), PartTitle,
 			Attrs(map[string]string{"id": titleIDFor(p.ID)}),
-			render.Text(orDefault(p.Title, p.Seams.W().ThereIsAProblem))),
+			render.Text(orDefault(p.Title, p.Strings.Resolve().ThereIsAProblem))),
 		b.El("ul", PartErrorList, nil, items...),
 	)
 }
@@ -208,12 +211,12 @@ func Timeline(p TimelineProps, s Skin) render.HTML {
 
 func init() {
 	Register(Spec{
-		Name:  "ValidationSummary",
-		Parts: []Part{PartRoot, PartTitle, PartErrorList, PartErrorItem, PartErrorLink},
-		WithSeams: func(s Skin, seams Seams) render.HTML {
+		Name:    "ValidationSummary",
+		Anatomy: []Part{PartRoot, PartTitle, PartErrorList, PartErrorItem, PartErrorLink},
+		WithParts: func(s Skin, parts Parts) render.HTML {
 			return ValidationSummary(ValidationSummaryProps{ID: "errors",
 				Errors: []FieldError{{For: "name", Message: "Enter an app name."}},
-				Seams:  seams}, s)
+				Parts:  parts}, s)
 		},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
@@ -242,8 +245,8 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "Timeline",
-		Parts: []Part{PartRoot, PartTimelineItem, PartTimelineMark, PartTimelineTime, PartTimelineBody, PartTitle, PartDesc},
+		Name:    "Timeline",
+		Anatomy: []Part{PartRoot, PartTimelineItem, PartTimelineMark, PartTimelineTime, PartTimelineBody, PartTitle, PartDesc},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{

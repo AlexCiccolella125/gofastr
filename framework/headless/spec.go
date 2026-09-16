@@ -13,7 +13,7 @@ package headless
 // which parts it draws, which of those a caller may fill, and what
 // runtime hooks it publishes; and it renders itself at any skin, so
 // the SAME fixture drives the nil-skin contract sweep, the goldens,
-// and the seam tests below. A component with a spec cannot be half
+// and the parts tests below. A component with a spec cannot be half
 // tested, and one without a spec fails the build.
 //
 // What a Spec deliberately does not carry is the component's own
@@ -43,24 +43,23 @@ type Spec struct {
 	// Name is the exported function's name, exactly. The coverage
 	// gate matches on it.
 	Name string
-	// Parts are the parts this component draws. A skin styles these
+	// Anatomy lists the parts this component draws. A skin styles these
 	// and only these; a part listed here and never rendered is a
 	// class in the stylesheet with nothing to land on.
-	Parts []Part
+	Anatomy []Part
 	// Fillable are the parts a caller may replace through Slots. The
-	// empty set is the correct answer for most components: a seam is
+	// empty set is the correct answer for most components: a slot is
 	// offered where the component's own content carries no guarantee.
 	Fillable []Part
 	// Hooks are the data-hui-* attributes this component publishes for
 	// the runtime. Naming them here is what lets a test prove the
 	// runtime is not bound to an attribute nothing renders.
 	Hooks []string
-	// WithSeams renders the component with caller slots and overrides
-	// applied. A component that offers seams must provide it: it is
-	// how the harness proves that filling a slot or adding an
-	// attribute cannot break the contract, and a seam nothing tests
-	// is a seam that will.
-	WithSeams func(s Skin, seams Seams) render.HTML
+	// WithParts renders the component with a caller's Parts applied.
+	// A component that offers its parts must provide it: it is how the
+	// harness proves that filling a slot or adding an attribute cannot
+	// break the contract, and a part nothing tests is a part that will.
+	WithParts func(s Skin, parts Parts) render.HTML
 	// Cases renders the component at a given skin. Nil skin means
 	// unstyled, which is what the contract is asserted against.
 	Cases func(k Kit) []Case

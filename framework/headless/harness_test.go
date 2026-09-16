@@ -138,14 +138,14 @@ func TestEveryDeclaredPartIsActuallyDrawn(t *testing.T) {
 	for _, sp := range Specs() {
 		t.Run(sp.Name, func(t *testing.T) {
 			probe := Skin{}
-			for _, p := range sp.Parts {
+			for _, p := range sp.Anatomy {
 				probe[p] = "probe-" + string(p)
 			}
 			var all strings.Builder
 			for _, c := range sp.Cases(probeKit(probe)) {
 				all.WriteString(string(c.HTML))
 			}
-			for _, p := range sp.Parts {
+			for _, p := range sp.Anatomy {
 				if !drawsClass(all.String(), "probe-"+string(p)) {
 					t.Errorf("part %q is declared but no case draws it", p)
 				}
@@ -165,7 +165,7 @@ func TestEveryDeclaredHookIsRendered(t *testing.T) {
 		// multi-select tells its runtime which class to give the chips
 		// it builds — and those exist only once something is styled.
 		probe := Skin{}
-		for _, p := range sp.Parts {
+		for _, p := range sp.Anatomy {
 			probe[p] = "probe-" + string(p)
 		}
 		var all strings.Builder
@@ -287,7 +287,7 @@ func TestEveryControlHasAName(t *testing.T) {
 	})
 }
 
-// ─── seams ──────────────────────────────────────────────────────────
+// ─── parts ──────────────────────────────────────────────────────────
 
 // Filling a slot must not cost the component its contract. The slot
 // gets something hostile — a heading, an unnamed control, a duplicate
@@ -298,13 +298,13 @@ func TestFilledSlotsKeepTheContract(t *testing.T) {
 		if len(sp.Fillable) == 0 {
 			continue
 		}
-		if sp.WithSeams == nil {
+		if sp.WithParts == nil {
 			t.Errorf("%s offers %d fillable parts and no WithSeams, so nothing tests them", sp.Name, len(sp.Fillable))
 			continue
 		}
 		for _, p := range sp.Fillable {
 			t.Run(sp.Name+"/"+string(p), func(t *testing.T) {
-				got := sp.WithSeams(nil, Seams{Slots: Slots{p: hostile}})
+				got := sp.WithParts(nil, Parts{Slots: Slots{p: hostile}})
 				if !strings.Contains(string(got), "<h4>slot</h4>") {
 					t.Errorf("part %q is listed as fillable and the content never arrived:\n%s", p, got)
 				}
@@ -337,11 +337,11 @@ func TestOverridesCannotBreakAComponent(t *testing.T) {
 		"data-testid":   "card",
 	}
 	for _, sp := range Specs() {
-		if sp.WithSeams == nil {
+		if sp.WithParts == nil {
 			continue
 		}
 		t.Run(sp.Name, func(t *testing.T) {
-			got := sp.WithSeams(Skin{PartRoot: "real"}, Seams{Overrides: Overrides{PartRoot: hostile}})
+			got := sp.WithParts(Skin{PartRoot: "real"}, Parts{Attrs: PartAttrs{PartRoot: hostile}})
 			if strings.Contains(string(got), `"stolen"`) {
 				t.Error("a caller renamed the root: ids are how a label finds its control")
 			}
@@ -472,7 +472,7 @@ func probeFor(name string) Skin {
 		return nil
 	}
 	s := Skin{}
-	for _, p := range sp.Parts {
+	for _, p := range sp.Anatomy {
 		s[p] = "probe-" + name + "-" + string(p)
 	}
 	return s
@@ -551,7 +551,7 @@ func TestEveryPartDrawnIsDeclared(t *testing.T) {
 	// declared by none of them still has a class to be caught by.
 	universal := Skin{}
 	for _, sp := range Specs() {
-		for _, p := range sp.Parts {
+		for _, p := range sp.Anatomy {
 			universal[p] = "probe-" + string(p)
 		}
 	}
@@ -559,7 +559,7 @@ func TestEveryPartDrawnIsDeclared(t *testing.T) {
 		sp := sp
 		t.Run(sp.Name, func(t *testing.T) {
 			declared := map[Part]bool{}
-			for _, p := range sp.Parts {
+			for _, p := range sp.Anatomy {
 				declared[p] = true
 			}
 			// Children resolve to nil, so what is drawn here is this
@@ -617,18 +617,18 @@ func TestEverySVGInAFixtureDeclaresItsSize(t *testing.T) {
 	})
 }
 
-// A seam nothing routes is a seam that silently drops what it is
+// A part nothing routes is a part that silently drops what it is
 // given. The override sweep above proves a hostile override cannot
 // break a component; this proves a benign binding on the root ARRIVES,
-// for every component that offers seams — which is the same as
+// for every component that offers its parts — which is the same as
 // proving the root is rendered through the Box rather than around it.
-func TestEveryComponentWithSeamsRoutesABindToItsRoot(t *testing.T) {
+func TestEveryComponentWithPartsRoutesABindToItsRoot(t *testing.T) {
 	for _, sp := range Specs() {
-		if sp.WithSeams == nil {
+		if sp.WithParts == nil {
 			continue
 		}
 		t.Run(sp.Name, func(t *testing.T) {
-			got := sp.WithSeams(nil, Seams{Binds: Binds{PartRoot: {Signal: "probe"}}})
+			got := sp.WithParts(nil, Parts{Binds: Binds{PartRoot: {Signal: "probe"}}})
 			if !strings.Contains(string(got), `data-fui-signal="probe"`) {
 				t.Errorf("a binding on the root never arrived: the root is rendered around the Box, "+
 					"so overrides on it are dropped the same way:\n%s", got)
@@ -639,12 +639,12 @@ func TestEveryComponentWithSeamsRoutesABindToItsRoot(t *testing.T) {
 
 // A props type that embeds Seams offers them, and Spec.WithSeams is
 // the only thing that proves they arrive. Five components once carried
-// the embed for Words alone and dropped Overrides and Binds on the
-// floor, with nothing failing, because every seam gate above skips a
+// the field for Slots alone and dropped Attrs and Binds on the
+// floor, with nothing failing, because every parts gate above skips a
 // spec with no WithSeams. This reads the source instead: a struct
 // with an embedded Seams field names a component, and that
-// component's spec must render with seams.
-func TestEveryPropsTypeThatEmbedsSeamsHasAFixture(t *testing.T) {
+// component's spec must render with its parts.
+func TestEveryPropsTypeWithPartsHasAFixture(t *testing.T) {
 	fset := token.NewFileSet()
 	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool {
 		return !strings.HasSuffix(fi.Name(), "_test.go")
@@ -662,7 +662,7 @@ func TestEveryPropsTypeThatEmbedsSeamsHasAFixture(t *testing.T) {
 				for _, spec := range gd.Specs {
 					ts := spec.(*ast.TypeSpec)
 					st, ok := ts.Type.(*ast.StructType)
-					if !ok || !embedsSeams(st) {
+					if !ok || !hasParts(st) {
 						continue
 					}
 					name := strings.TrimSuffix(ts.Name.Name, "Props")
@@ -671,7 +671,7 @@ func TestEveryPropsTypeThatEmbedsSeamsHasAFixture(t *testing.T) {
 						t.Errorf("%s embeds Seams and no spec is named %q", ts.Name.Name, name)
 						continue
 					}
-					if sp.WithSeams == nil {
+					if sp.WithParts == nil {
 						t.Errorf("%s embeds Seams and its spec has no WithSeams: the seam gates skip it, "+
 							"so an override or a bind it drops fails nothing", ts.Name.Name)
 					}
@@ -681,12 +681,12 @@ func TestEveryPropsTypeThatEmbedsSeamsHasAFixture(t *testing.T) {
 	}
 }
 
-func embedsSeams(st *ast.StructType) bool {
+func hasParts(st *ast.StructType) bool {
 	for _, f := range st.Fields.List {
-		if len(f.Names) != 0 {
+		if len(f.Names) != 1 || f.Names[0].Name != "Parts" {
 			continue
 		}
-		if id, ok := f.Type.(*ast.Ident); ok && id.Name == "Seams" {
+		if id, ok := f.Type.(*ast.Ident); ok && id.Name == "Parts" {
 			return true
 		}
 	}

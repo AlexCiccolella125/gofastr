@@ -11,7 +11,7 @@ skin or stylesheet ships in this repository yet; `framework/ui` is
 today's styled layer and does not render through this package.
 
 **Use this when** the prompt mentions: headless, unstyled, reskin, a
-second design system, parts, slots, overrides, binds, words, translated
+second design system, parts, anatomy, slots, attrs, binds, strings, translated
 component strings, an island on a table or pager, or a component whose
 accessibility must be pinned by a golden.
 
@@ -26,13 +26,12 @@ headless.Button(headless.ButtonProps{Label: "Save", Type: "submit"}, skin)
 // A skin: part → class. The only coupling between the two layers.
 skin := headless.Skin{headless.PartRoot: "btn", headless.PartIcon: "btn__icon"}
 
-// Seams: how a page reaches inside without forking.
-headless.Card(headless.CardProps{Title: "Apps", Seams: headless.Seams{
-    Slots:     headless.Slots{headless.PartCardHeader: header},
-    Overrides: headless.Overrides{headless.PartFooter: {"data-testid": "f"}},
-    Binds:     headless.Binds{headless.PartTitle: {Signal: "count"}},
-    Words:     words, // nil means English
-}}, skin, body)
+// Parts: how a page reaches inside without forking, keyed by part.
+headless.Card(headless.CardProps{Title: "Apps", Parts: headless.Parts{
+    Attrs: headless.PartAttrs{headless.PartFooter: {"data-testid": "f"}},
+    Slots: headless.Slots{headless.PartCardHeader: header},
+    Binds: headless.Binds{headless.PartTitle: {Signal: "count"}},
+}, Strings: strings /* nil means English */}, skin, body)
 
 // An in-page state change is an island, never a route (hard rule 1).
 headless.Pagination(headless.PaginationProps{
@@ -44,8 +43,8 @@ headless.Pagination(headless.PaginationProps{
 Every component registers a `Spec`: its name, the parts it draws, the
 parts a slot may fill, the hooks it publishes, and the cases worth
 rendering with a reason each. One fixture drives the nil-skin sweep,
-the seam tests and the two goldens (`testdata/spec_golden.txt` at the
-English words, `spec_golden_words.txt` at probe words).
+the parts tests and the two goldens (`testdata/spec_golden.txt` at the
+English strings, `spec_golden_strings.txt` at probe strings).
 
 ## Don't reinvent
 
@@ -59,15 +58,15 @@ English words, `spec_golden_words.txt` at probe words).
 - **A request through `ExtraAttrs`.** `Safe` drops every `data-fui-*`
   key. A request is `ButtonProps.Action`; a signal is a `Bind`; a
   region's refresh is an `Island`.
-- **One attribute under two spellings.** `Safe` and the override
+- **One attribute under two spellings.** `Safe` and the part-attrs
   sanitiser store names folded, as the browser reads them, so a
   caller's `NAME` cannot land beside the component's `name`; a key
   given twice is refused.
-- **An English string in a component.** Words live on `Words`, one typed
-  field each, so a missing translation is a compile error rather than a
-  stray word on a French page; `words_test.go` refuses English outside
-  the seam. A partial `Words` is safe: every empty field falls back to
-  its English default.
+- **An English string in a component.** Strings live on `Strings`, one
+  typed field each, so a missing translation is a compile error rather
+  than a stray word on a French page; `strings_test.go` refuses English
+  outside it. A partial `Strings` is safe: every empty field falls back
+  to its English default.
 - **A golden update without reading it.** `GOFASTR_UPDATE_GOLDEN=1 go test`
   regenerates; every changed line is a change to what assistive
   technology is told.
@@ -75,8 +74,8 @@ English words, `spec_golden_words.txt` at probe words).
   kernel, which hands it every inserted subtree; a MutationObserver or
   a navigate listener in a host, or a second module binding the same
   hooks, arms everything twice.
-- **Saying a sentence in the behaviour module.** Words travel as
-  `data-hui-*` attributes from `Words`, so the module itself writes no
+- **Saying a sentence in the behaviour module.** Strings travel as
+  `data-hui-*` attributes from `Strings`, so the module itself writes no
   sentence a translated page would say in English.
 
 Full contract: `gofastr docs ui-headless`.

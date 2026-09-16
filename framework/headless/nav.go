@@ -94,14 +94,17 @@ type TagProps struct {
 	ID         string
 	ExtraAttrs html.Attrs
 
-	// Seams: overrides and binds on the root and the dismiss control.
-	// Words ride here too (the dismiss control's name).
-	Seams
+	// Parts: attrs and binds on the root and the dismiss control.
+	// Strings carry the dismiss control's name.
+	Parts Parts
+	// Strings are the strings this component says. Nil means the English
+	// defaults; a layer above sets them from the request's language.
+	Strings *Strings
 }
 
 // Tag renders a chip, optionally dismissible.
 func Tag(p TagProps, s Skin) render.HTML {
-	b := p.Seams.Box(s)
+	b := p.Parts.Box(s)
 	if p.Label == "" {
 		panic("headless: Tag requires Label")
 	}
@@ -114,7 +117,7 @@ func Tag(p TagProps, s Skin) render.HTML {
 	if p.DismissHref != "" {
 		aria := p.DismissAriaLabel
 		if aria == "" {
-			aria = fmt.Sprintf(p.Seams.W().RemoveLabelled, p.Label)
+			aria = fmt.Sprintf(p.Strings.Resolve().RemoveLabelled, p.Label)
 		}
 		requireIsland("Tag with DismissHref", p.Island)
 		if urlsafe.CleanAnchor(p.DismissHref) == "" {
@@ -224,9 +227,12 @@ type PaginationProps struct {
 	ID         string
 	ExtraAttrs html.Attrs
 
-	// Seams: overrides and binds on the root, the list and the gaps.
-	// Words ride here too (the two end links).
-	Seams
+	// Parts: attrs and binds on the root, the list and the gaps.
+	// Strings carry the two end links.
+	Parts Parts
+	// Strings are the strings this component says. Nil means the English
+	// defaults; a layer above sets them from the request's language.
+	Strings *Strings
 }
 
 // Pagination renders prev / numbered pages / next. The current page
@@ -239,7 +245,7 @@ type PaginationProps struct {
 // inside it is PartPagination, which is where a caller's Class has
 // always landed.
 func Pagination(p PaginationProps, s Skin) render.HTML {
-	b := p.Seams.Box(s)
+	b := p.Parts.Box(s)
 	if p.AriaLabel == "" {
 		panic("headless: Pagination requires AriaLabel")
 	}
@@ -263,7 +269,7 @@ func Pagination(p PaginationProps, s Skin) render.HTML {
 		panic("headless: Pagination Page " + strconv.Itoa(p.Page) + " outside 1.." + strconv.Itoa(p.Pages))
 	}
 	requireIsland("Pagination", p.Island)
-	w := p.Seams.W()
+	w := p.Strings.Resolve()
 	prev := orDefault(p.PrevLabel, w.Previous)
 	next := orDefault(p.NextLabel, w.Next)
 
@@ -413,8 +419,8 @@ func Steps(p StepsProps, s Skin) render.HTML {
 
 func init() {
 	Register(Spec{
-		Name:  "Badge",
-		Parts: []Part{PartRoot, PartIcon},
+		Name:    "Badge",
+		Anatomy: []Part{PartRoot, PartIcon},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
@@ -430,10 +436,10 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "Tag",
-		Parts: []Part{PartRoot, PartIcon, PartBadgeDismiss},
-		WithSeams: func(s Skin, seams Seams) render.HTML {
-			return Tag(TagProps{Label: "env=prod", Seams: seams}, s)
+		Name:    "Tag",
+		Anatomy: []Part{PartRoot, PartIcon, PartBadgeDismiss},
+		WithParts: func(s Skin, parts Parts) render.HTML {
+			return Tag(TagProps{Label: "env=prod", Parts: parts}, s)
 		},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
@@ -451,12 +457,12 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "Pagination",
-		Parts: []Part{PartRoot, PartPagination, PartPaginationLink, PartPaginationGap},
-		WithSeams: func(s Skin, seams Seams) render.HTML {
+		Name:    "Pagination",
+		Anatomy: []Part{PartRoot, PartPagination, PartPaginationLink, PartPaginationGap},
+		WithParts: func(s Skin, parts Parts) render.HTML {
 			return Pagination(PaginationProps{Page: 1, Pages: 2, HrefPattern: "/apps?page=%d",
 				AriaLabel: "Pages", Island: Island{Endpoint: "/island/apps", Signal: "apps"},
-				Seams: seams}, s)
+				Parts: parts}, s)
 		},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
@@ -477,8 +483,8 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "Steps",
-		Parts: []Part{PartRoot, PartStep, PartMarker, PartLabel},
+		Name:    "Steps",
+		Anatomy: []Part{PartRoot, PartStep, PartMarker, PartLabel},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
@@ -494,8 +500,8 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "Toolbar",
-		Parts: []Part{PartRoot},
+		Name:    "Toolbar",
+		Anatomy: []Part{PartRoot},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
@@ -509,8 +515,8 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "ToolbarGroup",
-		Parts: []Part{PartToolbarGroup, PartToolbarLabel},
+		Name:    "ToolbarGroup",
+		Anatomy: []Part{PartToolbarGroup, PartToolbarLabel},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
@@ -522,8 +528,8 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "ToolbarSpacer",
-		Parts: []Part{PartToolbarSpacer},
+		Name:    "ToolbarSpacer",
+		Anatomy: []Part{PartToolbarSpacer},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
@@ -535,8 +541,8 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "ToolbarSearch",
-		Parts: []Part{PartToolbarSearch},
+		Name:    "ToolbarSearch",
+		Anatomy: []Part{PartToolbarSearch},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{

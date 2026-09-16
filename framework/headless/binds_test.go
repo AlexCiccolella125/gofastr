@@ -11,7 +11,7 @@ import (
 // data-fui-* key. The binding lands on the named part, on that part
 // only, and renders exactly the triple the framework's runtime reads.
 func TestBindLandsOnTheNamedPartOnly(t *testing.T) {
-	got := Card(CardProps{Title: "CPU", Seams: Seams{Binds: Binds{
+	got := Card(CardProps{Title: "CPU", Parts: Parts{Binds: Binds{
 		PartCardBody: {Signal: "cpu"},
 	}}}, nil, render.HTML("<p>41%</p>"))
 	has(t, got, `data-fui-signal="cpu"`, "the binding never arrived")
@@ -23,7 +23,7 @@ func TestBindLandsOnTheNamedPartOnly(t *testing.T) {
 }
 
 func TestBindAttrModeNamesItsAttribute(t *testing.T) {
-	got := Card(CardProps{Title: "CPU", Seams: Seams{Binds: Binds{
+	got := Card(CardProps{Title: "CPU", Parts: Parts{Binds: Binds{
 		PartCardBody: {Signal: "busy", Mode: "attr", Attr: "aria-busy"},
 	}}}, nil, render.HTML("<p>x</p>"))
 	has(t, got, `data-fui-signal-mode="attr"`, "attr mode is not stated")
@@ -61,7 +61,7 @@ func TestBindRefusesWhatTheRuntimeWouldRefuse(t *testing.T) {
 					t.Errorf("%s: refused for the wrong reason: %v", c.name, r)
 				}
 			}()
-			Card(CardProps{Title: "x", Seams: Seams{Binds: Binds{PartCardBody: c.bind}}}, nil, render.HTML("<p>x</p>"))
+			Card(CardProps{Title: "x", Parts: Parts{Binds: Binds{PartCardBody: c.bind}}}, nil, render.HTML("<p>x</p>"))
 		}()
 	}
 }

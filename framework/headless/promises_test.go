@@ -101,10 +101,10 @@ func TestAlertToneReachesTheSkin(t *testing.T) {
 	has(t, plain, `class="alert"`, "an alert with no tone lost its root class")
 }
 
-// A partial Words keeps every word it does not set: a caller that
+// A partial Strings keeps every string it does not set: a caller that
 // translates one string must not unname the reveal button.
-func TestPartialWordsFallBackToEnglish(t *testing.T) {
-	got := Password(PasswordProps{Name: "token", Seams: Seams{Words: &Words{RevealShow: "Montrer"}}}, nil)
+func TestPartialStringsFallBackToEnglish(t *testing.T) {
+	got := Password(PasswordProps{Name: "token", Strings: &Strings{RevealShow: "Montrer"}}, nil)
 	has(t, got, ">Montrer<", "the caller's word was not said")
 	has(t, got, `aria-label="Show password"`, "an unset word rendered as nothing")
 }

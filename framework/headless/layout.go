@@ -58,8 +58,8 @@ func Stack(p StackProps, s Skin, children ...render.HTML) render.HTML {
 
 func init() {
 	Register(Spec{
-		Name:  "Stack",
-		Parts: []Part{PartRoot},
+		Name:    "Stack",
+		Anatomy: []Part{PartRoot},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
@@ -121,8 +121,8 @@ func Cluster(p ClusterProps, s Skin, children ...render.HTML) render.HTML {
 
 func init() {
 	Register(Spec{
-		Name:  "Cluster",
-		Parts: []Part{PartRoot},
+		Name:    "Cluster",
+		Anatomy: []Part{PartRoot},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			button := func(label, variant string) render.HTML {
@@ -177,8 +177,8 @@ func Grid(p GridProps, s Skin, children ...render.HTML) render.HTML {
 
 func init() {
 	Register(Spec{
-		Name:  "Grid",
-		Parts: []Part{PartRoot},
+		Name:    "Grid",
+		Anatomy: []Part{PartRoot},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
@@ -213,8 +213,8 @@ func Container(p ContainerProps, s Skin, children ...render.HTML) render.HTML {
 
 func init() {
 	Register(Spec{
-		Name:  "Container",
-		Parts: []Part{PartRoot},
+		Name:    "Container",
+		Anatomy: []Part{PartRoot},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			measure := func(size, body string) render.HTML {
@@ -387,8 +387,8 @@ func Divider(p DividerProps, s Skin) render.HTML {
 
 func init() {
 	Register(Spec{
-		Name:  "Divider",
-		Parts: []Part{PartRoot, PartDividerLine, PartText},
+		Name:    "Divider",
+		Anatomy: []Part{PartRoot, PartDividerLine, PartText},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
@@ -431,8 +431,8 @@ func mods(own html.Attrs, s Skin, pairs ...string) {
 
 func init() {
 	Register(Spec{
-		Name:  "Section",
-		Parts: []Part{PartRoot, PartTitle, PartDesc, PartHeader, PartSectionHead, PartSectionBody, PartFooter},
+		Name:    "Section",
+		Anatomy: []Part{PartRoot, PartTitle, PartDesc, PartHeader, PartSectionHead, PartSectionBody, PartFooter},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
@@ -525,9 +525,9 @@ func Spacer(p SpacerProps, s Skin) render.HTML {
 
 func init() {
 	Register(Spec{
-		Name:  "Spacer",
-		Parts: []Part{PartRoot},
-		Hooks: []string{"data-hui-grow"},
+		Name:    "Spacer",
+		Anatomy: []Part{PartRoot},
+		Hooks:   []string{"data-hui-grow"},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{

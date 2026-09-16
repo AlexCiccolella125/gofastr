@@ -42,10 +42,13 @@ type FileUploadProps struct {
 	// DescribedBy is an extra id to reference, from a Field.
 	DescribedBy string
 
-	// Seams: overrides and binds on the root, the zone, the input, the
-	// list and the status. Words ride here too: the sentences the
+	// Parts: attrs and binds on the root, the zone, the input, the
+	// list and the status. Strings carry the sentences the
 	// runtime says when files are chosen.
-	Seams
+	Parts Parts
+	// Strings are the strings this component says. Nil means the English
+	// defaults; a layer above sets them from the request's language.
+	Strings *Strings
 
 	ExtraAttrs html.Attrs
 }
@@ -70,7 +73,7 @@ type FileUploadProps struct {
 // the input's value is not read back, and the list of names appears
 // silently.
 func FileUpload(p FileUploadProps, s Skin) render.HTML {
-	b := p.Seams.Box(s)
+	b := p.Parts.Box(s)
 	if p.Name == "" {
 		panic("headless: FileUpload requires Name")
 	}
@@ -118,8 +121,8 @@ func FileUpload(p FileUploadProps, s Skin) render.HTML {
 	// them, the same way the reveal button's labels do.
 	own := Attrs(map[string]string{
 		"data-hui-drop-input": p.ID,
-		"data-hui-drop-one":   p.Seams.W().FileSelected,
-		"data-hui-drop-many":  p.Seams.W().FilesSelected,
+		"data-hui-drop-one":   p.Strings.Resolve().FileSelected,
+		"data-hui-drop-many":  p.Strings.Resolve().FilesSelected,
 	})
 	own["data-hui-drop"] = ""
 	return b.El("div", PartRoot, own,
@@ -150,13 +153,13 @@ func joinIDs(a, b string) string {
 
 func init() {
 	Register(Spec{
-		Name:  "FileUpload",
-		Parts: []Part{PartRoot, PartDropZone, PartText, PartDropCTA, PartDropHint, PartDropInput, PartDropList, PartStatus},
+		Name:    "FileUpload",
+		Anatomy: []Part{PartRoot, PartDropZone, PartText, PartDropCTA, PartDropHint, PartDropInput, PartDropList, PartStatus},
 		Hooks: []string{"data-hui-drop", "data-hui-drop-input", "data-hui-drop-list",
 			"data-hui-drop-status", "data-hui-drop-one", "data-hui-drop-many"},
-		WithSeams: func(s Skin, seams Seams) render.HTML {
+		WithParts: func(s Skin, parts Parts) render.HTML {
 			return FileUpload(FileUploadProps{Name: "seam-upload", ID: "seam-upload",
-				Label: "Drag an archive here, or ", CTA: "choose a file", Seams: seams}, s)
+				Label: "Drag an archive here, or ", CTA: "choose a file", Parts: parts}, s)
 		},
 		Cases: func(k Kit) []Case {
 			s := k.Skin

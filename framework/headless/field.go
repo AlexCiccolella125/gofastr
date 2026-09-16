@@ -152,8 +152,8 @@ func ConditionalField(p ConditionalFieldProps, s Skin, children ...render.HTML) 
 
 func init() {
 	Register(Spec{
-		Name:  "Field",
-		Parts: []Part{PartRoot, PartLabel, PartHint, PartError},
+		Name:    "Field",
+		Anatomy: []Part{PartRoot, PartLabel, PartHint, PartError},
 		// Nothing is fillable. Every part a field draws is half of a
 		// relationship built from the same id as the control: a slot
 		// here would let a page replace the hint with markup that has
@@ -181,8 +181,8 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "FieldRow",
-		Parts: []Part{PartFieldRow},
+		Name:    "FieldRow",
+		Anatomy: []Part{PartFieldRow},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
@@ -200,9 +200,9 @@ func init() {
 	})
 
 	Register(Spec{
-		Name:  "ConditionalField",
-		Parts: []Part{PartRoot},
-		Hooks: []string{"data-hui-when", "data-hui-when-value"},
+		Name:    "ConditionalField",
+		Anatomy: []Part{PartRoot},
+		Hooks:   []string{"data-hui-when", "data-hui-when-value"},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
 			return []Case{{
