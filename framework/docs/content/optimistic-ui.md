@@ -583,15 +583,18 @@ ui.Cluster(ui.ClusterConfig{Gap: ui.GapSM},
 mutations. If the user clicks Pro then immediately clicks Free before
 either RPC settles, both fire; the server must treat them as the
 independent idempotent writes they are (or apply the version-aware 409
-pattern from Recipe 5 to make the second reject). On a navigation
-refresh, SSR re-reads `currentPlan` from the database and renders exactly
-one button as `Committed`, so client and server reconverge.
+pattern from Recipe 5 to make the second reject). The client still
+converges on one committed button: the revoke runs again when a commit
+settles, so the last completer wins and the other ends idle. On a
+navigation refresh, SSR re-reads `currentPlan` from the database and
+renders exactly one button as `Committed`, so client and server
+reconverge.
 
 **Authorization:** each per-plan endpoint enforces its own authorization.
 A user who can read "Pro" but not select it gets a 4xx on the Pro POST;
-the optimistic flip reverts and the previously-committed sibling stays
-committed (the runtime reverts the failed button to idle; it does not
-re-commit the sibling; that happens on the next navigation).
+the failed button rolls back to idle and the sibling it displaced is
+restored to committed on the spot (the server never accepted the new
+member, so the old one is still the committed one).
 
 **Runnable proof:** the "Free / Pro" cluster on
 [`/components/toggleaction`](../../../examples/site/components.go). E2E:

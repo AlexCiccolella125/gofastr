@@ -195,9 +195,9 @@ server side and the runtime does the work.
 | `data-fui-scrollspy` | Marks a scrollspy wrapper (`core-ui/patterns/scrollspy.Wrap` emits a `<div>` around a nav of `<a href="#id">` anchors). The runtime demand-loads the scrollspy module, which IntersectionObserves the anchored targets inside the configured region and tags the link whose target is in the active band with `aria-current="true"` + `.is-active`. The `activelink` module leaves these links alone: scrollspy owns their current-state. |
 | `data-fui-scrollspy-target` | On the scrollspy wrapper: a CSS selector for ADDITIONAL target elements when sections aren't headings (default `h2[id], h3[id]`, e.g. `section[id]`). Only anchors whose `href="#id"` resolves to an element inside the observed region participate; the active link is still whichever anchored target is in view. |
 | `data-fui-optimistic-idle` / `data-fui-optimistic-success` / `data-fui-optimistic-endpoint` / `data-fui-optimistic-method` | On an OptimisticAction button: the adapter flips the visible label between the idle and success copy as it dispatches a fetch to the endpoint+method, rolling back on error. Bound by the registered behaviour `framework/ui/optimisticaction.js` (Requires the kernel's `action` primitive) for `framework/ui.OptimisticAction`, "Save / Saved!" patterns without per-button JS. |
-| `data-fui-toggle-endpoint` / `data-fui-toggle-method` / `data-fui-toggle-allow-untoggle` / `data-fui-toggle-untoggle-endpoint` | On a three-state ToggleAction button (`framework/ui.ToggleAction`, `framework/ui/toggleaction.go`): `endpoint`+`method` (default POST) hit when toggling from idle → committed; `allow-untoggle="true"` lets a second click reverse the action, hitting `untoggle-endpoint` (same method) if set. With NO untoggle endpoint configured the button flips back to idle locally without issuing any request. Driven by the registered behaviour `framework/ui/toggleaction.js` (Requires the kernel's `action` primitive), whose three-state mutex keeps rapid clicks from racing. |
+| `data-fui-toggle-endpoint` / `data-fui-toggle-method` / `data-fui-toggle-allow-untoggle` / `data-fui-toggle-untoggle-endpoint` | On a three-state ToggleAction button (`framework/ui.ToggleAction`, `framework/ui/toggleaction.go`): `endpoint`+`method` (default POST) hit when toggling from idle → committed; `allow-untoggle="true"` lets a second click reverse the action, hitting `untoggle-endpoint` (same method) if set. With NO untoggle endpoint configured the button flips back to idle locally without issuing any request. Driven by the registered behaviour `framework/ui/toggleaction.js` (Requires the kernel's `action` primitive), whose pending state ignores re-entry per button and whose group mutex (see `data-fui-toggle-group`) converges on one committed member even when two members are clicked inside one round trip. |
 | `data-fui-toggle-idle` / `data-fui-toggle-committed` | Markers on the two label spans inside a ToggleAction button. The adapter shows/hides them as the button transitions between idle and committed states. SSR ships the initial visible state. |
-| `data-fui-toggle-group="<key>"` | Joins a ToggleAction button to a client-side mutex: committing any button with the same group key optimistically reverts the previously-committed sibling (no extra RPC: the server stays the source of truth and a later navigation refreshes from server state). Maps from `ToggleActionConfig.Group`. |
+| `data-fui-toggle-group="<key>"` | Joins a ToggleAction button to a client-side mutex: committing any button with the same group key optimistically reverts the previously-committed sibling (no extra RPC: the server stays the source of truth and a later navigation refreshes from server state). The revoke runs again when a commit settles, so two members clicked inside one round trip still converge on one committed member (the last completer wins); a failed commit puts the sibling it displaced back. Members whose elements left the document are pruned on `gofastr:navigate`. Maps from `ToggleActionConfig.Group`. |
 | `data-fui-network-retry-threshold` / `data-fui-network-retry-health` / `data-fui-network-retry-button` / `data-fui-network-retry-sse-silence` | On a NetworkRetryBanner element: threshold = number of consecutive fetch failures before the banner shows; health = the URL the runtime probes to detect recovery; button = the retry trigger; sse-silence = grace period (ms) after the last SSE frame before the banner considers the link unhealthy. The runtime polls `window.__gofastr.sseStatus.lastEventAt` (kept current by the SSE module on every frame) and, on a `gofastr:sse-status` reconnect, re-probes `health` so the banner can dismiss. |
 | `data-fui-network-retry-demo-trigger` / `data-fui-network-retry-demo-recover` | Demo-only attributes (`examples/site` NetworkRetryBanner page): trigger forces the banner into the failed state for screenshot/dev purposes; recover restores it. Not used in production wiring. |
 | `data-fui-banner-dismiss-id="<id>"` | Optional companion to `data-fui-banner-dismiss`. When set, the dismissal is recorded in `localStorage` under `gofastr.banner-dismiss.<id>` and the same banner is auto-hidden on every subsequent page load until the key is cleared. Use for "got it"-style deprecation notices. |
@@ -1468,7 +1468,11 @@ Go package is not a module outside the rules.
 
 The module keeps the contract every `src/*.js` module keeps: an IIFE
 that binds only its own markers by attribute, sets
-`window.__gofastr.loadedModules[<name>] = true` when attached, and
+`window.__gofastr.loadedModules[<name>] = true` FIRST — before it
+installs anything, right after its own early-return guard (a script
+that failed halfway with its flag unset has its load rejected and
+fetched again, and the retry re-executes the file: a flag at the end
+leaves every listener of the first pass installed twice) — and
 registers `window.__gofastr._moduleScanners[<name>] = fn(root)`,
 idempotent, so the kernel can hand it inserted DOM and the document
 after a navigation. Design and sequence: `docs/spec-behavior-registry.md`.
@@ -1477,12 +1481,18 @@ after a navigation. Design and sequence: `docs/spec-behavior-registry.md`.
 that must be registered before it: `registry.Requires(names...)`,
 carried in the behaviours block as `r`. The names are embedded kernel
 modules or registered behaviours; a name that is neither, or a cycle,
-panics where the block is built. The loader is the one place every
-load goes through (marker scan, idle queue, hover prefetch, the
-interaction bridge), so it is where dependencies live: `loadModule`
-loads a module's requirements first, in parallel, and only then
-appends its script. Readiness is registration, not transport: the
-loader resolves a module's promise when `loadedModules[name]` is an
+panics where the block is built — at the first render that builds the
+manifest, not at startup (the registry is only complete once every
+package's init has run), surfacing as a 500 through the framework's
+recovery middleware. The loader is the one place every load goes
+through (marker scan, idle queue, hover prefetch), so it is where
+dependencies live: `loadModule` loads a module's requirements first,
+in parallel, and only then appends its script. The interaction bridge
+is not on that list yet: it iterates the kernel's own marker table
+only, so a registered behaviour has no interaction trigger today
+(teaching the bridge registered descriptors is the later change that
+unblocks the lightbox move). Readiness is registration, not transport:
+the loader resolves a module's promise when `loadedModules[name]` is an
 own truthy property after the script ran, and a script that ran and
 never set its flag rejects with "module failed to register" and drops
 its cached promise, so a retry fetches again. Preload follows
@@ -1493,7 +1503,12 @@ kernel's `action`) is reachable only through `Requires` or an explicit
 `loadModule`, and is served, hashed, budgeted and linted like the
 rest; `window.__gofastr.action` (request, bind) is the primitive the
 two action adapters and `framework/headless` bind their buttons
-through.
+through: a bound group converges on one committed member (the revoke
+runs at click time and again on settlement, so a failed commit
+restores the sibling it displaced while a successful one displaces
+every other), and group members that leave the document are pruned on
+`gofastr:navigate` so the registry is not the last reference to a page
+that navigated away.
 
 ### What about widgets?
 

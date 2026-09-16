@@ -1,9 +1,13 @@
 # Spec: behaviour registers like style
 
-Status: proposed, 2026-09-15. Implements the direction from the runtime
-exploration: the browser runtime is composed on the fly per page and
-loads its features lazily, and a component's behaviour is registered by
-the package that renders its markup, the way its stylesheet already is.
+Status: accepted and underway, proposed 2026-09-15. Steps 1–3 of the
+sequence below are done (the seam with its tests, `framework/headless`'s
+registration, and dependencies + readiness with the action primitive and
+the two action adapters); steps 4–6 are open. Implements the direction
+from the runtime exploration: the browser runtime is composed on the fly
+per page and loads its features lazily, and a component's behaviour is
+registered by the package that renders its markup, the way its
+stylesheet already is.
 
 ## The problem
 
@@ -124,8 +128,12 @@ A registered module is an IIFE with the contract every `src/*.js` module
 already keeps, now written down:
 
 1. It binds only to its own markers, by attribute, never by class.
-2. It sets `window.__gofastr.loadedModules[<name>] = true` when it has
-   attached, so the kernel does not fetch it twice.
+2. It sets `window.__gofastr.loadedModules[<name>] = true` FIRST —
+   before it installs anything, right after its own early-return
+   guard — so the kernel does not fetch it twice AND a retry cannot
+   re-execute a half-failed file into double-installed listeners (a
+   script that failed with its flag unset has its load rejected and
+   fetched again).
 3. It registers `window.__gofastr._moduleScanners[<name>] = fn(root)`,
    idempotent against already-wired elements, so the kernel can hand it
    newly inserted DOM and the document after a client navigation.
@@ -177,11 +185,15 @@ the same URL shape, and the identifier guard already rejects anything
 that is not `[\w-]+`. `data-fui-prefetch="<name>"` works for a registered
 name for the same reason.
 
-The addition is measured, not guessed: the kernel currently sits at
-13,200 bytes gzip against a 13,213 goal (and 15,238 against 15,246 at
-level 1). The budget lines rise by the measured merged size plus the 8
-bytes of clearance every raise there carries, with the reason on the
-line, as `budget_test.go`'s history does.
+A malformed block (a `window.__gofastr_behaviors` that is not a
+descriptor map, an inline block that is not JSON) is caught by the same
+`try`: the kernel registers no behaviours and boots on its own table.
+The catch is silent on purpose — measured, not skipped: a
+`console.warn` costs 17 gzipped bytes at the shortest useful wording
+against the 8 bytes of clearance the core line carries, and unlike a
+failed fetch the browser console reports nothing on its own, so the
+number is written here and in the catch's comment for whoever next
+finds bytes to spend.
 
 ### Ownership gate (`fragments.go`, `attrdoc_test.go`)
 
@@ -195,8 +207,15 @@ documented table. A registered behaviour is not an owner in
 
 A behaviour may need another module before it can bind: the action
 adapters need the action primitive. The loader is the one place every
-load goes through (marker scan, idle queue, hover prefetch, the
-interaction bridge), so dependencies live there and nowhere else.
+load goes through (marker scan, idle queue, hover prefetch), so
+dependencies live there and nowhere else. One path is not on that list
+yet: the interaction bridge (boot.js's interaction-time load, which
+prevents the default, loads the module, and replays the event) iterates
+the kernel's own `_moduleMarkers` table only — it cannot see registered
+descriptors, so a registered behaviour has no interaction trigger today
+and the bridge neither delays nor dispatches for it. Teaching the
+bridge to read registered descriptors is the later change that unblocks
+the lightbox move (sequence step 5), not this one.
 
 - `registry.Requires(names...)` declares the modules that must be
   loaded before this one. A name is an embedded kernel module or a
@@ -205,11 +224,17 @@ interaction bridge), so dependencies live there and nowhere else.
 - `loadModule(name)` loads a module's requirements first, in parallel,
   and only then appends the module's script. A requirement's own
   requirements load the same way. A cycle is refused at
-  `BehaviorsJSON` time with a panic that names it; a requirement that
+  `BehaviorsJSON` time with a panic that names it — at the FIRST
+  RENDER that builds the manifest, not at startup: the registry is
+  only complete once every package's init has run, and the manifest
+  builder is the first reader of the whole graph. A requirement that
   is neither embedded nor registered is refused the same way.
 - Readiness is registration, not transport. A module says it is ready
-  by setting `window.__gofastr.loadedModules[name] = true` at the end
-  of its IIFE (the contract every module already keeps). The loader
+  by setting `window.__gofastr.loadedModules[name] = true` — before it
+  installs anything, per the module contract: a script that failed
+  halfway with its flag unset has its load rejected and its cached
+  promise dropped, so a retry re-executes the file and would install
+  every listener of the first pass twice. The loader
   resolves the module's promise when that flag is set after the script
   has run; a script that ran and never set its flag rejects with
   "module failed to register" and drops its cached promise, so a
@@ -251,7 +276,14 @@ no marker and no attribute name of any package:
   `disabled` has other owners), and
   dispatches `action:start`, `action:committed`, `action:rolled-back`
   and `action:untoggle` on the element, bubbling. Binding twice is a
-  no-op.
+  no-op. A `group` converges on one committed member: the revoke runs
+  at click time (so a displaced sibling is restored when the new
+  member's commit fails) and again on settlement, so two members
+  clicked inside one round trip — both past the per-element re-entry
+  guard — still end with the last completer committed and the other
+  idle. Group members whose elements left the document are pruned on
+  `gofastr:navigate`, so the registry is not the last reference to a
+  page that navigated away.
 
 Owners bind their own markup to it:
 

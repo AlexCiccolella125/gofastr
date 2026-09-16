@@ -56,9 +56,11 @@
   const bound = new WeakSet();
   // Group members, keyed by group name. A Map of Sets rather than a
   // document scan on every commit: the registry is the truth about what
-  // is bound, and a prune at iteration time drops members whose
-  // elements left the document (an island swap replaces a whole group
-  // at once; the stale members must not be revoked-or-kept by accident).
+  // is bound. Members whose elements left the document are pruned at
+  // iteration time (an island swap replaces a whole group at once; the
+  // stale members must not be revoked-or-kept by accident) and on
+  // gofastr:navigate (see the handler below), so a group navigated away
+  // from is not held forever.
   const groups = new Map();
 
   // setState paints one state. idle and done are the two label parts
@@ -172,6 +174,14 @@
         if (ok) {
           setState(el, spec, 'committed');
           el.dispatchEvent(new CustomEvent('action:committed', { bubbles: true }));
+          // Two members of one group clicked inside one round trip both
+          // get here: the re-entry guard is per element and the
+          // click-time revoke only sees committed siblings, so without
+          // this pass both would end committed. Re-running the revoke on
+          // settlement makes the last completer win and the group
+          // converge on one committed member. A failure of the later
+          // one still restores the sibling it displaced (below).
+          if (spec.group) revokeGroupSiblings(spec.group, el);
           return;
         }
         // The server refused the new member, so the sibling it
@@ -198,6 +208,24 @@
     });
   }
 
-  NS.action = { request, bind };
+  // A group whose members all left the document is dropped on the
+  // kernel's client-navigation event. The revoke pass prunes too, but it
+  // only runs when a sibling commits; a page navigated away from
+  // wholesale would otherwise be referenced by the group registry
+  // forever, the last holder of every detached button on that page.
+  window.addEventListener('gofastr:navigate', () => {
+    for (const [name, members] of groups) {
+      for (const el of members) {
+        if (!el.isConnected) members.delete(el);
+      }
+      if (members.size === 0) groups.delete(name);
+    }
+  });
+
+  // _groupCount is test-only: how many group keys the registry still
+  // holds. Nothing in the module or the kernel reads it; the retention
+  // tests do, so a prune that stops running fails a test instead of
+  // leaking quietly.
+  NS.action = { request, bind, _groupCount: () => groups.size };
   (NS.loadedModules = NS.loadedModules || {}).action = true;
 })();

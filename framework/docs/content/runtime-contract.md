@@ -443,6 +443,14 @@ id="gofastr-behaviors">` block in static exports and the embed frame.
 The kernel scans those markers after its own table, so the module loads
 once when a marker appears, at boot, on DOM insertion, or after a
 client navigation, and `data-fui-prefetch="<name>"` warms it on hover.
+A malformed block (a `window.__gofastr_behaviors` that is not a
+descriptor map, an inline `#gofastr-behaviors` that is not JSON) is
+ignored: the kernel registers no behaviours and boots on its own
+module table. The catch is silent on purpose — a `console.warn` does
+not clear the core gzip budget (measured: +17 bytes at the shortest
+useful wording, against 8 bytes of clearance), and unlike a failed
+fetch the console reports nothing on its own.
+
 Registered markers use the package's own `data-` prefix; a
 `data-fui-*` marker is admitted only when the attribute is in the table
 above. The module is held to the same source lints as the kernel's own
@@ -456,9 +464,20 @@ A behaviour may declare dependencies:
 registered before it, embedded kernel modules or other registered
 behaviours; the behaviours block carries them as `r`, and the loader
 honours them on every load path, requirements first, then the module's
-script. Readiness is registration: the loader resolves a module's
-promise only when `loadedModules[name]` is set after its script ran,
-and a script that ran and never registered rejects with "module failed
+script. A name that is neither, or a cycle, panics where the block is
+built — at the first render that builds the manifest, not at startup
+(the registry is only complete once every package's init has run);
+through the framework's recovery middleware the panic surfaces as a
+500 with the cycle path in the log line. The interaction bridge is not
+yet a load path for registered behaviours: it iterates the kernel's own
+marker table only, so a registered behaviour has no interaction trigger
+today. Readiness is registration: the loader resolves a module's
+promise only when `loadedModules[name]` is set after its script ran —
+and the module sets its flag FIRST, before it installs anything (a
+script that failed halfway with its flag unset has its load rejected
+and fetched again, and the retry re-executes the file: a flag at the
+end leaves every listener of the first pass installed twice) — and a
+script that ran and never registered rejects with "module failed
 to register", drops its cached promise, and a retry fetches again.
 Preload and the static export list a needed behaviour's requirements
 beside it. A module with no marker (a primitive) is reachable only
@@ -469,7 +488,13 @@ and `window.__gofastr.action.bind(el, spec)` attaches the whole
 optimistic lifecycle (idle → pending → committed → error, the label
 flip, `aria-busy` while pending, the `action:*` events) to
 an element from a spec of `endpoint`, `method`, `idle`, `done`,
-`group`, `untoggle` and `pressed`.
+`group`, `untoggle` and `pressed`. A bound group converges on one
+committed member: the revoke runs at click time and again when a
+commit settles, so a failed commit restores the sibling it displaced
+while a successful one displaces every other, and two members clicked
+inside one round trip still end with exactly one committed. Group
+members whose elements left the document are pruned on
+`gofastr:navigate`.
 
 The framework's own `headless` module is registered this way by
 `framework/headless/behavior.go`, binding that package's `data-hui-*`

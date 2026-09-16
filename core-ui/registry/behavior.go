@@ -82,10 +82,13 @@ func LoadIdle() BehaviorOption { return func(e *BehaviorEntry) { e.Idle = true }
 // before this one: the action adapters need the action primitive, and
 // a dependency declared here is a dependency the loader honors on
 // every path that loads the module (marker scan, idle queue, hover
-// prefetch, the interaction bridge). A name is an embedded kernel
-// module or another registered behaviour; the manifest carries it and
-// core-ui/runtime refuses a name that is neither, or a cycle, when it
-// builds the block. A module may not require itself.
+// prefetch; the interaction bridge reads only the kernel's own table
+// today). A name is an embedded kernel module or another registered
+// behaviour; the manifest carries it and core-ui/runtime refuses a
+// name that is neither, or a cycle, when it builds the block — at the
+// first render that needs the manifest, not at startup, because the
+// registry is only complete once every package's init has run. A
+// module may not require itself.
 func Requires(names ...string) BehaviorOption {
 	return func(e *BehaviorEntry) { e.Requires = append(e.Requires, names...) }
 }

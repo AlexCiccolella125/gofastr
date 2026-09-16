@@ -137,6 +137,58 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   where the old module reverted in silence.
 
 ### Fixed
+- **Action groups converge on one committed member.** Two members of
+  one `data-fui-toggle-group` clicked inside one round trip both
+  passed the per-element re-entry guard, and the click-time revoke
+  only saw committed siblings, so both ended committed. The kernel's
+  action primitive (`core-ui/runtime/src/action.js`) now re-runs the
+  revoke when a commit settles: the last completer wins, the group
+  converges on exactly one committed button, and a failure of the
+  later click still restores the sibling it displaced. Covered by
+  `TestActionGroupConcurrentClicksConvergeOnOne`.
+- **Action group registry no longer retains navigated-away buttons.**
+  Group members were pruned only when a sibling committed; a group
+  navigated away from wholesale was held by the registry forever. The
+  primitive prunes disconnected members on `gofastr:navigate` (exposed
+  as a test-only `window.__gofastr.action._groupCount()`), covered by
+  `TestActionPrunesGroupMembersOnNavigate`.
+- **A half-failed action adapter can no longer double-install.** The
+  two registered action modules set their `loadedModules` flag at the
+  end of the file, so a script that failed halfway had its load
+  rejected and a retry re-executed it, installing every document
+  listener twice. Both adapters set the flag first, before anything
+  installs; the module contract now says so and source gates in
+  `framework/ui` and `core-ui/runtime` hold it
+  (`TestActionAdaptersSetLoadedFlagBeforeInstalling`,
+  `TestRegisteredBehaviorsSetLoadedFlagBeforeInstalling`).
+- **The per-module size budget covers registered behaviours.**
+  `TestRuntimeModuleSizeBudgets` measured `ModuleNames()`, which only
+  sees registrations linked into the test binary — none are, the
+  packages that register live above `core-ui/runtime`. The budget now
+  discovers every `registry.RegisterBehavior` source in the tree
+  through `check.RegisteredBehaviorSources`, minifies it through the
+  production minifier, and holds it to the same 3 KB goal.
+- **`serveRuntimeModule` serves registered behaviours immutably.**
+  Pinned by a test through the real route
+  (`TestServeRuntimeModuleServesRegisteredBehavior`): the immutable
+  year-long `Cache-Control`, the module's served bytes verbatim, and a
+  404 for an unknown name.
+- **A malformed behaviours manifest leaves the kernel standing, by
+  test.** Pinned by `TestBehaviorMalformedManifestsLeaveTheKernelStanding`:
+  a `window.__gofastr_behaviors` global that is not a descriptor map
+  and an inline `#gofastr-behaviors` block that is not JSON are both
+  ignored — the kernel boots on its own module table and loads
+  nothing from the broken registry. The catch stays silent: a
+  `console.warn` costs 17 gzipped bytes at the shortest useful
+  wording against the 8 bytes of clearance on the core budget line
+  (measured, recorded in the spec and the catch's comment).
+- **Requirement-cycle wording matches reality.** The panic fires at
+  the first render that builds the behaviours manifest, not at
+  startup (the registry is only complete once every package's init
+  has run). Spec, doc comments and
+  `TestCyclePanicSurfacesAs500ThroughARealHost` now say what actually
+  happens: through the framework's recovery middleware the panic is a
+  500 whose log line carries the cycle path.
 - **`core-ui/check`: the JavaScript lints reach registered behaviours.**
   Every clean-tree lint (no-var and the runtime-shape rules) walked
   `core-ui/runtime` alone, so a module registered through

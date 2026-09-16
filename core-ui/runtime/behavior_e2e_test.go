@@ -596,3 +596,54 @@ func TestBehaviorPrefetchWarmsRequirements(t *testing.T) {
 		t.Fatalf("dependent fetched %d times on hover prefetch, want 1", n)
 	}
 }
+
+// A malformed behaviours manifest must not take the page down: the
+// kernel's _registered reader catches the bad block, registers no
+// behaviours, and boots on its own module table. Both delivery shapes
+// are covered — a window.__gofastr_behaviors global that is not a
+// descriptor map, and an inline #gofastr-behaviors block that is not
+// JSON. The probe behaviour's marker IS on the page in both cases, so
+// a regression that lets the throw escape (or lets a garbage entry
+// load) is visible: the kernel's own reveal module must still load,
+// the probe module must not.
+func TestBehaviorMalformedManifestsLeaveTheKernelStanding(t *testing.T) {
+	cases := []struct {
+		name string
+		head string
+	}{
+		{
+			name: "global is not a descriptor map",
+			head: `<script>window.__gofastr_behaviors = 'certainly not json';</script>`,
+		},
+		{
+			name: "inline block is not JSON",
+			head: `<script type="application/json" id="gofastr-behaviors">{"probe-beh": oops</script>`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			registerProbe(t)
+			p := startProbeServer(t, tc.head, `<p data-probe>probe marker</p><p data-fui-reveal="fade-up" id="rev">reveal marker</p>`, false)
+			ctx := chromedptest.Context(t, chromedptest.Timeout(60*time.Second))
+			if err := chromedp.Run(ctx,
+				chromedp.Navigate(p.srv.URL+"/"),
+				chromedp.WaitVisible(`#ready`, chromedp.ByID),
+			); err != nil {
+				t.Fatalf("chromedp: %v", err)
+			}
+			// The kernel booted far enough to run its own module
+			// table: the reveal marker drives a real module load.
+			if !pollTrue(ctx, `!!(window.__gofastr.loadedModules && window.__gofastr.loadedModules.reveal)`) {
+				t.Fatal("the kernel's own module table stopped loading after a malformed behaviours manifest")
+			}
+			// And the broken registry loaded nothing.
+			time.Sleep(300 * time.Millisecond)
+			if n := p.hits.Load(); n != 0 {
+				t.Fatalf("the malformed manifest still loaded the probe module: %d fetches, want 0", n)
+			}
+			if el := pollTrue(ctx, `!!document.querySelector('[data-probe]')`); !el {
+				t.Fatal("the marker element left the page")
+			}
+		})
+	}
+}

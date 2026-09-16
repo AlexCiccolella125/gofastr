@@ -3,7 +3,12 @@ package runtime
 import (
 	"bytes"
 	"compress/gzip"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/DonaldMurillo/gofastr/core-ui/check"
+	"github.com/DonaldMurillo/gofastr/core-ui/runtime/minify"
 )
 
 const (
@@ -268,6 +273,43 @@ func TestRuntimeModuleSizeBudgets(t *testing.T) {
 		}
 		if got := gzipSize(t, src); got > budget {
 			t.Errorf("module %s gzip = %d bytes — exceeds %d byte budget (goal %d)", name, got, budget, moduleGoalGZ)
+		}
+	}
+	// Registered behaviours (docs/spec-behavior-registry.md) are modules
+	// from the host down, so the per-module budget holds them too.
+	// ModuleNames() cannot: it sees only the registrations linked into
+	// THIS test binary, and the packages that register (framework/ui,
+	// framework/headless, the examples) live above core-ui/runtime. The
+	// budget therefore discovers their sources through the walk every
+	// clean-tree gate uses — check.RegisteredBehaviorSources follows the
+	// //go:embed beside each RegisterBehavior call in the tree — and
+	// holds each FILE to the same goal, minified through the production
+	// minifier under the same gate. A registration that escapes the
+	// inventory fails rather than skirting the budget: check's own
+	// TestRegisteredBehaviorSources_RefusesWhatItCannotRead pins that
+	// a source the walk cannot follow is an error (asserted below by
+	// failing the test on err), and its
+	// TestRegisteredBehaviorSources_FindsTheTreesModules pins the
+	// tree's registrations by path, so a new module cannot land without
+	// the walk seeing it.
+	sources, err := check.RegisteredBehaviorSources(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("registered behaviours: %v", err)
+	}
+	if len(sources) == 0 {
+		t.Fatal("no registered behaviour sources found under the repo root: the walk is broken, not the tree empty")
+	}
+	for _, f := range sources {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		src := string(raw)
+		if !nominify() {
+			src = minify.Minify(src)
+		}
+		if got := gzipSize(t, src); got > moduleGoalGZ {
+			t.Errorf("registered behaviour %s gzip = %d bytes — exceeds %d byte budget (goal %d): split or shrink the module", filepath.Base(f), got, moduleGoalGZ, moduleGoalGZ)
 		}
 	}
 }
