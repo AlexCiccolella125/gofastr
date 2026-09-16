@@ -1459,6 +1459,13 @@ a no-op and a different one panics. A `data-fui-*` marker is admitted
 only when the attribute is already in the table above (hard rule 5
 through the seam, `TestRegisteredBehaviorDataFuiMarkersAreDocumented`).
 
+The module is held to the source lints every `src/*.js` module is held
+to (`core-ui/check`: no `var`, no selector or storage key built from a
+raw value, and the rest): the clean-tree tests reach it through the
+`//go:embed` directive beside the `RegisterBehavior` call
+(`check.RegisteredBehaviorSources`), so a module that lives beside its
+Go package is not a module outside the rules.
+
 The module keeps the contract every `src/*.js` module keeps: an IIFE
 that binds only its own markers by attribute, sets
 `window.__gofastr.loadedModules[<name>] = true` when attached, and

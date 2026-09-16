@@ -16,25 +16,25 @@
 // data-hui-drop-over, which no component renders.
 (function () {
   'use strict';
-  var NAME = 'headless';
-  var NS = window.__gofastr = window.__gofastr || {};
+  const NAME = 'headless';
+  const NS = window.__gofastr = window.__gofastr || {};
   // The kernel fetches a module once per page, but anything that
   // evaluates this file a second time must bind nothing twice.
-  if (NS.loadedModules && NS.loadedModules[NAME]) return;
+  if (NS.loadedModules && Object.prototype.hasOwnProperty.call(NS.loadedModules, NAME)) return;
 
-  var HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
-  var DISMISSED_KEY = 'gofastr.headless.system.dismissed';
+  const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+  const DISMISSED_KEY = 'gofastr.headless.system.dismissed';
 
   // within(root, sel): root itself when it matches, plus everything
   // matching inside it. The kernel hands scan() one inserted subtree,
   // and a subtree whose root IS the marker is missed by
   // querySelectorAll alone.
   function within(root, sel) {
-    var out = [];
+    const out = [];
     if (root.matches && root.matches(sel)) out.push(root);
     if (root.querySelectorAll) {
-      var found = root.querySelectorAll(sel);
-      for (var i = 0; i < found.length; i++) out.push(found[i]);
+      const found = root.querySelectorAll(sel);
+      for (let i = 0; i < found.length; i++) out.push(found[i]);
     }
     return out;
   }
@@ -43,9 +43,9 @@
   // element reaches scan() more than once (an island swap inside an
   // already-scanned subtree, the post-navigation document pass), and
   // whatever binds a listener on arrival must not bind it twice.
-  var armedFor = new WeakMap();
+  const armedFor = new WeakMap();
   function once(el, kind) {
-    var kinds = armedFor.get(el);
+    let kinds = armedFor.get(el);
     if (!kinds) {
       kinds = new Set();
       armedFor.set(el, kinds);
@@ -64,15 +64,15 @@
   // it: a reveal that costs the typing position fights the person
   // using it.
   function reveal(btn) {
-    var shell = btn.closest('[data-hui-affix]');
-    var input = shell && shell.querySelector('[data-hui-affix-input]');
+    const shell = btn.closest('[data-hui-affix]');
+    const input = shell && shell.querySelector('[data-hui-affix-input]');
     if (!input) return;
-    var shown = input.type === 'text';
+    const shown = input.type === 'text';
     input.type = shown ? 'password' : 'text';
     btn.setAttribute('aria-pressed', String(!shown));
     btn.setAttribute('aria-label', shown ? btn.dataset.huiShowLabel : btn.dataset.huiHideLabel);
     btn.textContent = shown ? btn.dataset.huiShowText : btn.dataset.huiHideText;
-    var at = input.value.length;
+    const at = input.value.length;
     input.focus();
     try { input.setSelectionRange(at, at); } catch (e) { /* type=password forbids it in Safari */ }
   }
@@ -86,17 +86,17 @@
   // edits config, and rewriting an unpickable value to black would
   // destroy it.
   function syncColour(el) {
-    var shell = el.closest('[data-hui-affix]');
+    const shell = el.closest('[data-hui-affix]');
     if (!shell) return;
-    var swatch = shell.querySelector('[data-hui-affix-swatch]');
-    var text = shell.querySelector('[data-hui-affix-input]');
+    const swatch = shell.querySelector('[data-hui-affix-swatch]');
+    const text = shell.querySelector('[data-hui-affix-input]');
     if (!swatch || !text) return;
     if (el === swatch) {
       text.value = swatch.value.toUpperCase();
       shell.removeAttribute('data-invalid');
       return;
     }
-    var v = text.value.trim();
+    const v = text.value.trim();
     if (HEX.test(v)) {
       swatch.value = v.length === 4 ? '#' + v[1] + v[1] + v[2] + v[2] + v[3] + v[3] : v;
       shell.removeAttribute('data-invalid');
@@ -112,9 +112,9 @@
   // checked and the empty string when not, and any other control's
   // value.
   function whenValue(scope, name) {
-    var fields = scope.querySelectorAll('[name="' + CSS.escape(name) + '"]');
-    for (var i = 0; i < fields.length; i++) {
-      var el = fields[i];
+    const fields = scope.querySelectorAll('[name="' + CSS.escape(name) + '"]');
+    for (let i = 0; i < fields.length; i++) {
+      const el = fields[i];
       if (el.type === 'radio') {
         if (el.checked) return el.value;
         continue;
@@ -126,12 +126,12 @@
   }
 
   function syncWhen(region) {
-    var scope = region.closest('form') || document;
-    var shown = whenValue(scope, region.dataset.huiWhen) === region.dataset.huiWhenValue;
+    const scope = region.closest('form') || document;
+    const shown = whenValue(scope, region.dataset.huiWhen) === region.dataset.huiWhenValue;
     region.hidden = !shown;
-    var controls = region.querySelectorAll('input, select, textarea, button');
-    for (var i = 0; i < controls.length; i++) {
-      var c = controls[i];
+    const controls = region.querySelectorAll('input, select, textarea, button');
+    for (let i = 0; i < controls.length; i++) {
+      const c = controls[i];
       // The mark is what tells a control we disabled from one the page
       // disabled itself, so showing the region re-enables exactly the
       // controls that hiding it disabled.
@@ -153,16 +153,16 @@
   // NEW form element with the same errors is focused, because a reader
   // who submitted again and failed again has to be told.
   function armFormErrors(root) {
-    var forms = within(root, '[data-hui-form-errors]');
+    const forms = within(root, '[data-hui-form-errors]');
     // Every form in the pass is marked, and only the first summary is
     // focused: a form left unmarked because an earlier one took the
     // focus would take it itself on the next pass, from wherever the
     // reader had moved to by then.
-    var announced = false;
-    for (var i = 0; i < forms.length; i++) {
-      var form = forms[i];
+    let announced = false;
+    for (let i = 0; i < forms.length; i++) {
+      const form = forms[i];
       if (!once(form, 'errors')) continue;
-      var summary = form.querySelector('[role="alert"][tabindex="-1"]');
+      const summary = form.querySelector('[role="alert"][tabindex="-1"]');
       if (summary && !announced) {
         summary.focus();
         announced = true;
@@ -181,9 +181,9 @@
   // dispatches nothing on failure; its rollback stays silent here on
   // purpose until it grows an event of its own.
   function announceFailure(btn) {
-    var status = btn.querySelector('[data-hui-action-status]');
+    const status = btn.querySelector('[data-hui-action-status]');
     if (!status) return;
-    var text = btn.dataset.huiActionFailed || '';
+    const text = btn.dataset.huiActionFailed || '';
     status.textContent = '';
     requestAnimationFrame(function () { status.textContent = text; });
   }
@@ -196,15 +196,15 @@
   // for several with {n} and {names}. An empty selection clears both,
   // so changing one's mind leaves nothing behind.
   function showFiles(root) {
-    var input = document.getElementById(root.dataset.huiDropInput);
-    var list = root.querySelector('[data-hui-drop-list]');
-    var status = root.querySelector('[data-hui-drop-status]');
+    const input = document.getElementById(root.dataset.huiDropInput);
+    const list = root.querySelector('[data-hui-drop-list]');
+    const status = root.querySelector('[data-hui-drop-status]');
     if (!input || !list) return;
     list.textContent = '';
-    var files = input.files || [];
-    var names = [];
-    for (var i = 0; i < files.length; i++) {
-      var li = document.createElement('li');
+    const files = input.files || [];
+    const names = [];
+    for (let i = 0; i < files.length; i++) {
+      const li = document.createElement('li');
       li.textContent = files[i].name;
       list.appendChild(li);
       names.push(files[i].name);
@@ -222,7 +222,7 @@
   }
 
   function armDrop(root) {
-    var input = document.getElementById(root.dataset.huiDropInput);
+    const input = document.getElementById(root.dataset.huiDropInput);
     if (!input || !once(root, 'drop')) return;
     function stop(e) { e.preventDefault(); e.stopPropagation(); }
     root.addEventListener('dragenter', function (e) { stop(e); root.dataset.huiDropOver = ''; });
@@ -238,9 +238,9 @@
       // a drop keeps the same rule rather than smuggling several past
       // it. The first file is the one taken, as the picker would take
       // the one chosen.
-      var dropped = e.dataTransfer.files;
+      let dropped = e.dataTransfer.files;
       if (!input.multiple && dropped.length > 1) {
-        var one = new DataTransfer();
+        const one = new DataTransfer();
         one.items.add(dropped[0]);
         dropped = one.files;
       }
@@ -251,8 +251,8 @@
   }
 
   function armDrops(root) {
-    var roots = within(root, '[data-hui-drop]');
-    for (var i = 0; i < roots.length; i++) armDrop(roots[i]);
+    const roots = within(root, '[data-hui-drop]');
+    for (let i = 0; i < roots.length; i++) armDrop(roots[i]);
   }
 
   // ─── system banners (SystemBanner) ──────────────────────────────
@@ -261,25 +261,25 @@
   // island swap that re-renders it does not say it twice. The store
   // can be refused (private mode, policy): every access is guarded and
   // the worst case is a message shown again.
-  var systemDismissed = new Set();
+  const systemDismissed = new Set();
   try {
-    var stored = JSON.parse(sessionStorage.getItem(DISMISSED_KEY) || '[]');
-    for (var s = 0; s < stored.length; s++) systemDismissed.add(stored[s]);
+    const stored = JSON.parse(sessionStorage.getItem(DISMISSED_KEY) || '[]');
+    for (let s = 0; s < stored.length; s++) systemDismissed.add(stored[s]);
   } catch (e) { /* no storage: dismissals last until the page does */ }
 
   function rememberDismissal(id) {
     systemDismissed.add(id);
     try {
-      var ids = [];
+      const ids = [];
       systemDismissed.forEach(function (v) { ids.push(v); });
       sessionStorage.setItem(DISMISSED_KEY, JSON.stringify(ids));
     } catch (e) { /* no storage: nothing to remember with */ }
   }
 
   function armSystem(root) {
-    var banners = within(root, '[data-hui-system]');
-    for (var i = 0; i < banners.length; i++) {
-      var el = banners[i];
+    const banners = within(root, '[data-hui-system]');
+    for (let i = 0; i < banners.length; i++) {
+      const el = banners[i];
       if (!el.hidden && systemDismissed.has(el.dataset.huiSystemId)) el.hidden = true;
     }
   }
@@ -291,17 +291,17 @@
   // later (an island swap, a client navigation) needs no re-binding
   // for them: the listener was never on the element.
   document.addEventListener('click', function (e) {
-    var t = e.target;
+    const t = e.target;
     if (!t || !t.closest) return;
-    var btn = t.closest('[data-hui-reveal]');
+    const btn = t.closest('[data-hui-reveal]');
     if (btn) {
       e.preventDefault();
       reveal(btn);
       return;
     }
-    var dismiss = t.closest('[data-hui-system-dismiss]');
+    const dismiss = t.closest('[data-hui-system-dismiss]');
     if (dismiss) {
-      var el = dismiss.closest('[data-hui-system]');
+      const el = dismiss.closest('[data-hui-system]');
       if (!el) return;
       e.preventDefault();
       el.hidden = true;
@@ -310,24 +310,24 @@
   });
 
   document.addEventListener('input', function (e) {
-    var t = e.target;
+    const t = e.target;
     if (!t || !t.closest) return;
     if (t.matches('[data-hui-affix-swatch], [data-hui-color] [data-hui-affix-input]')) syncColour(t);
-    var regions = (t.form || document).querySelectorAll('[data-hui-when]');
-    for (var i = 0; i < regions.length; i++) syncWhen(regions[i]);
+    const regions = (t.form || document).querySelectorAll('[data-hui-when]');
+    for (let i = 0; i < regions.length; i++) syncWhen(regions[i]);
   });
 
   document.addEventListener('change', function (e) {
-    var t = e.target;
+    const t = e.target;
     if (!t || !t.closest) return;
-    var root = t.closest('[data-hui-drop]');
+    const root = t.closest('[data-hui-drop]');
     if (root && t.type === 'file') showFiles(root);
-    var regions = (t.form || document).querySelectorAll('[data-hui-when]');
-    for (var i = 0; i < regions.length; i++) syncWhen(regions[i]);
+    const regions = (t.form || document).querySelectorAll('[data-hui-when]');
+    for (let i = 0; i < regions.length; i++) syncWhen(regions[i]);
   });
 
   document.addEventListener('optimistic-action:rolled-back', function (e) {
-    var btn = e.target && e.target.closest && e.target.closest('[data-hui-action]');
+    const btn = e.target && e.target.closest && e.target.closest('[data-hui-action]');
     if (btn) announceFailure(btn);
   });
 
@@ -338,10 +338,10 @@
   // dismiss memory of its own: losing the connection again must show
   // it again.
   document.addEventListener('gofastr:sse-status', function (e) {
-    var status = (e && e.detail) || {};
-    var lost = status.connected === false && status.retryCount > 0;
-    var banners = document.querySelectorAll('[data-hui-system-offline]');
-    for (var i = 0; i < banners.length; i++) banners[i].hidden = !lost;
+    const status = (e && e.detail) || {};
+    const lost = status.connected === false && status.retryCount > 0;
+    const banners = document.querySelectorAll('[data-hui-system-offline]');
+    for (let i = 0; i < banners.length; i++) banners[i].hidden = !lost;
   });
 
   // ─── the arrival pass ───────────────────────────────────────────
@@ -352,11 +352,11 @@
   // document after a client navigation, and it is idempotent through
   // the once() guard above.
   function scan(root) {
-    var scope = root && root.querySelectorAll ? root : document;
+    const scope = root && root.querySelectorAll ? root : document;
     armFormErrors(scope);
     armDrops(scope);
-    var regions = within(scope, '[data-hui-when]');
-    for (var i = 0; i < regions.length; i++) syncWhen(regions[i]);
+    const regions = within(scope, '[data-hui-when]');
+    for (let i = 0; i < regions.length; i++) syncWhen(regions[i]);
     armSystem(scope);
   }
 

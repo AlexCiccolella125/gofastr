@@ -476,7 +476,10 @@ helpful pre-flight read for human reviewers.
    (`window.__gofastr.loadedModules[name] = true` on attach, a scanner
    under `window.__gofastr._moduleScanners[name]`), bind by attribute
    only, and use your own `data-` prefix: a `data-fui-*` marker is
-   admitted only when the attribute is already documented. See
+   admitted only when the attribute is already documented. The module
+   is a runtime module and the runtime's source lints hold it: `const`
+   and `let`, never `var`; no selector or storage key built from a raw
+   value (`core-ui/check`, found through your `//go:embed`). See
    `core-ui/ARCHITECTURE.md` "Component behaviour".
 
 ---

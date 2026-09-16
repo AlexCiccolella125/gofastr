@@ -93,6 +93,14 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   hand edits, so they were left alone.
 
 ### Fixed
+- **`core-ui/check`: the JavaScript lints reach registered behaviours.**
+  Every clean-tree lint (no-var and the runtime-shape rules) walked
+  `core-ui/runtime` alone, so a module registered through
+  `registry.RegisterBehavior` beside its Go package was held to none of
+  them; `RegisteredBehaviorSources` finds each through its `//go:embed`
+  directive and the lints take a file root. The four shape lints that
+  had fixture tests only now run over the tree as well. The `headless`
+  and `site-ping` modules move from `var` to `const` and `let`.
 - **`framework/headless`**: `Safe` and the override sanitiser store
   attribute names folded, as the browser reads them. Stored as written, a
   caller's `NAME` sorted ahead of the component's `name` and the browser

@@ -445,8 +445,11 @@ once when a marker appears, at boot, on DOM insertion, or after a
 client navigation, and `data-fui-prefetch="<name>"` warms it on hover.
 Registered markers use the package's own `data-` prefix; a
 `data-fui-*` marker is admitted only when the attribute is in the table
-above. Contract and rules: `core-ui/ARCHITECTURE.md` "Component
-behaviour".
+above. The module is held to the same source lints as the kernel's own
+(`core-ui/check`: no `var`, no selector or storage key built from a raw
+value, and the rest): the clean-tree tests find every registered
+behaviour through its `//go:embed` directive. Contract and rules:
+`core-ui/ARCHITECTURE.md` "Component behaviour".
 
 The framework's own `headless` module is registered this way by
 `framework/headless/behavior.go`, binding that package's `data-hui-*`
