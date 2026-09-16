@@ -2,10 +2,14 @@ package check
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -18,17 +22,23 @@ import (
 // built raw. This file finds those modules so the lints can hold them
 // to it.
 
-// RegisteredBehaviorSources returns the JavaScript files every
-// registry.RegisterBehavior call in the tree embeds: for each Go file
-// under root (tests, vendor, node_modules, testdata and hidden
-// directories skipped) that calls RegisterBehavior, every
-// `//go:embed` directive naming a .js file, resolved beside that Go
-// file. A directive whose file is missing is an error rather than a
-// silence, because a module the lints cannot read is a module they
-// cannot hold.
+// RegisteredBehaviorSources returns the JavaScript file behind every
+// registry.RegisterBehavior call in the tree: for each call in a Go
+// file under root (tests, vendor, node_modules, testdata and hidden
+// directories skipped), the source argument is followed to the
+// package-level variable it names, and that variable's `//go:embed`
+// directive names the file, resolved beside the Go file. Only what a
+// registration passes counts: a JavaScript asset the same file embeds
+// for another purpose is not a module.
+//
+// A registration whose source is not such a variable, a directive
+// naming a file that is not there, and a Go file that does not parse
+// are errors rather than silences, because a module the lints cannot
+// read is a module they cannot hold.
 func RegisteredBehaviorSources(root string) ([]string, error) {
 	var out []string
 	seen := map[string]bool{}
+	fset := token.NewFileSet()
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -48,18 +58,18 @@ func RegisteredBehaviorSources(root string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		src := string(raw)
-		if !strings.Contains(src, "RegisterBehavior(") {
+		// The cheap test first: most files in the tree never register.
+		if !strings.Contains(string(raw), "RegisterBehavior(") {
 			return nil
 		}
-		for _, js := range embeddedJS(src) {
-			full := filepath.Join(filepath.Dir(path), js)
-			if _, err := os.Stat(full); err != nil {
-				return fmt.Errorf("registered behaviour: %s embeds %s, which is not there: %w", path, js, err)
-			}
-			if !seen[full] {
-				seen[full] = true
-				out = append(out, full)
+		files, err := behaviorSourcesInFile(fset, path, raw)
+		if err != nil {
+			return err
+		}
+		for _, f := range files {
+			if !seen[f] {
+				seen[f] = true
+				out = append(out, f)
 			}
 		}
 		return nil
@@ -71,22 +81,170 @@ func RegisteredBehaviorSources(root string) ([]string, error) {
 	return out, nil
 }
 
-// embeddedJS lists the .js patterns named by the //go:embed directives
-// in a Go source. A directive may name several files and may quote
-// them; a pattern with a wildcard is left as written, and resolving it
-// is the caller's problem the day one exists (none does today).
-func embeddedJS(src string) []string {
+// behaviorSourcesInFile parses one Go file and follows each
+// RegisterBehavior call's source argument to its embed directive.
+func behaviorSourcesInFile(fset *token.FileSet, path string, raw []byte) ([]string, error) {
+	f, err := parser.ParseFile(fset, path, raw, parser.ParseComments)
+	if err != nil {
+		return nil, fmt.Errorf("registered behaviour: %w", err)
+	}
+	embeds := embedDirectives(f)
 	var out []string
-	for _, line := range strings.Split(src, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "//go:embed ") {
+	var walkErr error
+	ast.Inspect(f, func(n ast.Node) bool {
+		if walkErr != nil {
+			return false
+		}
+		call, ok := n.(*ast.CallExpr)
+		if !ok || !isRegisterBehaviorCall(call) {
+			return true
+		}
+		if len(call.Args) < 2 {
+			return true
+		}
+		ident := sourceIdent(call.Args[1])
+		pos := fset.Position(call.Pos())
+		if ident == "" {
+			walkErr = fmt.Errorf("registered behaviour at %s: the source is not a variable this file embeds, so no lint can read it", pos)
+			return false
+		}
+		patterns, ok := embeds[ident]
+		if !ok {
+			walkErr = fmt.Errorf("registered behaviour at %s: %s carries no //go:embed directive, so no lint can read its module", pos, ident)
+			return false
+		}
+		for _, pat := range patterns {
+			matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), pat))
+			if err != nil {
+				walkErr = fmt.Errorf("registered behaviour at %s: embed pattern %q: %w", pos, pat, err)
+				return false
+			}
+			if len(matches) == 0 {
+				walkErr = fmt.Errorf("registered behaviour at %s: %s embeds %q, which is not there", pos, ident, pat)
+				return false
+			}
+			out = append(out, matches...)
+		}
+		return true
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	return out, nil
+}
+
+// isRegisterBehaviorCall matches registry.RegisterBehavior(...) under
+// any import alias, and a dot-imported RegisterBehavior(...).
+func isRegisterBehaviorCall(call *ast.CallExpr) bool {
+	switch fn := call.Fun.(type) {
+	case *ast.SelectorExpr:
+		return fn.Sel.Name == "RegisterBehavior"
+	case *ast.Ident:
+		return fn.Name == "RegisterBehavior"
+	}
+	return false
+}
+
+// sourceIdent returns the identifier a registration's source argument
+// names: the bare variable, or the variable inside a string(...)
+// conversion for a []byte embed. Anything else, a literal or a call,
+// is not a file the lints can open.
+func sourceIdent(arg ast.Expr) string {
+	switch e := arg.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.CallExpr:
+		if fn, ok := e.Fun.(*ast.Ident); ok && fn.Name == "string" && len(e.Args) == 1 {
+			if id, ok := e.Args[0].(*ast.Ident); ok {
+				return id.Name
+			}
+		}
+	}
+	return ""
+}
+
+// embedDirectives maps each package-level variable to the patterns its
+// //go:embed directive names. The directive is a doc comment: on the
+// spec when the var block has several, on the declaration when it has
+// one, and both are read.
+func embedDirectives(f *ast.File) map[string][]string {
+	out := map[string][]string{}
+	for _, decl := range f.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok || gd.Tok != token.VAR {
 			continue
 		}
-		for _, f := range strings.Fields(strings.TrimPrefix(line, "//go:embed ")) {
-			f = strings.Trim(f, "\"`")
-			if strings.HasSuffix(f, ".js") {
-				out = append(out, f)
+		for _, spec := range gd.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
 			}
+			var patterns []string
+			for _, cg := range []*ast.CommentGroup{gd.Doc, vs.Doc} {
+				if cg == nil {
+					continue
+				}
+				for _, c := range cg.List {
+					if strings.HasPrefix(c.Text, "//go:embed ") {
+						patterns = append(patterns, embedPatterns(strings.TrimPrefix(c.Text, "//go:embed "))...)
+					}
+				}
+			}
+			if len(patterns) == 0 {
+				continue
+			}
+			for _, name := range vs.Names {
+				out[name.Name] = append(out[name.Name], patterns...)
+			}
+		}
+	}
+	return out
+}
+
+// embedPatterns splits a directive's argument the way the go command
+// does: space-separated, with a double-quoted or back-quoted pattern
+// kept whole and unquoted, so a name with a space in it stays one
+// name.
+func embedPatterns(s string) []string {
+	var out []string
+	for i := 0; i < len(s); {
+		switch s[i] {
+		case ' ', '\t':
+			i++
+		case '"', '`':
+			q := s[i]
+			j := i + 1
+			for j < len(s) && s[j] != q {
+				if q == '"' && s[j] == '\\' {
+					j++
+				}
+				j++
+			}
+			if j >= len(s) {
+				// An unterminated quote is the go command's error to
+				// report; the lint takes what it can read.
+				out = append(out, s[i+1:])
+				return out
+			}
+			lit := s[i : j+1]
+			if q == '"' {
+				if u, err := strconv.Unquote(lit); err == nil {
+					lit = u
+				} else {
+					lit = s[i+1 : j]
+				}
+			} else {
+				lit = s[i+1 : j]
+			}
+			out = append(out, lit)
+			i = j + 1
+		default:
+			j := i
+			for j < len(s) && s[j] != ' ' && s[j] != '\t' {
+				j++
+			}
+			out = append(out, s[i:j])
+			i = j
 		}
 	}
 	return out
