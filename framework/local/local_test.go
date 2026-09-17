@@ -756,3 +756,24 @@ func TestServeMountsTheRouteAndReturnsTheScriptURL(t *testing.T) {
 		t.Fatalf("the mounted handler served %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// A page script writes a seeded signal with setSignal(name, value), so
+// the name has to come from Go rather than be retyped in JavaScript —
+// and it has to be the same string the binding carries as
+// data-fui-signal, or the script reads the DOM and writes somewhere else.
+func TestSeededSignalNamesTheSignalAPageScriptWrites(t *testing.T) {
+	s := fresh(t, "site")
+	d := Define[draft](s, "drafts", CollectionConfig{Version: 1})
+	sl := store.JSON[draft](store.New("seedname"), "current", draft{})
+	seed := SeedSignal(d, "current", sl)
+	if seed.Name() != "seedname.current" {
+		t.Fatalf("Name = %q, want the fully-qualified slice name", seed.Name())
+	}
+	if seed.Name() != sl.Name() {
+		t.Fatalf("Name = %q but the slice is %q", seed.Name(), sl.Name())
+	}
+	html := string(seed.Bind(context.Background(), "p", nil))
+	if !strings.Contains(html, `data-fui-signal="`+seed.Name()+`"`) {
+		t.Fatalf("the binding does not carry Name() as data-fui-signal:\n%s", html)
+	}
+}

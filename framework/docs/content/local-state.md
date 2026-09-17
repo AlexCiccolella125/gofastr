@@ -189,6 +189,44 @@ marker rides on the bindings, so a page that never binds the slice never
 restores it. `SeedSignal` implies `Global()` and refuses a slice that is
 already `store.Persist`-ed: one owner per browser value.
 
+**Writing it from a page script.** The signal is an ordinary
+`core-ui/store` signal, so a script sets it with
+`__gofastr.setSignal(name, value)` and the seed bridge writes that value
+on to the record — that is the whole write path; there is no separate
+"save" call. `name` is the fully-qualified slice name, which Go owns, so
+read it rather than retype it: `SeededSignal.Name()` on the server side,
+or off the DOM, since `Bind` puts the same string on the element as
+`data-fui-signal`.
+
+<!-- gofastr:compile
+import "context"
+import "github.com/DonaldMurillo/gofastr/core-ui/html"
+import "github.com/DonaldMurillo/gofastr/core-ui/store"
+import "github.com/DonaldMurillo/gofastr/core/render"
+import "github.com/DonaldMurillo/gofastr/framework/local"
+
+type Draft struct{ Title string }
+var Site = local.New("docs-seed-write")
+var Drafts = local.Define[Draft](Site, "drafts", local.CollectionConfig{Version: 1})
+var S = store.New("editor")
+var ctx = context.Background()
+-->
+```go
+current := local.SeedSignal(Drafts, "current", store.JSON[Draft](S, "current", Draft{}))
+
+// Hand the name to the page script instead of hardcoding it there.
+_ = current.Bind(ctx, "p", map[string]string{"id": "draft-title"})
+_ = html.Div(html.DivConfig{ID: "editor", ExtraAttrs: html.Attrs{
+	"data-signal": current.Name(), // "editor.current"
+}}, render.Text(""))
+```
+
+```js
+// static/app.js, on the extra-script rail
+const name = document.getElementById('editor').dataset.signal;
+__gofastr.setSignal(name, { Title: 'typed by the user' }); // the record follows
+```
+
 **A persisted value cannot appear at first paint.** IndexedDB is
 asynchronous by construction, so SSR always paints the server's value and
 the record lands after hydration. A screen that must not flash needs the

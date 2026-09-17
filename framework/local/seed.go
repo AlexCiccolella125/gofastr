@@ -49,8 +49,22 @@ func SeedSignal[T any](c *Collection[T], key string, slice *store.Slice[T]) *See
 // something nothing asked for.
 func (s *SeededSignal[T]) boundSlice() *store.Slice[T] { return s.slice }
 
+// Name is the signal key the browser knows the slice by — the
+// fully-qualified core-ui/store name, "<store>.<slice>". A page script
+// WRITES a seeded signal with __gofastr.setSignal(name, value), and the
+// seed bridge writes that value on to the record; without this the
+// script had to hardcode a string Go owns, which is the kind of
+// duplication that survives the rename it should not have survived.
+// The same name is on every binding as data-fui-signal, so a script can
+// read it off the DOM instead of being handed it.
+func (s *SeededSignal[T]) Name() string { return s.slice.Name() }
+
 // Attrs returns the two marker attributes a binding carries:
 // data-local-store="<app>" and data-local-seed="<collection>:<key>".
+// The signal's own name is not among them: store.Slice.Bind already
+// puts it on the same element as data-fui-signal, and a second spelling
+// of one name is a second thing to keep in step. Name() is the Go-side
+// reader.
 func (s *SeededSignal[T]) Attrs() map[string]string {
 	return map[string]string{
 		"data-local-store": s.coll.def.store.app,
