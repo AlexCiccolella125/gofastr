@@ -83,6 +83,22 @@ _, _ = Drafts, Prefs
   serves on the extra-script rail (never inline). A missing function
   leaves records and version untouched and raises `gofastr:local-error`
   with reason `migration`.
+- **Adoption.** `local.Adopt("<localStorage key>", "<fn>")` is a version
+  step over a key this package does not own: the browser reads it, the
+  app's registered parse turns its text into records, and the framework
+  writes them under the collection's caps, the same lock and the same
+  once-only stamp. See *Adopt a key the app already wrote*.
+- **Keys.** A record needs a stable one, and a store you are adopting
+  usually has none: an array index is not an identity, and a server id
+  only exists for rows the server has seen. Deriving a key from the
+  fields a user can edit (a name, a folder) is legitimate and has one
+  consequence worth knowing before you ship it: a **rename becomes a
+  delete and a put**, not an update, so anything keyed off the old key
+  (a seed marker, a mirror cookie, an `AnyKey` trigger the page already
+  rendered) is pointing at a record that no longer exists. If the format
+  has no id, the cheapest fix is to give it one on adoption — `Adopt`
+  hands the key assignment to your parse for exactly this reason — and
+  to write that id back into your own format.
 - **The record type** must round-trip through `encoding/json`; `Define`
   panics on one that does not.
 
@@ -121,6 +137,32 @@ Doing only one fails silently at runtime: the manifest 404s,
 answers `null`, and a page script dies on a null read. The module warns
 in the console with the app id and the manifest URL it expected, which is
 the only breadcrumb there is.
+
+**When the host is built before the router** — which is how most
+`uihost` apps are built, since the router comes from the app the host
+went into — `Serve` inverts the construction order. `Store.Script`
+returns the same URL and the mount step, so the halves can be taken in
+either order:
+
+<!-- gofastr:compile
+import "github.com/DonaldMurillo/gofastr/core-ui/app"
+import "github.com/DonaldMurillo/gofastr/framework/local"
+import "github.com/DonaldMurillo/gofastr/framework/uihost"
+
+var Site = local.New("docs-script")
+var rt local.ScriptRouter // app.Router(), built later
+var site = app.NewApp("docs2")
+-->
+```go
+url, mount := Site.Script()
+host := uihost.New(site, uihost.WithExtraScripts(url))
+// … the app and its router are built here …
+mount(rt)
+_ = host
+```
+
+Both are still required, and the forgettable half is now in the
+signature rather than absent from it.
 
 The global the script assigns is readable, and it carries the caps
 `Define` resolved rather than the ones you wrote:
@@ -175,6 +217,73 @@ The script runs after `runtime.js` and before the marker scan, so it
 reaches the store with `await __gofastr.loadModule('local-store')` and
 then `__gofastr.localStore('<app>')`. Everything it does from there is
 the browser API above; it does not need the framework to know it exists.
+
+## Adopt a key the app already wrote
+
+An app that already keeps something in `localStorage` has the hardest
+version of this package's problem: the records exist, they are the
+user's, and the first read of the new collection must find them. Doing
+that in page script means re-implementing what the migration machinery
+already does — read once, write all or nothing, stamp so it never runs
+again, under the lock that stops two tabs doing it at once — and getting
+it wrong loses data that has no copy anywhere.
+
+`local.Adopt` is that as a version step. The app supplies only the
+parse.
+
+<!-- gofastr:compile
+import "github.com/DonaldMurillo/gofastr/framework/local"
+
+type Team struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Packed string `json:"packed"`
+}
+var Site = local.New("docs-adopt")
+-->
+```go
+var Teams = local.Define[Team](Site, "teams", local.CollectionConfig{
+	Version: 2, KeyField: "id", MaxRecordBytes: 4 << 10, MaxRecords: 2000,
+	Migrations: []local.Migration{{Version: 2, Steps: []local.Step{
+		local.Adopt("showdown_teams", "adopt-teams"),
+	}}},
+})
+_ = Teams
+```
+
+```js
+// static/app.js, on the extra-script rail — never inline, like a Func
+// migration. (text, storageKey) => [{k, v}, …].
+(window.__gofastr._localAdopters = window.__gofastr._localAdopters || {})['adopt-teams'] =
+  (text) => text.split('\n').filter(Boolean).map((line, i) => {
+    const team = parseOneLine(line);          // the app's own format
+    return { k: team.id || 'team-' + i, v: team };
+  });
+```
+
+What the framework owns, and what the rule is:
+
+- **Once per browser.** The step runs inside the collection's migration,
+  under `navigator.locks`, and the version is stamped only if every
+  record landed. A refused record — a key the validator will not take, a
+  value that does not encode, anything over the collection's caps —
+  fails the whole migration: nothing is stamped, the collection is gated
+  with `gofastr:local-error{reason:"migration"}`, and the foreign key is
+  still there to try again from. Half a library, stamped as done, is the
+  failure this exists to make impossible.
+- **The foreign key is read, never written and never deleted.** The
+  framework does not own it. That also means the browser holds two
+  copies until the app stops writing the old key, which is the app's
+  decision to make and to test — the adoption is what makes it safe to
+  make, not a substitute for making it.
+- **The parse assigns the keys**, because a format with no identity of
+  its own is the normal case (see *Keys* above).
+- **A record the collection already holds is replaced.** The step runs
+  before the collection is anyone's source of truth.
+- **Order.** Within one version step, the records already in the
+  collection are transformed first and the adopted ones are written
+  after, at the target schema: your parse returns records of the version
+  it is declared on, not of the version before it.
 
 ## The browser API
 
@@ -274,6 +383,46 @@ asynchronous by construction, so SSR always paints the server's value and
 the record lands after hydration. A screen that must not flash needs the
 value on the request: a `Mirror` collection, below.
 
+**A seeded signal is a SCALAR.** A `store.Slice` renders its value as
+text, so a slice of a struct type paints its own JSON on the page and a
+slice of a slice paints an array. Seed a string, a number or a bool —
+the sentence, the count, the flag — and keep the records themselves on
+the browser side of the bridge, where the page script that knows how to
+draw them is. This package does not ship a browser-side template and is
+not going to.
+
+### Seed a count: how many records there are
+
+A screen that wants to say "3 teams" does not want a record; it wants
+the collection's size. `SeedCount` joins `count()` to an `int` slice and
+keeps it live through the collection's own `subscribe` — this tab's
+writes and another tab's:
+
+<!-- gofastr:compile
+import "context"
+import "github.com/DonaldMurillo/gofastr/core-ui/store"
+import "github.com/DonaldMurillo/gofastr/framework/local"
+
+type Draft struct{ Title string }
+var Site = local.New("docs-count")
+var Drafts = local.Define[Draft](Site, "drafts", local.CollectionConfig{Version: 1})
+var S = store.New("editor2")
+var ctx = context.Background()
+-->
+```go
+n := local.SeedCount(Drafts, S.Int("drafts", 0))
+_ = n.Bind(ctx, "span", nil) // data-fui-signal + data-local-count="drafts"
+```
+
+The alternative — a denormalised "summary" record the page script
+rewrites on every save — is what an app reaches for when the only bridge
+is one record wide, and it is the thing that drifts from the records it
+summarises. Nothing is written back here: the count belongs to the
+records, and a script that sets the signal by hand only changes what the
+screen says until the next write corrects it. A seed over `list()` is
+out of scope for the reason above: rendering rows needs a template on
+the browser side.
+
 ### Mirror: tiny values on the request
 
 A collection declared `Mirror: true` keeps each record in a cookie too,
@@ -321,6 +470,31 @@ request, and a Cookie header past the 8–16 KiB most proxies allow is a
 431 the user can only clear by hand. `Define` panics over the budget, and
 the browser refuses the cookie (not the record) with
 `gofastr:local-error{reason:"mirror"}` if the encoded reality passes it.
+
+**What the mirror is for, and what it is not.** A few small
+preferences: a theme, a collapsed sidebar, the last tab, a compact-view
+flag. The ceilings are 1 KiB per record, 16 records, and 4 KiB for all
+of a store's mirrored collections together — and that last number is not
+a framework preference, it is the Cookie header the world's proxies
+accept. Anything bigger than a preference does not fit and cannot be
+made to: cookies are the only channel a browser-held value has to a
+render at FIRST PAINT, so the budget is the budget.
+
+A larger record therefore has two honest shapes, and neither is a
+mirror. **Read it at action time** through the upload bridge — the
+record rides the request the user's click already makes, bounded by the
+declaration — or **render a placeholder and let the seed fill it** after
+hydration, which is one frame later and is what a seeded signal or a
+seeded count is for.
+
+Worked example, from the port that found this. A packed Pokémon team is
+up to 746 bytes, so a mirrored `teams` collection would hold about five
+of them and charge every one on every request: the team list cannot be a
+Go render, full stop. A team NAME is about 30 bytes, so one mirrored
+`summary` record of 1 KiB holds roughly 30 names — about 1.4 KiB of the
+4 KiB header budget once component encoding has had its way, leaving
+room for the session and CSRF cookies. That is the shape that fits: the
+names at first paint, the teams at action time.
 
 ### Upload: what accompanies a request
 
@@ -393,6 +567,66 @@ Note that `Wrap` re-encodes a JSON body after lifting the field out, so
 the handler sees the same object with different bytes (map key order, no
 insignificant whitespace). A handler that hashes or signs the raw body
 must do it upstream of `Wrap`.
+
+**One record the page picks.** `data-local-send` is written from the Go
+declaration, so "upload the team the user just clicked" out of a
+two-thousand-record library has no key to name at render time.
+`Collection.AnyKey()` declares one record whose key the page writes on
+the trigger as `data-local-key` before the click:
+
+<!-- gofastr:compile
+import "net/http"
+import "github.com/DonaldMurillo/gofastr/core-ui/html"
+import "github.com/DonaldMurillo/gofastr/framework/local"
+
+type Team struct{ Name string }
+var Site = local.New("docs-anykey")
+var Teams = local.Define[Team](Site, "teams", local.CollectionConfig{Version: 1, MaxRecordBytes: 4 << 10, MaxRecords: 2000})
+var mux = http.NewServeMux()
+-->
+```go
+pick := local.Send(Teams.AnyKey())
+attrs := pick.Merge(html.Attrs{"data-fui-rpc": "/teams/check", "data-fui-rpc-method": "POST"})
+_ = attrs // renders data-local-any="teams"; the page adds data-local-key
+
+mux.Handle("/teams/check", pick.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	one, err := local.List(r.Context(), Teams) // exactly one record
+	_, _ = one, err
+}))
+```
+
+```js
+row.querySelector('button').setAttribute('data-local-key', teamID);
+```
+
+The bound is **one record**, not the collection's, so a 2000-record
+library does not declare a megabyte body; the server accepts exactly one
+record under that collection; and a trigger that declared `AnyKey` and
+carries no usable key refuses rather than sending the request without
+it, like every other way this bridge fails closed. One `AnyKey` per
+trigger — there is one `data-local-key` to write.
+
+**The bridges are HTTP-shaped.** The upload is a field in a request body
+and the download is a header on its response; both are RPC-shaped, and
+both need a request to ride on. An app whose real actions travel on a
+**WebSocket** (a chat, a game, this package's first Showdown-shaped
+consumer) has no frame for them: it uploads through an action — one HTTP
+endpoint whose handler reads the records and answers — or it sends the
+value on its own socket and does not use the bridge at all. There is no
+socket bridge, and adding one would mean this package having an opinion
+about a frame format it does not own.
+
+**A synchronous app API over an asynchronous collection.** Most apps
+adopting this already have `load()`/`save()` with dozens of call sites,
+and the collection is IndexedDB: asynchronous, so a refusal (`size`,
+`full`, `quota`) cannot be `save()`'s return value. The pattern that
+works, and the one the package is built for, is **write-through**: keep
+the app's synchronous in-memory cache as the thing callers read and
+write, put every change to the collection beside it without waiting, and
+listen to `gofastr:local-error` for the refusals — which are the cases
+where the browser could not keep what the cache already shows. It is the
+same shape as a `localStorage` app that started checking its quota; what
+changes is that the answer arrives on an event instead of at the call.
 
 ### Download: records written from a response
 
@@ -473,6 +707,15 @@ first paint, an upload action whose Go handler reads the declared record
 and answers with a receipt it also writes back. Browser coverage:
 `examples/site/e2e_local_test.go` and `framework/local/local_e2e_test.go`.
 
+**Running a harness.** A GoFastr server started inside a **git
+worktree** remaps its listen address (`isolation remapped the listen
+address`, `wt_<hash>`), which is deliberate — two lanes on one box do
+not fight over a port — and is also why a harness that passes an
+explicit `-addr` and then curls it never connects. Set
+`GOFASTR_ISOLATION=off` (or `GOFASTR_ISOLATION_REWRITE=0`) for a script
+that names its own address. It is not specific to this package; every
+browser test here hits it.
+
 ## See also
 
 - [Signal store](signal-store.md): `store.Persist`, the one-slice cousin
@@ -502,9 +745,17 @@ and answers with a receipt it also writes back. Browser coverage:
   a warning naming the collection the first time an unwrapped handler
   reads an unmirrored one — the only case that can never be a browser
   with an empty store.
+- **Expecting the mirror to carry a real record.** It is a few hundred
+  bytes of preference riding the Cookie header; a large record is read
+  at action time through the upload, or painted after hydration by a
+  seed.
+- **Looking for a WebSocket bridge.** There is none: the upload is a
+  request body and the download is a response header. A socket-driven
+  app uploads through an action.
 - **Serving the declaration by halves.** The route and the extra script
   are both required; either alone 404s the manifest and leaves
-  `localStore(app)` answering `null`. `Store.Serve` does both.
+  `localStore(app)` answering `null`. `Store.Serve` does both, and
+  `Store.Script` returns both when the router does not exist yet.
 - **Sending a collection on a GET.** An upload rides a mutating request;
   `Merge` panics on a GET trigger and the runtime sends nothing on one.
 - **Pushing a dataset through the response header.** The header is

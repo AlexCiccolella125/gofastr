@@ -13,6 +13,13 @@ the kernel's `local` storage primitive (IndexedDB, with a tiny-value
 localStorage fallback; no dependency).
 Every record lives under `gofastr.state.local.<app>.<collection>:<key>`.
 
+The bridges are **HTTP-shaped** — the upload is a request-body field,
+the download a response header — so a WebSocket app uploads through an
+action. The mirror is for a few small preferences (4 KiB of Cookie
+header for all of a store's mirrored collections); a large record is
+read at action time through the upload, or painted after hydration by a
+seed.
+
 Three rules the package will not bend: a mirror read is a **client
 hint** (check the `local.Source`), a mirrored collection costs the
 Cookie header on every request (all of a store's share 4 KiB, a panic
@@ -82,9 +89,20 @@ var Drafts = local.Define[Draft](Site, "drafts", local.CollectionConfig{
 })
 var Prefs = local.Define[View](Site, "prefs", local.CollectionConfig{Version: 1, Mirror: true})
 
+// Adopt a key the app already wrote: a version step that runs ONCE,
+// under the same lock and stamp. The app supplies only the parse,
+// registered on the rail as window.__gofastr._localAdopters["<name>"]
+// ((text, key) => [{k, v}, …]); the foreign key is never deleted.
+var Teams = local.Define[Draft](Site, "teams", local.CollectionConfig{
+	Version: 2, KeyField: "id",
+	Migrations: []local.Migration{{Version: 2, Steps: []local.Step{local.Adopt("legacy_teams", "adopt-teams")}}},
+})
+
 // Serve the declaration on the extra-script rail (once, in main). Serve
 // mounts the route AND returns the URL: doing one half is a silent 404,
 // an undefined window.__gofastr_local and a null store in the browser.
+// Site.Script() returns the URL and the mount step instead, for a host
+// built before its router.
 var host = uihost.New(site, uihost.WithExtraScripts(Site.Serve(rt)))
 
 // Seed a signal from a record; the runtime patches it in after
@@ -92,13 +110,25 @@ var host = uihost.New(site, uihost.WithExtraScripts(Site.Serve(rt)))
 var title = local.SeedSignal(Drafts, "current", store.JSON[Draft](S, "draft", Draft{}))
 
 // Upload: the trigger declares what rides along; the handler reads it.
+// AnyKey is one record whose key the page writes on the trigger as
+// data-local-key at click time; the bound is one record, not the
+// collection's.
 var up = local.Send(Drafts.Key("current"))
+var pick = local.Send(Teams.AnyKey())
+
+// A collection's SIZE, not a record: no summary record to keep in step.
+var howMany = local.SeedCount(Drafts, S.Int("ndrafts", 0))
 
 func screen(ctx context.Context) render.HTML {
+	_ = howMany.Bind(ctx, "span", nil)
 	return title.Bind(ctx, "p", nil) // + up.Merge(...) on the RPC trigger
 }
 
 func routes() {
+	rt.Post("/teams/check", pick.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		one, _ := local.List(r.Context(), Teams) // exactly one record
+		_ = one
+	}))
 	rt.Post("/drafts/upload", up.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// src is local.SourceUpload, SourceMirror or SourceNone. A mirror
 		// read is a CLIENT HINT — any script on the origin writes that
@@ -116,6 +146,10 @@ func routes() {
 	}))
 }
 ```
+
+A server started in a **git worktree** remaps its `-addr`
+(`isolation remapped the listen address`); a harness that names its own
+address sets `GOFASTR_ISOLATION=off`.
 
 Browser side (after `__gofastr.loadModule('local-store')`):
 `__gofastr.localStore('site').collection('drafts')` → `get`, `put`,
