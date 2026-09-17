@@ -89,8 +89,8 @@ func TestDefineValidatesTheDeclaration(t *testing.T) {
 
 	// Mirror clamps to the cookie-sized defaults and ceilings.
 	p := Define[prefs](s, "prefs", CollectionConfig{Version: 1, Mirror: true})
-	if p.maxRecordBytes() != MirrorDefaultMaxRecordBytes || p.maxRecords() != MirrorDefaultMaxRecords {
-		t.Fatalf("mirror caps = %d/%d, want %d/%d", p.maxRecordBytes(), p.maxRecords(), MirrorDefaultMaxRecordBytes, MirrorDefaultMaxRecords)
+	if p.Caps().MaxRecordBytes != MirrorDefaultMaxRecordBytes || p.Caps().MaxRecords != MirrorDefaultMaxRecords {
+		t.Fatalf("mirror caps = %d/%d, want %d/%d", p.Caps().MaxRecordBytes, p.Caps().MaxRecords, MirrorDefaultMaxRecordBytes, MirrorDefaultMaxRecords)
 	}
 	mustPanic(t, "exceeds the ceiling", func() {
 		Define[prefs](s, "prefs2", CollectionConfig{Version: 1, Mirror: true, MaxRecordBytes: 4096})
@@ -658,5 +658,66 @@ func TestStripJSONLeavesNoStaleContentLength(t *testing.T) {
 	}
 	if gotHeader != strconv.Itoa(read) || gotLen != int64(read) {
 		t.Fatalf("Content-Length header %q, r.ContentLength %d, body %d bytes — all three have to agree", gotHeader, gotLen, read)
+	}
+}
+
+// The derived upload bound follows the caps the Send named, both of
+// them. Summing MaxBytes alone let a collection that declares 512 bytes
+// x 10 records — the POC's declaration, 5 KiB of records — render
+// data-local-max="1114112": the browser's fail-closed pre-flight could
+// never fire and the server accepted a megabyte for a 5 KiB collection.
+func TestTheUploadBoundFollowsTheCapsItNames(t *testing.T) {
+	s := fresh(t, "site")
+	small := Define[draft](s, "notes", CollectionConfig{
+		Version: 1, KeyField: "id", MaxRecordBytes: 512, MaxRecords: 10,
+	})
+	// MaxBytes was not declared, so it defaulted to 1 MiB — a size these
+	// ten records can never reach.
+	if got := small.Caps().MaxBytes; got != DefaultMaxBytes {
+		t.Fatalf("MaxBytes = %d, want the %d default", got, DefaultMaxBytes)
+	}
+	u := Send(small)
+	want := 512*10 + 10*UploadRecordOverhead + UploadBodySlack
+	if u.max != want {
+		t.Fatalf("derived bound = %d, want %d", u.max, want)
+	}
+	if u.max >= 8<<10 {
+		t.Fatalf("derived bound = %d: a 5 KiB collection must not declare 8 KiB or more", u.max)
+	}
+	if got := u.Attrs()["data-local-max"]; got != strconv.Itoa(want) {
+		t.Fatalf("data-local-max = %q, want %q", got, strconv.Itoa(want))
+	}
+	// One key is one record, not a whole collection.
+	if got := Send(small.Key("current")).max; got != 512+UploadRecordOverhead+UploadBodySlack {
+		t.Fatalf("one-key bound = %d", got)
+	}
+	// The ceiling still holds for a declaration that really is huge.
+	big := Define[draft](s, "big", CollectionConfig{
+		Version: 1, MaxRecordBytes: MaxRecordBytesLimit, MaxRecords: 1000, MaxBytes: MaxBytesLimit,
+	})
+	if got := Send(big).max; got != UploadMaxBytesLimit {
+		t.Fatalf("clamped bound = %d, want %d", got, UploadMaxBytesLimit)
+	}
+}
+
+// The caps are readable, not write-only. What a caller declared and what
+// holds are different numbers — MaxBytes defaults under a far smaller
+// MaxRecords x MaxRecordBytes, and Mirror lowers two of them — so an app
+// that sizes a textarea or derives its own bound needs them back.
+func TestCapsReadsBackTheResolvedDeclaration(t *testing.T) {
+	s := fresh(t, "site")
+	d := Define[draft](s, "drafts", CollectionConfig{Version: 2, KeyField: "id", MaxRecordBytes: 512, MaxRecords: 10,
+		Migrations: []Migration{{Version: 2}}})
+	want := Caps{Version: 2, KeyField: "id", MaxRecordBytes: 512, MaxRecords: 10, MaxBytes: DefaultMaxBytes}
+	if got := d.Caps(); got != want {
+		t.Fatalf("Caps = %+v, want %+v", got, want)
+	}
+	// A Mirror collection is clamped: the caps a caller reads back are
+	// the clamped ones, not the defaults it did not write.
+	p := Define[prefs](s, "prefs", CollectionConfig{Version: 1, Mirror: true})
+	mirrored := Caps{Version: 1, MaxRecordBytes: MirrorDefaultMaxRecordBytes,
+		MaxRecords: MirrorDefaultMaxRecords, MaxBytes: DefaultMaxBytes, Mirrored: true}
+	if got := p.Caps(); got != mirrored {
+		t.Fatalf("mirror Caps = %+v, want %+v", got, mirrored)
 	}
 }

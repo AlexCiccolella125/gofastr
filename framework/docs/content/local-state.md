@@ -111,6 +111,18 @@ host := uihost.New(site, uihost.WithExtraScripts(Site.ScriptURL())) // path + ?v
 _ = host
 ```
 
+The global the script assigns is readable, and it carries the caps
+`Define` resolved rather than the ones you wrote:
+`window.__gofastr_local["<app>"]` is `{collections: {"<name>": {v, key,
+maxRecord, maxRecords, maxBytes, mirror, migrations}}, mirrorMax}`. Read
+it in a console to see why a write was refused; never edit it, because
+the store reads a collection's entry once per page and refuses an entry
+it cannot read rather than falling back to a generous default. The same
+numbers in Go are `Collection.Caps()` — `Version`, `KeyField`,
+`MaxRecordBytes`, `MaxRecords`, `MaxBytes`, `Mirrored` — which is how a
+page renders "up to 10 notes of 512 bytes" without repeating the
+declaration.
+
 ## The browser API
 
 After `__gofastr.loadModule('local-store')` (or once any page markup

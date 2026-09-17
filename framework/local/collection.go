@@ -253,15 +253,39 @@ func (c *Collection[T]) Name() string { return c.def.name }
 // Store returns the declaring store.
 func (c *Collection[T]) Store() *Store { return c.def.store }
 
-// The effective declaration, read back. Unexported: the caller wrote
-// the CollectionConfig, and the only thing that reads these is the test
-// that pins the clamping. An accessor nothing calls is a promise the
-// package has to keep for nothing.
-func (c *Collection[T]) version() int        { return c.def.version }
-func (c *Collection[T]) maxRecordBytes() int { return c.def.maxRecord }
-func (c *Collection[T]) maxRecords() int     { return c.def.maxRecords }
-func (c *Collection[T]) maxBytes() int       { return c.def.maxBytes }
-func (c *Collection[T]) mirrored() bool      { return c.def.mirror }
+// Caps is a collection's declaration as Define resolved it: the
+// defaults filled in, a Mirror collection clamped to cookie size. The
+// numbers a caller wrote are not the numbers that hold — MaxBytes
+// defaults to 1 MiB under a MaxRecords x MaxRecordBytes that is far
+// smaller, and Mirror lowers two of them — so an app that sizes its own
+// records, renders "up to N notes" or derives its own bound has to be
+// able to read them back.
+type Caps struct {
+	// Version is the declared schema version.
+	Version int
+	// KeyField is the record field put(value) reads the key from, or "".
+	KeyField string
+	// MaxRecordBytes, MaxRecords and MaxBytes are the three caps the
+	// browser enforces, after defaults and the Mirror clamp.
+	MaxRecordBytes int
+	MaxRecords     int
+	MaxBytes       int
+	// Mirrored is Mirror: every record also rides a cookie.
+	Mirrored bool
+}
+
+// Caps returns the effective declaration. One accessor rather than five:
+// the caps are read together or not at all.
+func (c *Collection[T]) Caps() Caps {
+	return Caps{
+		Version:        c.def.version,
+		KeyField:       c.def.keyField,
+		MaxRecordBytes: c.def.maxRecord,
+		MaxRecords:     c.def.maxRecords,
+		MaxBytes:       c.def.maxBytes,
+		Mirrored:       c.def.mirror,
+	}
+}
 
 // keyOf returns the key the browser's put(value) would derive: the
 // declared KeyField of v, which must be a non-empty string. It errors
