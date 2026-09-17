@@ -6,8 +6,10 @@ declared once per app with named collections; each collection is a Go
 record type with a JSON round-trip, an optional key field, a size cap per
 record and per collection, and a schema version with migrations the
 browser runs once. The browser API is generated from that declaration and
-served by the runtime as the module `local-store`, on top of the kernel's
-`local` storage primitive ([Runtime contract](runtime-contract.md)):
+served by the runtime as two modules, `local-store` (the store, caps,
+migrations and mirror) and `local-bridge` (the seed, upload and download
+bridges, which requires the first), on top of the kernel's `local` storage
+primitive ([Runtime contract](runtime-contract.md)):
 IndexedDB, with a tiny-value `localStorage` fallback. Both are browser
 APIs; no dependency was added.
 
@@ -226,7 +228,7 @@ mux.Handle("/drafts/upload", upload.HandlerFunc(func(w http.ResponseWriter, r *h
 ```
 
 `Merge` puts three attributes on the RPC trigger: `data-local-store`,
-`data-local-send="drafts:current"` and `data-fui-rpc-with="local-store"`.
+`data-local-send="drafts:current"` and `data-fui-rpc-with="local-bridge"`.
 The runtime loads the module before dispatching and its request hook
 attaches exactly the named records as the reserved field `__local`
 (`{"<collection>": [{"k": key, "v": value}, …]}`) in a JSON body, the form
@@ -270,7 +272,7 @@ for the logout that never reaches `rpc.js`.
 
 ## Rules the package keeps
 
-- **No inline scripts.** The module is a registered behaviour, the
+- **No inline scripts.** Both modules are registered behaviours, the
   manifest and any migration function ride the extra-script rail;
   `make csp-check` stays green.
 - **State survives soft navigation and the route cache.** The seed

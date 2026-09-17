@@ -210,7 +210,7 @@ func TestSendAttrsNameOnlyTheDeclaration(t *testing.T) {
 	p := Define[prefs](s, "prefs", CollectionConfig{Version: 1, Mirror: true})
 	u := Send(d.Key("current"), p)
 	a := u.Attrs()
-	if a["data-local-store"] != "site" || a["data-local-send"] != "drafts:current,prefs" || a["data-fui-rpc-with"] != BehaviorName {
+	if a["data-local-store"] != "site" || a["data-local-send"] != "drafts:current,prefs" || a["data-fui-rpc-with"] != BridgeName {
 		t.Fatalf("Attrs = %v", a)
 	}
 	m := u.Merge(map[string]string{"data-fui-rpc": "/x", "class": "c"})

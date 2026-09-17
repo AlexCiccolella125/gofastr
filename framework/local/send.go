@@ -18,7 +18,7 @@ import (
 
 // The upload bridge. A trigger rendered with Upload.Attrs carries
 // data-local-send="<coll>[:<key>][,…]" and data-fui-rpc-with=
-// "local-store"; rpc.js loads the module before the fetch and its
+// "local-bridge"; rpc.js loads the module before the fetch and its
 // request hook attaches the named records as the reserved field
 // __local: {"<coll>": [{"k": key, "v": value}, …]} in a JSON body, the
 // form field __local in a form body, or a fresh JSON body when the
@@ -103,7 +103,7 @@ func (u *Upload) Attrs() map[string]string {
 	return map[string]string{
 		"data-local-store":  u.store.app,
 		"data-local-send":   strings.Join(parts, ","),
-		"data-fui-rpc-with": BehaviorName,
+		"data-fui-rpc-with": BridgeName,
 	}
 }
 

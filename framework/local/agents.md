@@ -3,8 +3,9 @@
 A `local.Store` declares, once per app, the collections a browser keeps
 for that app: a Go record type, a schema version with migrations, a key
 field, a size cap per record and per collection. The browser API is
-generated from that declaration and served as the runtime module
-`local-store`, on top of the kernel's `local` storage primitive
+generated from that declaration and served as the runtime modules
+`local-store` (store, caps, migrations, mirror) and `local-bridge` (the
+seed, upload and download bridges), on top of the kernel's `local` storage primitive
 (IndexedDB, with a tiny-value localStorage fallback; no dependency).
 Every record lives under `gofastr.state.local.<app>.<collection>:<key>`.
 

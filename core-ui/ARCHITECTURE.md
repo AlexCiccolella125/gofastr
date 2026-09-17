@@ -799,8 +799,10 @@ conflict resolution, no queue of pending mutations, no sync. Opinions
 of that shape belong in a layer ABOVE core-ui, never in the primitive:
 `framework/local` is that layer (declared collections, caps,
 migrations, the seed/upload/download bridges), registered through the
-behaviour seam as the `local-store` module with `Requires("local")`,
-owning its own `data-local-*` markers and reaching this store only
+behaviour seam as two modules, `local-store` with `Requires("local")`
+and `local-bridge` with `Requires("local-store")` — one file per
+module because the per-module byte budget holds registered behaviours
+too — owning their own `data-local-*` markers and reaching this store only
 through the API above. Its one ask of core-ui is the `data-fui-rpc-with`
 request/response hook seam in `rpc.js`.
 

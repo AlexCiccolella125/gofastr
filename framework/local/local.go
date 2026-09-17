@@ -5,9 +5,11 @@
 // Collection[T] is a Go type with a JSON round-trip, an optional key
 // field, a size cap per record and per collection, and a schema
 // version with migrations the browser runs once. The browser API is
-// generated from that declaration and served by the runtime as the
-// composed module "local-store" (local-store.js beside this file),
-// which stores every record in the kernel's `local` primitive
+// generated from that declaration and served by the runtime as two
+// composed modules beside this file: "local-store" (the store, caps,
+// migrations, mirror) and "local-bridge" (the seed, upload and
+// download bridges; Requires the first). Both keep every record in
+// the kernel's `local` primitive
 // (core-ui/runtime/src/local.js: IndexedDB, with a tiny-value
 // localStorage fallback). No dependency was added: both engines are
 // browser APIs.

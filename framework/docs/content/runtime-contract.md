@@ -527,10 +527,11 @@ offline-first (see the capability map's non-goals). `core-ui/store`'s
 `Slice.Persist()` is the one consumer core-ui ships
 (`data-fui-signal-persist` in the table above).
 
-`framework/local` registers its `local-store` module the same way
-(`Requires("local")`, marker `[data-local-store]`): the opinionated
+`framework/local` registers two modules the same way: `local-store`
+(`Requires("local")`, marker `[data-local-store]`) is the opinionated
 layer above the primitive — declared collections with caps and
-migrations, `data-local-seed` (a signal filled from a record),
+migrations, the cookie mirror — and `local-bridge` (`Requires("local-store")`,
+marker `[data-local-seed]`) carries the bridges: `data-local-seed` (a signal filled from a record),
 `data-local-send` (records that ride an RPC request as the reserved
 field `__local`, through the `data-fui-rpc-with` seam above) and the
 `X-Gofastr-Local` response header (records a handler writes back). The

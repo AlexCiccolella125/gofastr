@@ -15,9 +15,11 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   field, a size cap per record and per collection, a schema version
   with `Rename`/`Default`/`Remove`/`Func` migrations the browser runs
   once). The browser API is generated from the declaration and served
-  as the runtime module `local-store`, registered through the behaviour
-  seam with `Requires("local")` on top of the kernel's browser-store
-  primitive (IndexedDB; no dependency): `get`, `put`, `delete`, `list`
+  as two runtime modules registered through the behaviour seam —
+  `local-store` (`Requires("local")`: the store, caps, migrations,
+  mirror) and `local-bridge` (`Requires("local-store")`: the bridges),
+  each under the per-module byte budget — on top of the kernel's
+  browser-store primitive (IndexedDB; no dependency): `get`, `put`, `delete`, `list`
   with filters and ordering, `count`, `subscribe` (this tab's writes and
   other tabs'), `clear`, `available`; every call settles, and a refusal
   raises `gofastr:local-error` with its reason. Four explicit bridges to
