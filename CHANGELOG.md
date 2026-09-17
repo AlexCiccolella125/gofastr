@@ -51,11 +51,7 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   The upload bridge **fails closed**: a request whose declared records
   could not be attached, or that is past the bound `Send` derives from
   the declaration, is not sent at all. Local-first state, not offline
-  sync. Proof: `examples/site` at `/forms/draft-notes`, and
-  `examples/team-builder`, the smallest app that shows why: a team the
-  browser keeps with no account and no database, read by Go only on
-  "Check team", the verdict written back, and a browser test that
-  relaunches Chrome on one profile to show the team is still there.
+  sync. Proof: `examples/site` at `/forms/draft-notes`;
   `gofastr docs local-state`.
   Sharpened by the first consumer outside this repository (a GoFastr app
   in its own module, building against the branch through a `replace`):
