@@ -56,6 +56,9 @@ var (
 	// — the page's own markers migrate drafts and prefs at scan time.
 	e2eNotes  *Collection[e2eDraft]
 	e2eTagged *Collection[e2eTag]
+	// A collection seeded from a key this package does not own, the way
+	// an app that already stores something adopts it.
+	e2eAdopted *Collection[e2eDraft]
 )
 
 type e2eTag struct {
@@ -80,6 +83,10 @@ func e2eDeclare(t *testing.T) {
 		e2eTagged = Define[e2eTag](e2eSite, "tagged", CollectionConfig{
 			Version: 2, Mirror: true,
 			Migrations: []Migration{{Version: 2, Steps: []Step{Rename("colour", "theme")}}},
+		})
+		e2eAdopted = Define[e2eDraft](e2eSite, "adopted", CollectionConfig{
+			Version: 2, KeyField: "id", MaxRecordBytes: 512, MaxRecords: 8, MaxBytes: 4096,
+			Migrations: []Migration{{Version: 2, Steps: []Step{Adopt("legacy-notes", "adopt-notes")}}},
 		})
 		e2eSeed = SeedSignal(e2eDrafts, "current", store.JSON[e2eDraft](store.New("e2elocal"), "current", e2eDraft{Title: "server default"}))
 	})
@@ -136,6 +143,10 @@ func startE2E(t *testing.T, tls ...bool) *e2eServer {
 		w.Header().Set("Content-Type", "application/javascript")
 		_, _ = w.Write([]byte(`window.__migrated = 0;
 (window.__gofastr._localMigrations = window.__gofastr._localMigrations || {})['drafts-v2'] = (rec) => { window.__migrated++; rec.title = (rec.title || '') + ' (v2)'; return rec; };
+(window.__gofastr._localAdopters = window.__gofastr._localAdopters || {})['adopt-notes'] = (text) => text.split('\n').filter((l) => l).map((line) => {
+  const bar = line.indexOf('|');
+  return { k: line.slice(0, bar), v: { id: line.slice(0, bar), title: line.slice(bar + 1) } };
+});
 window.__errors = []; window.addEventListener('gofastr:local-error', (e) => window.__errors.push(e.detail));
 window.__migrations = []; window.addEventListener('gofastr:local-migrated', (e) => window.__migrations.push(e.detail));`))
 	})
@@ -402,6 +413,59 @@ func TestE2E_MigrationRunsOnce(t *testing.T) {
 	evalJSON(t, ctx, `window.__migrated`, &n)
 	if n != 0 || rec["title"] != "legacy (v2)" {
 		t.Fatalf("second load: migrated %d times, title %q — a migration must run once per browser", n, rec["title"])
+	}
+}
+
+// Adopt: a foreign localStorage key the app already wrote becomes
+// records, once, under the same lock and the same stamp as any other
+// version step — and the foreign key survives it, because the
+// framework does not own it.
+func TestE2E_AdoptSeedsFromAForeignKeyOnceAndKeepsIt(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	// The legacy write, from a page with no store marker: the store's
+	// migration must not race the plant.
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(e.srv.URL+"/plain"),
+		chromedp.WaitVisible(`#ready`, chromedp.ByID),
+		chromedp.Evaluate(`window.localStorage.setItem('legacy-notes', 'a|Alpha\nb|Beta\nc|Gamma')`, nil),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	openPage(t, ctx, e.srv.URL+"/")
+	const adoptedJS = `window.__gofastr.localStore('e2e').collection('adopted')`
+	var list []map[string]any
+	evalJSON(t, ctx, adoptedJS+`.list()`, &list)
+	if len(list) != 3 {
+		t.Fatalf("adopted %d records from three lines: %v", len(list), list)
+	}
+	for i, want := range []string{"Alpha", "Beta", "Gamma"} {
+		v, _ := list[i]["value"].(map[string]any)
+		if v["title"] != want {
+			t.Fatalf("record %d = %v, want title %q — the app's parse assigns the key and the value", i, list[i], want)
+		}
+	}
+	var meta map[string]any
+	evalJSON(t, ctx, `window.__gofastr.local.get('local.e2e.adopted')`, &meta)
+	if v, _ := meta["v"].(float64); int(v) != 2 {
+		t.Fatalf("stored version = %v, want 2: an adoption stamps like any other step", meta)
+	}
+	var kept string
+	evalJSON(t, ctx, `Promise.resolve(window.localStorage.getItem('legacy-notes'))`, &kept)
+	if !strings.Contains(kept, "Alpha") {
+		t.Fatalf("the foreign key = %q: Adopt reads it and never deletes it", kept)
+	}
+
+	// A fourth line, then a reload: the step is stamped, so it does not
+	// run again and the collection is not re-seeded.
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.localStorage.setItem('legacy-notes', 'a|Alpha\nb|Beta\nc|Gamma\nd|Delta')`, nil)); err != nil {
+		t.Fatal(err)
+	}
+	openPage(t, ctx, e.srv.URL+"/")
+	evalJSON(t, ctx, adoptedJS+`.list()`, &list)
+	if len(list) != 3 {
+		t.Fatalf("after reload the collection holds %d records — an adoption runs ONCE per browser", len(list))
 	}
 }
 

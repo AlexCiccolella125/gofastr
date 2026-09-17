@@ -847,3 +847,35 @@ func TestAReadOutsideWrapIsSilentWithoutTheDevFlag(t *testing.T) {
 		t.Fatalf("warned outside the dev loop: %s", logs.String())
 	}
 }
+
+// Adopt is a version step like any other on the wire: the foreign key
+// it reads and the parse function that turns its text into records.
+func TestAdoptCarriesTheForeignKeyAndTheParse(t *testing.T) {
+	raw, err := json.Marshal(Adopt("showdown_teams", "adopt-teams"))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var step map[string]any
+	if err := json.Unmarshal(raw, &step); err != nil {
+		t.Fatal(err)
+	}
+	if step["op"] != "adopt" || step["from"] != "showdown_teams" || step["name"] != "adopt-teams" {
+		t.Fatalf("adopt step = %v", step)
+	}
+	for _, c := range []struct {
+		what    string
+		key, fn string
+	}{
+		{"no storage key", "", "adopt-teams"},
+		{"no parse function", "showdown_teams", ""},
+	} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("Adopt with %s must panic", c.what)
+				}
+			}()
+			Adopt(c.key, c.fn)
+		}()
+	}
+}
