@@ -146,20 +146,75 @@ func TestRPCHooksDecorateTheRequestAndSeeTheResponse(t *testing.T) {
 	}
 }
 
-// A trigger naming a module that does not exist still dispatches: the
-// seam is best-effort, the RPC is not.
-func TestRPCWithUnknownModuleStillDispatches(t *testing.T) {
+// A trigger naming a module that does not exist does NOT dispatch.
+//
+// data-fui-rpc-with is a PRECONDITION, not a hint: the trigger is
+// saying this request is not itself without that module's decoration.
+// Dispatching anyway sent the server a request that looks complete and
+// is not — a save with the draft missing — and the page had no way to
+// know. The same holds for a request hook that throws, or one that
+// marks the request fatal itself.
+func TestRPCWithUnknownModuleDoesNotDispatch(t *testing.T) {
 	s := startRPCHooksServer(t)
 	ctx := chromedptest.Context(t, chromedptest.Timeout(90*time.Second))
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate(s.srv.URL+"/"),
 		chromedp.WaitVisible(`#ready`, chromedp.ByID),
-		chromedp.Evaluate(`document.getElementById('bare').setAttribute('data-fui-rpc-with', 'no-such-module')`, nil),
+		chromedp.Evaluate(`(() => {
+            window.__refused = [];
+            window.addEventListener('gofastr:rpc-refused', (e) => window.__refused.push(e.detail));
+            document.getElementById('bare').setAttribute('data-fui-rpc-with', 'no-such-module');
+        })()`, nil),
 		chromedp.Click(`#bare`, chromedp.ByID),
 	); err != nil {
 		t.Fatal(err)
 	}
-	if !localPollTrue(ctx, `Promise.resolve((document.getElementById('out').textContent || '').indexOf('ok') >= 0)`) {
-		t.Fatal("an RPC whose data-fui-rpc-with module is missing never answered")
+	if !localPollTrue(ctx, `Promise.resolve(window.__refused.length === 1)`) {
+		t.Fatal("the RPC was dispatched without the module the trigger declared, and nothing said so")
+	}
+	var refused []map[string]any
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__refused`, &refused)); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := refused[0]["reason"].(string); r != "module:no-such-module" {
+		t.Fatalf("gofastr:rpc-refused = %v, want the module that would not load", refused[0])
+	}
+	var out string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`document.getElementById('out').textContent || ''`, &out)); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "ok") {
+		t.Fatalf("the endpoint answered %q — the request must not have been sent at all", out)
+	}
+}
+
+// A request hook that throws cancels the dispatch too: a hook is how a
+// module attaches what the markup promised, and a hook that failed
+// halfway leaves a request that is missing it.
+func TestRPCRequestHookThatThrowsCancelsTheDispatch(t *testing.T) {
+	s := startRPCHooksServer(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(90*time.Second))
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(s.srv.URL+"/"),
+		chromedp.WaitVisible(`#ready`, chromedp.ByID),
+		chromedp.Evaluate(`(() => {
+            window.__refused = [];
+            window.addEventListener('gofastr:rpc-refused', (e) => window.__refused.push(e.detail));
+            const h = window.__gofastr._rpcHooks || (window.__gofastr._rpcHooks = { request: [], response: [] });
+            h.request.push(() => { throw new Error('the records could not be read'); });
+        })()`, nil),
+		chromedp.Click(`#bare`, chromedp.ByID),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !localPollTrue(ctx, `Promise.resolve(window.__refused.length === 1)`) {
+		t.Fatal("a request hook threw and the request was dispatched anyway")
+	}
+	var out string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`document.getElementById('out').textContent || ''`, &out)); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "ok") {
+		t.Fatalf("the endpoint answered %q — the request must not have been sent", out)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/DonaldMurillo/gofastr/core-ui/app"
@@ -31,11 +32,23 @@ import (
 // The reserved field name, on both sides.
 const uploadField = "__local"
 
-// DefaultUploadMaxBytes bounds a wrapped request's whole body; raise
-// it with Upload.Max, up to UploadMaxBytesLimit.
+// Upload body bounds. The default is DERIVED from what the Send named:
+// the sum of those collections' declared caps plus UploadBodySlack for
+// the rest of the body, clamped into
+// [DefaultUploadMaxBytes, UploadMaxBytesLimit].
+//
+// A fixed 256 KiB was four times smaller than a single collection's own
+// default MaxBytes (1 MiB), so a store filled to its declared cap
+// failed every upload with a bare 413 — a limit the declaration never
+// mentioned, hit by data the declaration said was fine. Raise it
+// explicitly with Upload.Max.
 const (
 	DefaultUploadMaxBytes = 256 << 10
 	UploadMaxBytesLimit   = 8 << 20
+	// UploadBodySlack is what the rest of the request may add: the form
+	// fields or JSON the trigger was already sending, plus the wire
+	// overhead of the records themselves ({"k":…,"v":…} per record).
+	UploadBodySlack = 64 << 10
 )
 
 var (
@@ -63,7 +76,8 @@ func Send(items ...Sendable) *Upload {
 	if len(items) == 0 {
 		panic("local: Send needs at least one collection or key")
 	}
-	u := &Upload{max: DefaultUploadMaxBytes}
+	u := &Upload{}
+	declared := 0
 	for _, it := range items {
 		si := it.sendItem()
 		if u.store == nil {
@@ -72,12 +86,32 @@ func Send(items ...Sendable) *Upload {
 			panic(fmt.Sprintf("local: Send mixes stores %q and %q — one store per upload", u.store.app, si.def.store.app))
 		}
 		u.items = append(u.items, si)
+		if si.key == "" {
+			declared += si.def.maxBytes
+		} else {
+			declared += si.def.maxRecord
+		}
 	}
+	u.max = clampUpload(declared + UploadBodySlack)
 	return u
 }
 
+// clampUpload holds a derived bound inside the range Max accepts, so
+// the default is never smaller than the old fixed one and never past
+// the ceiling.
+func clampUpload(n int) int {
+	if n < DefaultUploadMaxBytes {
+		return DefaultUploadMaxBytes
+	}
+	if n > UploadMaxBytesLimit {
+		return UploadMaxBytesLimit
+	}
+	return n
+}
+
 // Max caps the wrapped request's whole body (the records and the rest)
-// in bytes; outside (0, UploadMaxBytesLimit] panics.
+// in bytes, replacing the bound Send derived from the declaration;
+// outside (0, UploadMaxBytesLimit] panics.
 func (u *Upload) Max(bytes int) *Upload {
 	if bytes <= 0 || bytes > UploadMaxBytesLimit {
 		panic(fmt.Sprintf("local: Upload.Max %d is outside (0, %d]", bytes, UploadMaxBytesLimit))
@@ -87,10 +121,13 @@ func (u *Upload) Max(bytes int) *Upload {
 }
 
 // Attrs returns the attributes the RPC trigger (a <form data-fui-rpc>
-// or a button) carries: data-local-store, data-local-send and
-// data-fui-rpc-with. Merge them into the trigger's attribute map. A
-// GET trigger carries nothing at request time, so pass attrs with a
-// data-fui-rpc-method of GET and Attrs panics.
+// or a button) carries: data-local-store, data-local-send,
+// data-local-max and data-fui-rpc-with. Merge them into the trigger's
+// attribute map, or use Merge.
+//
+// data-local-max is the body bound above, so the browser can refuse an
+// oversized upload with gofastr:local-error{reason:"size"} instead of
+// sending it and reading a bare 413 the page cannot see.
 func (u *Upload) Attrs() map[string]string {
 	parts := make([]string, 0, len(u.items))
 	for _, it := range u.items {
@@ -103,6 +140,7 @@ func (u *Upload) Attrs() map[string]string {
 	return map[string]string{
 		"data-local-store":  u.store.app,
 		"data-local-send":   strings.Join(parts, ","),
+		"data-local-max":    strconv.Itoa(u.max),
 		"data-fui-rpc-with": BridgeName,
 	}
 }
@@ -113,7 +151,7 @@ func (u *Upload) Merge(attrs map[string]string) map[string]string {
 	if strings.EqualFold(attrs["data-fui-rpc-method"], http.MethodGet) {
 		panic("local: Send on a GET trigger — an upload rides a mutating request")
 	}
-	out := make(map[string]string, len(attrs)+3)
+	out := make(map[string]string, len(attrs)+4)
 	for k, v := range attrs {
 		out[k] = v
 	}

@@ -876,3 +876,81 @@ func TestE2E_ClearOnNextLoadIsHonouredWithoutAStoreMarker(t *testing.T) {
 		t.Fatalf("the record is still there (%v) — a logout must not depend on the next page carrying a marker", got)
 	}
 }
+
+// The upload bridge fails closed.
+//
+// A trigger that declares records is promising the handler those
+// records. When they cannot be attached — the store is not declared,
+// the body is not one the field can ride on, the gather failed, or they
+// are past the bound the declaration itself implies — the request is
+// not sent at all. Sending it anyway gave the handler something that
+// looks complete and is not, and the page never heard.
+func TestE2E_TheUploadRefusesRatherThanSendWithoutItsRecords(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+
+	var res map[string]any
+	evalJSON(t, ctx, draftsJS+`.put({ id: 'current', title: 'a draft the handler is promised' })`, &res)
+	if ok, _ := res["ok"].(bool); !ok {
+		t.Fatalf("put = %v", res)
+	}
+	// Squeeze the declared bound the trigger carries: the records no
+	// longer fit the upload the declaration allows.
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+        window.__refused = [];
+        window.addEventListener('gofastr:rpc-refused', (ev) => window.__refused.push(ev.detail));
+        document.getElementById('up').setAttribute('data-local-max', '8');
+    })()`, nil)); err != nil {
+		t.Fatal(err)
+	}
+	before := len(e.seen)
+	if err := chromedp.Run(ctx, chromedp.Click(`#send`, chromedp.ByID)); err != nil {
+		t.Fatal(err)
+	}
+	if !pollTrue(ctx, `Promise.resolve(window.__refused.length === 1)`) {
+		t.Fatal("the oversized upload was sent anyway — the browser must refuse before the fetch")
+	}
+	e.mu.Lock()
+	after := len(e.seen)
+	e.mu.Unlock()
+	if after != before {
+		t.Fatalf("the endpoint was called %d times — a refused upload must not reach the server", after-before)
+	}
+	var errs []map[string]any
+	evalJSON(t, ctx, `Promise.resolve(window.__errors)`, &errs)
+	for _, d := range errs {
+		if d["reason"] == "size" {
+			return
+		}
+	}
+	t.Fatalf("gofastr:local-error never said \"size\": %v — a bare 413 is not something a page can act on", errs)
+}
+
+// A download op the browser refused is not silence. The response has
+// already been written when the header is read, so the server believes
+// it wrote what the browser would not take; the bridge is advisory by
+// construction, which is exactly why it has to say so.
+func TestE2E_ARefusedDownloadOpIsReported(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+
+	// drafts caps at three records. Fill it, including the one the
+	// handler reads, so the record the response pushes back is a fourth.
+	for _, id := range []string{"current", "b", "c"} {
+		var res map[string]any
+		evalJSON(t, ctx, fmt.Sprintf(draftsJS+`.put({ id: %q, title: 'x' })`, id), &res)
+		if ok, _ := res["ok"].(bool); !ok {
+			t.Fatalf("put %s = %v", id, res)
+		}
+	}
+	if err := chromedp.Run(ctx, chromedp.Click(`#send`, chromedp.ByID)); err != nil {
+		t.Fatal(err)
+	}
+	if !pollTrue(ctx, `Promise.resolve(window.__errors.some((d) => d.reason === 'download'))`) {
+		var errs []map[string]any
+		evalJSON(t, ctx, `Promise.resolve(window.__errors)`, &errs)
+		t.Fatalf("the response wrote a record the browser refused and nothing said so: %v", errs)
+	}
+}

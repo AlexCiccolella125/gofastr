@@ -244,25 +244,64 @@
     return Promise.all(jobs).then(() => Object.fromEntries(out));
   };
 
+  // refuse marks the request fatal so rpc.js cancels the dispatch, and
+  // tells the page why. The upload bridge FAILS CLOSED: a request whose
+  // declared records could not be attached is not the request the
+  // markup promised, and a handler that acts on it — saving a draft
+  // that is not there, checking a team it never received — is worse
+  // than no request at all.
+  const refuse = (req, app, reason, size, max) => {
+    req.fatal = 'local:' + reason;
+    try {
+      window.dispatchEvent(new CustomEvent('gofastr:local-error', {
+        detail: { app: app, collection: '', key: '', reason: reason, size: size || 0, max: max || 0 },
+      }));
+    } catch (_) { /* best-effort */ }
+  };
+
   const requestHook = (node, req) => {
     const sendSpec = node.getAttribute('data-local-send');
     const app = node.getAttribute('data-local-store');
     if (!sendSpec || !app || RESERVED.test(app) || req.method === 'GET') return Promise.resolve();
     const store = openStore(app);
-    if (!store) return Promise.resolve();
+    if (!store) {
+      // The trigger declares records the manifest never did. Nothing
+      // can be gathered and nothing should be sent.
+      refuse(req, app, 'store');
+      return Promise.resolve();
+    }
+    // The declaration's own ceiling, carried on the trigger by
+    // Upload.Attrs. Without it the browser posted whatever it had and
+    // the server answered a bare 413 the page could not see — the one
+    // failure a size-capped store exists to report.
+    const max = parseInt(node.getAttribute('data-local-max'), 10);
     return gather(store, sendSpec).then((payload) => {
+      const text = JSON.stringify(payload);
+      if (max > 0 && text.length > max) {
+        refuse(req, app, 'size', text.length, max);
+        return;
+      }
       if (req.isFormData && req.body && typeof req.body.append === 'function') {
-        req.body.append('__local', JSON.stringify(payload));
+        req.body.append('__local', text);
         return;
       }
       let obj = {};
       if (typeof req.body === 'string' && req.body !== '') {
         try { obj = JSON.parse(req.body); } catch (_) { obj = null; }
-        if (!isObject(obj)) return; // not a JSON object body: nothing to ride on
+        if (!isObject(obj)) {
+          // A body the bridge cannot open is a body the records cannot
+          // ride on, and sending it without them is the silent half-
+          // request this bridge exists to prevent.
+          refuse(req, app, 'body');
+          return;
+        }
       }
       obj.__local = payload;
       req.body = JSON.stringify(obj);
       req.headers['Content-Type'] = 'application/json';
+    }, (err) => {
+      console.warn('[gofastr] local upload: the records could not be read', err);
+      refuse(req, app, 'gather');
     });
   };
 
@@ -270,9 +309,16 @@
 
   // X-Gofastr-Local: {"app":"<app>","ops":[{"c":"<coll>","k":"<key>","v":…}
   // | {"c":"<coll>","k":"<key>","d":true} | {"clear":true}]}. Every op
-  // goes through the same put/delete as a page write, so the caps
-  // hold and subscribers hear it; a refused op raises
-  // gofastr:local-error like any other.
+  // goes through the same put/delete as a page write, so the caps hold
+  // and subscribers hear it; a refused op raises gofastr:local-error
+  // like any other.
+  //
+  // The download bridge is ADVISORY and the doc says so: the response
+  // has already been written when the browser reads the header, so the
+  // server believes it wrote whatever the browser then refuses. What
+  // the bridge owes the page is to be loud about it — every settlement
+  // is read, a refusal is warned and raised, and a store the manifest
+  // never declared is not silence.
   const responseHook = (node, r) => {
     let header = '';
     try { header = r.headers.get('X-Gofastr-Local') || ''; } catch (_) { return; }
@@ -281,14 +327,35 @@
     try { msg = JSON.parse(header); } catch (_) { return; }
     if (!isObject(msg) || typeof msg.app !== 'string' || RESERVED.test(msg.app) || !Array.isArray(msg.ops)) return;
     const store = openStore(msg.app);
-    if (!store) return;
+    if (!store) {
+      console.warn('[gofastr] local download: no store declared for', msg.app, '- the response wrote nothing');
+      return;
+    }
+    const settle = (coll, key, p) => p.then((r) => {
+      if (r && r.ok) return;
+      // The op carries the store's own gofastr:local-error too; this
+      // one says the op came from a RESPONSE, so the server believes it
+      // wrote what the browser refused. Advisory by construction — the
+      // response is already sent — which is exactly why it has to be
+      // visible.
+      const why = (r && r.reason) || 'unavailable';
+      console.warn('[gofastr] local download refused:', msg.app, coll, key, why);
+      try {
+        window.dispatchEvent(new CustomEvent('gofastr:local-error', {
+          detail: { app: msg.app, collection: coll, key: key, reason: 'download', cause: why, size: 0, max: 0 },
+        }));
+      } catch (_) { /* best-effort */ }
+    });
     for (const op of msg.ops) {
       if (!isObject(op)) continue;
-      if (op.clear === true) { store.clear(); continue; }
+      if (op.clear === true) { settle('', '', store.clear()); continue; }
       const c = typeof op.c === 'string' ? store.collection(op.c) : null;
-      if (!c || !validKey(op.k)) continue;
-      if (op.d === true) c.delete(op.k);
-      else if (own(op, 'v')) c.put(op.k, op.v);
+      if (!c || !validKey(op.k)) {
+        console.warn('[gofastr] local download: no such collection or key', msg.app, op.c, op.k);
+        continue;
+      }
+      if (op.d === true) settle(op.c, op.k, c.delete(op.k));
+      else if (own(op, 'v')) settle(op.c, op.k, c.put(op.k, op.v));
     }
   };
 
