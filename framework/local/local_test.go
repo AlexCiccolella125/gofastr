@@ -692,6 +692,40 @@ func TestStripJSONLeavesNoStaleContentLength(t *testing.T) {
 // x 10 records — the POC's declaration, 5 KiB of records — render
 // data-local-max="1114112": the browser's fail-closed pre-flight could
 // never fire and the server accepted a megabyte for a 5 KiB collection.
+// AnyKey: one record, the key chosen at click time. It is not in
+// data-local-send (which would mean the whole collection), the bound is
+// one record, and the server takes exactly one.
+func TestAnyKeySendsOneRecordTheTriggerNames(t *testing.T) {
+	s := fresh(t, "site")
+	d := Define[draft](s, "drafts", CollectionConfig{
+		Version: 1, KeyField: "id", MaxRecordBytes: 512, MaxRecords: 200,
+	})
+	u := Send(d.AnyKey())
+	a := u.Attrs()
+	if a["data-local-any"] != "drafts" || a["data-local-send"] != "" {
+		t.Fatalf("Attrs = %v: an AnyKey collection is not in data-local-send", a)
+	}
+	if want := 512 + UploadRecordOverhead + UploadBodySlack; u.max != want {
+		t.Fatalf("bound = %d, want one record's %d — not the whole collection's", u.max, want)
+	}
+
+	// Any valid key is inside the declaration: the page picked it.
+	recs, err := u.parse([]byte(`{"drafts":[{"k":"b","v":{"id":"b"}}]}`))
+	if err != nil || len(recs["drafts"]) != 1 {
+		t.Fatalf("one record under AnyKey = %v, %v", recs, err)
+	}
+	// Two is not "one record the page named".
+	if _, err := u.parse([]byte(`{"drafts":[{"k":"a","v":{"id":"a"}},{"k":"b","v":{"id":"b"}}]}`)); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("two records under AnyKey = %v, want ErrTooLarge", err)
+	}
+	// A whole-collection item alongside it still delivers the collection.
+	if _, err := Send(d, d.AnyKey()).parse([]byte(`{"drafts":[{"k":"a","v":{"id":"a"}},{"k":"b","v":{"id":"b"}}]}`)); err != nil {
+		t.Fatalf("two records under a whole-collection Send = %v", err)
+	}
+	other := Define[draft](s, "notes", CollectionConfig{Version: 1})
+	mustPanic(t, "AnyKey twice", func() { Send(d.AnyKey(), other.AnyKey()) })
+}
+
 func TestTheUploadBoundFollowsTheCapsItNames(t *testing.T) {
 	s := fresh(t, "site")
 	small := Define[draft](s, "notes", CollectionConfig{

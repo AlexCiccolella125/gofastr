@@ -366,18 +366,40 @@ type Ref struct {
 	key string
 }
 
-// sendItem is what Send records: a collection, and a key or "" for
-// the whole collection.
-type sendItem struct {
+// AnyKey names ONE record of the collection whose key the page chooses
+// at click time: the trigger carries data-local-any="<collection>" and
+// the page script writes the key on it as data-local-key before the
+// click. "The team the user just picked" out of a two-thousand-record
+// library is that, and the alternative was rewriting data-local-send
+// from a script — which works, and is a string Go owns, and leaves the
+// derived upload bound at the WHOLE collection's size.
+//
+// The bound is one record (MaxRecordBytes plus the wire overhead), the
+// server accepts exactly one record for the collection, and any key
+// the validator accepts is inside the declaration: what the page picks
+// is not something the server knew when it rendered.
+func (c *Collection[T]) AnyKey() AnyRef { return AnyRef{def: c.def} }
+
+// AnyRef is Collection.AnyKey's Sendable.
+type AnyRef struct {
 	def *collectionDef
-	key string
 }
 
-// Sendable is a whole Collection or a Ref to one of its records.
+// sendItem is what Send records: a collection, and a key, "" for the
+// whole collection, or anyKey for one record the trigger names.
+type sendItem struct {
+	def    *collectionDef
+	key    string
+	anyKey bool
+}
+
+// Sendable is a whole Collection, a Ref to one of its records, or an
+// AnyRef to one record the page names at click time.
 type Sendable interface{ sendItem() sendItem }
 
 func (c *Collection[T]) sendItem() sendItem { return sendItem{def: c.def} }
 func (r Ref) sendItem() sendItem            { return sendItem{def: r.def, key: r.key} }
+func (a AnyRef) sendItem() sendItem         { return sendItem{def: a.def, anyKey: true} }
 
 // manifestEntry is the per-collection block the browser reads.
 type manifestEntry struct {

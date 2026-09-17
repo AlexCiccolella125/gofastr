@@ -124,6 +124,8 @@ func startE2E(t *testing.T, tls ...bool) *e2eServer {
 	block := uiruntime.BehaviorsJSON()
 	e := &e2eServer{}
 	up := Send(e2eDrafts.Key("current"), e2ePref)
+	// One record, whichever the page names on the trigger at click time.
+	any := Send(e2eDrafts.AnyKey())
 	mux := http.NewServeMux()
 	mux.HandleFunc("/__gofastr/runtime.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/javascript")
@@ -172,6 +174,15 @@ window.__migrations = []; window.addEventListener('gofastr:local-migrated', (e) 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
+	mux.Handle("/upload-any", any.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var s e2eSeen
+		s.Drafts, s.Err = List(r.Context(), e2eDrafts)
+		e.mu.Lock()
+		e.seen = append(e.seen, s)
+		e.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
 	mux.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
 		ClearOnNextLoad(w, r, e2eSite)
 		http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -198,13 +209,14 @@ window.__migrations = []; window.addEventListener('gofastr:local-migrated', (e) 
 		ctx := context.Background()
 		seedEl := e2eSeed.Bind(ctx, "p", map[string]string{"id": "seeded"})
 		countEl := e2eNum.Bind(ctx, "span", map[string]string{"id": "ndrafts"})
+		anyBtn := `<button id="send-any" data-fui-rpc="/upload-any" data-fui-rpc-method="POST" data-fui-rpc-signal="any-result"` + attrString(any.Attrs()) + `>one</button>`
 		form := `<form id="up" data-fui-rpc="/upload" data-fui-rpc-signal="up-result"` + attrString(up.Attrs()) + `><input name="note" value="hi"><button id="send" type="submit">send</button></form>`
 		fmt.Fprintf(w, `<!doctype html><html><head><title>local</title>`+
 			`<script type="application/json" id="gofastr-behaviors">%s</script></head><body>`+
 			`<main role="main"><span id="ready">ready</span>%s%s%s<span id="result" data-fui-signal="up-result"></span>`+
 			`<a id="away" href="/other">other</a></main>`+
 			`<script src="/__gofastr/runtime.js"></script><script src="%s"></script><script src="/app.js"></script></body></html>`,
-			block, seedEl, countEl, form, e2eSite.ScriptURL())
+			block, seedEl, countEl, form+anyBtn, e2eSite.ScriptURL())
 	})
 	if len(tls) > 0 && tls[0] {
 		e.srv = httptest.NewTLSServer(mux)
@@ -615,6 +627,51 @@ func TestE2E_UploadDeliversOnlyTheDeclaredAndDownloadWritesBack(t *testing.T) {
 
 // Two real tabs: a subscriber in one hears the other's write with
 // source 'tab', and its own with source 'local'.
+// AnyKey: the page names the record on the trigger at click time, one
+// record travels, and a trigger with no key refuses rather than send a
+// request without the record its markup promised.
+func TestE2E_AnyKeySendsTheRecordThePagePicked(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+	evalJSON(t, ctx, `Promise.all([
+        `+draftsJS+`.put({id: 'a', title: 'first'}),
+        `+draftsJS+`.put({id: 'b', title: 'second'}),
+    ])`, nil)
+
+	// No data-local-key yet: the upload fails closed and says why.
+	if err := chromedp.Run(ctx, chromedp.Click(`#send-any`, chromedp.ByID)); err != nil {
+		t.Fatal(err)
+	}
+	if !pollTrue(ctx, `Promise.resolve(window.__errors.some((d) => d.reason === 'key'))`) {
+		t.Fatal("a trigger that declared AnyKey and carries no key must refuse, not send")
+	}
+
+	// The page picks one, the way a list row would.
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`document.getElementById('send-any').setAttribute('data-local-key', 'b')`, nil),
+		chromedp.Click(`#send-any`, chromedp.ByID),
+	); err != nil {
+		t.Fatal(err)
+	}
+	// The endpoint answers a signal this button does not paint, so wait
+	// on the server having been reached.
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		e.mu.Lock()
+		n := len(e.seen)
+		e.mu.Unlock()
+		if n > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	seen := e.last(t)
+	if len(seen.Drafts) != 1 || seen.Drafts[0].Key != "b" || seen.Drafts[0].Value.Title != "second" {
+		t.Fatalf("the handler read %+v, want only the record the page named", seen.Drafts)
+	}
+}
+
 func TestE2E_SecondTabSeesTheWrite(t *testing.T) {
 	e := startE2E(t)
 	tabA := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))

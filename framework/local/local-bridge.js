@@ -257,7 +257,12 @@
   // travels, as the reserved field __local: {"<coll>": [{k, v}, …]} in
   // a JSON body, the form field __local in a FormData body, and a
   // fresh JSON body when the trigger had none. A GET carries nothing.
-  const gather = (store, sendSpec) => {
+  // data-local-any names a collection whose ONE record the page picks:
+  // the key is data-local-key on the same trigger, written by the page
+  // script before the click. A missing or invalid key sends nothing —
+  // see requestHook, which refuses rather than send the request the
+  // markup promised without the record it promised.
+  const gather = (store, sendSpec, anyColl, anyKey) => {
     // A Map, never a plain object: the collection name arrives from
     // an attribute, and a bracket write keyed by one is how __proto__
     // re-parents a store. Serialised as an object at the end.
@@ -279,6 +284,14 @@
         jobs.push(c.list().then((list) => { for (const r of list) rows.push({ k: r.key, v: r.value }); }));
       }
     }
+    if (anyColl) {
+      const c = store.collection(anyColl);
+      if (c && !RESERVED.test(anyColl)) {
+        if (!out.has(anyColl)) out.set(anyColl, []);
+        const rows = out.get(anyColl);
+        jobs.push(c.get(anyKey).then((v) => { if (v !== undefined) rows.push({ k: anyKey, v: v }); }));
+      }
+    }
     return Promise.all(jobs).then(() => Object.fromEntries(out));
   };
 
@@ -298,9 +311,10 @@
   };
 
   const requestHook = (node, req) => {
-    const sendSpec = node.getAttribute('data-local-send');
+    const sendSpec = node.getAttribute('data-local-send') || '';
+    const anyColl = node.getAttribute('data-local-any') || '';
     const app = node.getAttribute('data-local-store');
-    if (!sendSpec || !app || RESERVED.test(app) || req.method === 'GET') return Promise.resolve();
+    if ((!sendSpec && !anyColl) || !app || RESERVED.test(app) || req.method === 'GET') return Promise.resolve();
     const store = openStore(app);
     if (!store) {
       // The trigger declares records the manifest never did. Nothing
@@ -313,7 +327,17 @@
     // the server answered a bare 413 the page could not see — the one
     // failure a size-capped store exists to report.
     const max = parseInt(node.getAttribute('data-local-max'), 10);
-    return gather(store, sendSpec).then((payload) => {
+    // The runtime-chosen key. The declaration says WHICH collection one
+    // record may come from; the page says which record. A trigger that
+    // declared data-local-any and carries no usable key is refused
+    // here: sending it without the record is the silent half-request
+    // this bridge exists to prevent.
+    const anyKey = anyColl ? (node.getAttribute('data-local-key') || '') : '';
+    if (anyColl && !validKeyOf(store)(anyKey)) {
+      refuse(req, app, 'key');
+      return Promise.resolve();
+    }
+    return gather(store, sendSpec, anyColl, anyKey).then((payload) => {
       const text = JSON.stringify(payload);
       if (max > 0 && text.length > max) {
         refuse(req, app, 'size', text.length, max);
