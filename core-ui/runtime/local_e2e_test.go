@@ -54,10 +54,17 @@ func startLocalServer(t *testing.T, head string) *httptest.Server {
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
+		// /idb is the same page on the same ORIGIN with head omitted, so
+		// one test can write on the fallback and then come back with
+		// IndexedDB available to the same store.
+		injected := head
+		if r.URL.Path == "/idb" {
+			injected = ""
+		}
 		fmt.Fprintf(w, `<!doctype html><html><head><title>local</title>%s</head><body>
   <main role="main"><span id="ready">ready</span></main>
   <script src="/__gofastr/runtime.js"></script>
-</body></html>`, head)
+</body></html>`, injected)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -128,7 +135,7 @@ func TestLocalRoundTripsThroughIndexedDB(t *testing.T) {
 		t.Fatalf("get() = %s — the value did not round-trip with its type", round)
 	}
 	var keys []string
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.keys()`, &keys, awaitLocalPromise)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.keys().then((r) => r.keys)`, &keys, awaitLocalPromise)); err != nil {
 		t.Fatal(err)
 	}
 	if len(keys) != 1 || keys[0] != "teams" {
@@ -222,7 +229,7 @@ func TestLocalFallsBackToLocalStorageForTinyValuesOnly(t *testing.T) {
 		t.Fatalf("fallback get() = %q", round)
 	}
 	var keys []string
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.keys()`, &keys, awaitLocalPromise)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.keys().then((r) => r.keys)`, &keys, awaitLocalPromise)); err != nil {
 		t.Fatal(err)
 	}
 	if len(keys) != 1 || keys[0] != "pref" {
@@ -342,14 +349,14 @@ func TestLocalPrefixEnumeration(t *testing.T) {
 	}
 
 	var keys []string
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.keys('local.site.drafts:')`, &keys, awaitLocalPromise)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.keys('local.site.drafts:').then((r) => r.keys)`, &keys, awaitLocalPromise)); err != nil {
 		t.Fatal(err)
 	}
 	if len(keys) != 2 || keys[0] != "local.site.drafts:a" || keys[1] != "local.site.drafts:b" {
 		t.Fatalf("keys(prefix) = %v, want exactly the two drafts, sorted — a sibling prefix (draftsx) or another group leaked in", keys)
 	}
 	var all []string
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.keys()`, &all, awaitLocalPromise)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.keys().then((r) => r.keys)`, &all, awaitLocalPromise)); err != nil {
 		t.Fatal(err)
 	}
 	if len(all) != 5 {
@@ -357,7 +364,7 @@ func TestLocalPrefixEnumeration(t *testing.T) {
 	}
 
 	var entries []map[string]any
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.entries('local.site.drafts:')`, &entries, awaitLocalPromise)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.entries('local.site.drafts:').then((r) => r.entries)`, &entries, awaitLocalPromise)); err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 2 {
@@ -388,7 +395,7 @@ func TestLocalPrefixEnumerationOnTheFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	var entries []map[string]any
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.entries('g:')`, &entries, awaitLocalPromise)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.entries('g:').then((r) => r.entries)`, &entries, awaitLocalPromise)); err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 2 || entries[0]["key"] != "g:1" || entries[1]["key"] != "g:2" {
@@ -441,5 +448,157 @@ func TestLocalWatchCrossesTabsByPrefix(t *testing.T) {
 		if k == "other:x" {
 			t.Fatal("a watcher heard a key outside its prefix")
 		}
+	}
+}
+
+// available() names the engine that will actually answer, and the two
+// enumerations settle the way set and remove do.
+//
+// Two booleans could not say which engine answers — a caller reading
+// { idb: false, ls: true } has to re-derive the rule — and keys/entries
+// resolving a bare array made an aborted transaction indistinguishable
+// from an empty store, which is how a clear() built on them reported
+// success over records that all survived.
+func TestLocalNamesItsEngineAndSettlesItsEnumerations(t *testing.T) {
+	srv := startLocalServer(t, noIDB)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(90*time.Second))
+
+	openLocal(t, ctx, srv.URL+"/idb")
+	var avail map[string]any
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.available()`, &avail, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+	if avail["engine"] != "idb" {
+		t.Fatalf("available() = %v, want engine \"idb\" — the caller cannot otherwise say which engine answered", avail)
+	}
+
+	if err := chromedp.Run(ctx, chromedp.Evaluate(
+		`window.__gofastr.local.set('one', 1)`, nil, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+	var ks map[string]any
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.keys()`, &ks, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := ks["ok"].(bool); !ok {
+		t.Fatalf("keys() = %v, want { ok: true, keys: [...] } — an enumeration has to be able to say it failed", ks)
+	}
+	if list, _ := ks["keys"].([]any); len(list) != 1 || list[0] != "one" {
+		t.Fatalf("keys().keys = %v, want [one]", ks["keys"])
+	}
+	var es map[string]any
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.entries()`, &es, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := es["ok"].(bool); !ok {
+		t.Fatalf("entries() = %v, want { ok: true, entries: [...] }", es)
+	}
+	if list, _ := es["entries"].([]any); len(list) != 1 {
+		t.Fatalf("entries().entries = %v, want the one entry", es["entries"])
+	}
+
+	// And the fallback says so by name, not by elimination.
+	openLocal(t, ctx, srv.URL+"/")
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.available()`, &avail, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+	if avail["engine"] != "ls" {
+		t.Fatalf("available() on the fallback = %v, want engine \"ls\"", avail)
+	}
+}
+
+// A session that fell back to localStorage leaves entries no IndexedDB
+// session can see: invisible to get, invisible to keys, and out of
+// reach of any clear — the previous user's records surviving a logout.
+// The first session that does open the database adopts them and empties
+// the fallback of this namespace.
+func TestLocalAdoptsFallbackEntriesWhenIndexedDBReturns(t *testing.T) {
+	srv := startLocalServer(t, noIDB)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(90*time.Second))
+
+	// Session one: no IndexedDB, so the entry lands in the fallback.
+	openLocal(t, ctx, srv.URL+"/")
+	if err := chromedp.Run(ctx, chromedp.Evaluate(
+		`window.__gofastr.local.set('ghost', 'left-behind')`, nil, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(
+		`localStorage.getItem('gofastr.state.' + encodeURIComponent('ghost')) || ''`, &stored)); err != nil {
+		t.Fatal(err)
+	}
+	if stored != `"left-behind"` {
+		t.Fatalf("the fallback holds %q — this test is not measuring what it says it is", stored)
+	}
+
+	// Session two, same origin, IndexedDB available.
+	openLocal(t, ctx, srv.URL+"/idb")
+	if !localPollTrue(ctx, `window.__gofastr.local.get('ghost').then((v) => v === 'left-behind')`) {
+		var got string
+		_ = chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.get('ghost').then((v) => String(v))`, &got, awaitLocalPromise))
+		t.Fatalf("get('ghost') = %q — the fallback entry is a ghost the IndexedDB session cannot see", got)
+	}
+	var left string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(
+		`localStorage.getItem('gofastr.state.' + encodeURIComponent('ghost')) || ''`, &left)); err != nil {
+		t.Fatal(err)
+	}
+	if left != "" {
+		t.Fatalf("the fallback still holds %q — adoption must be one-way and leave nothing behind", left)
+	}
+	// And a remove reaches the fallback too, whichever engine answers.
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+        localStorage.setItem('gofastr.state.' + encodeURIComponent('ghost'), '"re-planted"');
+    })()`, nil)); err != nil {
+		t.Fatal(err)
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.remove('ghost')`, nil, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(
+		`localStorage.getItem('gofastr.state.' + encodeURIComponent('ghost')) || ''`, &left)); err != nil {
+		t.Fatal(err)
+	}
+	if left != "" {
+		t.Fatalf("remove left %q in the fallback — a delete has to reach both engines", left)
+	}
+}
+
+// On the fallback engine a write reaches the other tabs of the origin
+// through the native storage event, which this module already listens
+// for. Announcing on BroadcastChannel as well delivered the same change
+// twice, and every subscriber fired twice for one write.
+func TestLocalFallbackDeliversAWriteOnce(t *testing.T) {
+	srv := startLocalServer(t, noIDB)
+	tabA := chromedptest.Context(t, chromedptest.Timeout(90*time.Second))
+	openLocal(t, tabA, srv.URL+"/")
+	if err := chromedp.Run(tabA, chromedp.Evaluate(`(() => {
+        window.__heard = [];
+        window.__gofastr.local.subscribe('once', (v) => window.__heard.push(v));
+    })()`, nil)); err != nil {
+		t.Fatal(err)
+	}
+
+	tabB, cancelB := chromedp.NewContext(tabA)
+	t.Cleanup(cancelB)
+	openLocal(t, tabB, srv.URL+"/")
+	if err := chromedp.Run(tabB, chromedp.Evaluate(
+		`window.__gofastr.local.set('once', 'x')`, nil, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+
+	if !localPollTrue(tabA, `Promise.resolve(window.__heard.length >= 1)`) {
+		t.Fatal("tab A never heard the sibling tab's fallback write")
+	}
+	// Both transports are fast; a second delivery would already be in.
+	// Wait past it anyway so the assertion is about the count, not the
+	// clock.
+	time.Sleep(500 * time.Millisecond)
+	var heard []string
+	if err := chromedp.Run(tabA, chromedp.Evaluate(`window.__heard`, &heard)); err != nil {
+		t.Fatal(err)
+	}
+	if len(heard) != 1 {
+		t.Fatalf("tab A heard %v — one fallback write must deliver once, not once per transport", heard)
 	}
 }

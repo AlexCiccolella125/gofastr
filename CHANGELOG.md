@@ -10,11 +10,13 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
 ### Added
 - **The `local` browser store** (`core-ui/runtime/src/local.js`): the
   runtime's five hard-coded Web-storage keys, generalised into one
-  primitive with one owner. `window.__gofastr.local` is `available()`,
-  `get`, `set`, `remove`, `keys`, `entries`, `subscribe` and `watch`;
+  primitive with one owner. `window.__gofastr.local` is `available()`
+  → `{idb, ls, engine}`, `get`, `set`, `remove`, `keys` and `entries`
+  → `{ok, reason, …}`, `subscribe` and `watch`;
   `keys` and `entries` take an optional prefix and read one IndexedDB
   key range (an entry's `size` is the stored UTF-8 length of its JSON
-  text), and `watch(prefix, fn)` hears another tab's write of any key
+  text) and settle the way `set` does, so an aborted enumeration is
+  never mistaken for an empty store; `watch(prefix, fn)` hears another tab's write of any key
   under a prefix — the three calls a layer that groups records under a
   common prefix needs, with no opinion about what a group means. The engine is
   **IndexedDB** — a saved value is not a preference: asynchronous, not
@@ -26,7 +28,13 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   `gofastr.state.` plus the component-encoded key, so an application
   key can never name another feature's storage. `subscribe` fires when
   another tab of the origin changes the key (BroadcastChannel, plus the
-  `storage` event for the fallback); a tab never hears its own writes.
+  `storage` event for the fallback, never both, so one write delivers
+  once); a tab never hears its own writes. The fallback is a fallback
+  and not a second engine: the first session that opens IndexedDB
+  adopts the entries a fallback session left behind and empties the
+  namespace out of `localStorage`, and `remove` reaches both engines,
+  so a record written on the fallback cannot outlive a delete or a
+  logout.
   Every call settles rather than throwing and `set` says which of
   `size`/`quota`/`encode`/`unavailable` refused it: the contract is
   best-effort, and truth still lives on the server. Like `action` it is

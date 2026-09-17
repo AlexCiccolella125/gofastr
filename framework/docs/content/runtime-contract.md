@@ -499,8 +499,10 @@ members whose elements left the document are pruned on
 
 The kernel's `local` module is the other one — the browser's own store,
 as one primitive. `window.__gofastr.local` is
-`available()` → `{idb, ls}`, `get(key)`, `set(key, value)` →
-`{ok, reason}`, `remove(key)`, `keys(prefix?)`, `entries(prefix?)` →
+`available()` → `{idb, ls, engine}` (`engine` names the one that will
+actually answer: `idb`, `ls` or `none`), `get(key)`, `set(key, value)` →
+`{ok, reason}`, `remove(key)`, `keys(prefix?)` → `{ok, reason, keys}`,
+`entries(prefix?)` → `{ok, reason, entries}` with entries
 `[{key, value, size}]`, `subscribe(key, fn)` → unsubscribe and
 `watch(prefix, fn)` → unwatch. The engine is **IndexedDB**;
 `localStorage` is the fallback, used only when IndexedDB will not open

@@ -35,6 +35,11 @@
 // is the public API — get, set, remove, keys, entries, subscribe,
 // watch, available.
 //
+// Every call settles and none throws. set, remove, keys and entries
+// settle to { ok, reason, … }: an enumeration that failed is not an
+// empty store, and a caller that deletes what it enumerated has to be
+// able to tell the two apart.
+//
 // keys and entries take an optional PREFIX and enumerate only the
 // application keys under it, as one IndexedDB key range rather than a
 // scan of the whole store: a layer above that groups its records under
@@ -85,8 +90,57 @@
       req.onerror = () => resolve(null);
       req.onblocked = () => resolve(null);
     });
+    // eslint-disable-next-line no-use-before-define
+    dbPromise = dbPromise.then((db) => (db ? adopt(db).then(() => db) : db));
     return dbPromise;
   };
+
+  // adopt closes the split between the two engines. A session that
+  // could not open IndexedDB wrote its entries to the fallback; every
+  // later IndexedDB session was blind to them, so they were records
+  // nothing could read, nothing could overwrite and no clear() could
+  // ever remove — a ghost that outlives a logout. The first session
+  // that does open the database moves them across (a key IndexedDB
+  // already holds is simply dropped) and empties the fallback of this
+  // namespace. One way only: the fallback never receives from
+  // IndexedDB, so the two cannot diverge a second time.
+  const adopt = (db) => new Promise((resolve) => {
+    const found = [];
+    try {
+      for (let i = 0; i < window.localStorage.length; i++) {
+        // eslint-disable-next-line no-use-before-define
+        const app = strip(window.localStorage.key(i));
+        if (app !== null) found.push(app);
+      }
+    } catch (_) { resolve(); return; }
+    if (found.length === 0) { resolve(); return; }
+    let tx;
+    try {
+      tx = db.transaction(DB_STORE, 'readwrite');
+      const os = tx.objectStore(DB_STORE);
+      for (const app of found) {
+        // Guard spelled at the sink: literal namespace + component
+        // encoding, the same spelling every other sink in this file uses.
+        const stored = PREFIX + encodeURIComponent(app);
+        const req = os.getKey(stored);
+        req.onsuccess = () => {
+          if (req.result !== undefined) return;
+          let text = null;
+          try { text = window.localStorage.getItem(PREFIX + encodeURIComponent(app)); } catch (_) { text = null; }
+          if (typeof text === 'string') os.put(text, stored);
+        };
+      }
+    } catch (_) { resolve(); return; }
+    const drop = () => {
+      for (const app of found) {
+        try { window.localStorage.removeItem(PREFIX + encodeURIComponent(app)); } catch (_) { /* best-effort */ }
+      }
+      resolve();
+    };
+    tx.oncomplete = drop;
+    tx.onabort = () => resolve();
+    tx.onerror = () => resolve();
+  });
 
   // idbRun runs one transaction and settles to { ok, value, reason }.
   // Never rejects: the caller's settlement is always one of the two
@@ -212,10 +266,15 @@
 
   const api = {
     // available reports what this browser actually gives us, probed
-    // rather than feature-detected. Use it to decide whether to offer a
-    // "your work is saved here" affordance at all.
+    // rather than feature-detected: { idb, ls, engine }, where engine
+    // is the one that will actually answer a get or a set — 'idb',
+    // 'ls' or 'none'. Two booleans could not say that, and "which
+    // engine am I on" is the first question a bug report needs.
     available() {
-      return openDB().then((db) => ({ idb: !!db, ls: lsAvailable() }));
+      return openDB().then((db) => {
+        const ls = lsAvailable();
+        return { idb: !!db, ls: ls, engine: db ? 'idb' : (ls ? 'ls' : 'none') };
+      });
     },
 
     // get resolves the stored value, or undefined when the key is
@@ -257,45 +316,62 @@
         } catch (_) {
           return { ok: false, reason: 'quota' };
         }
-        announce(key);
+        // No announce: a localStorage write already reaches the other
+        // tabs of this origin through the native storage event, which
+        // this module listens for. Announcing too would deliver the
+        // same change twice and fire every subscriber twice.
         return { ok: true, reason: '' };
       });
     },
 
     // remove drops the entry. Resolves { ok } and never throws.
+    // remove drops the entry from BOTH engines. Adoption runs once, at
+    // open, so a fallback entry written after it (or by a script this
+    // module did not run) would otherwise survive a delete and a
+    // logout. Removing a key localStorage does not hold changes
+    // nothing and fires no storage event, so the common path is free.
     remove(key) {
       if (typeof key !== 'string' || key === '') return Promise.resolve({ ok: false, reason: 'unavailable' });
       return openDB().then((db) => {
+        let lsOK = true;
+        try {
+          // Guard spelled at the sink (see get above).
+          window.localStorage.removeItem(PREFIX + encodeURIComponent(key));
+        } catch (_) {
+          lsOK = false;
+        }
         if (db) {
           return idbRun('readwrite', (s) => s.delete(PREFIX + encodeURIComponent(key))).then((r) => {
             if (r.ok) announce(key);
             return { ok: r.ok, reason: r.ok ? '' : r.reason };
           });
         }
-        try {
-          // Guard spelled at the sink (see get above).
-          window.localStorage.removeItem(PREFIX + encodeURIComponent(key));
-        } catch (_) {
-          return { ok: false, reason: 'unavailable' };
-        }
-        announce(key);
-        return { ok: true, reason: '' };
+        // No announce on the fallback: the storage event carries it
+        // (see set above).
+        return lsOK ? { ok: true, reason: '' } : { ok: false, reason: 'unavailable' };
       });
     },
 
-    // keys resolves the application keys this origin holds, namespace
-    // stripped and decoded, or only those under prefix when one is
-    // given. Sorted, so a caller can diff two reads.
+    // keys resolves { ok, reason, keys }: the application keys this
+    // origin holds, namespace stripped and decoded, or only those under
+    // prefix when one is given, sorted so a caller can diff two reads.
+    //
+    // The settlement shape is the same one set and remove keep, and it
+    // is load-bearing: an aborted transaction and an empty store used
+    // to be the same empty array, so a clear() built on it reported
+    // success while every record survived. An enumeration that failed
+    // has to be able to say so.
     keys(prefix) {
       return openDB().then((db) => {
         if (db) {
           return idbRun('readonly', (s) => s.getAllKeys(rangeFor(prefix))).then((r) => {
+            if (!r.ok) return { ok: false, reason: r.reason, keys: [] };
             const out = [];
-            for (const k of (r.ok && r.value) || []) {
+            for (const k of r.value || []) {
               const app = strip(k, prefix);
               if (app !== null) out.push(app);
             }
-            return out.sort();
+            return { ok: true, reason: '', keys: out.sort() };
           });
         }
         const out = [];
@@ -304,15 +380,17 @@
             const app = strip(window.localStorage.key(i), prefix);
             if (app !== null) out.push(app);
           }
-        } catch (_) { return []; }
-        return out.sort();
+        } catch (_) { return { ok: false, reason: 'unavailable', keys: [] }; }
+        return { ok: true, reason: '', keys: out.sort() };
       });
     },
 
-    // entries resolves [{ key, value, size }] for every entry under
-    // prefix (or the whole namespace), sorted by key; size is the
-    // stored UTF-8 length of the entry's JSON text. One transaction, so
-    // keys and values are one snapshot. An unreadable entry is skipped.
+    // entries resolves { ok, reason, entries }, where entries is
+    // [{ key, value, size }] for every entry under prefix (or the whole
+    // namespace), sorted by key; size is the stored UTF-8 length of the
+    // entry's JSON text. One transaction, so keys and values are one
+    // snapshot. An unreadable entry is skipped; a read that FAILED says
+    // so rather than looking like an empty collection (see keys).
     entries(prefix) {
       const collect = (pairs) => {
         const out = [];
@@ -329,12 +407,12 @@
         if (db) {
           const range = rangeFor(prefix);
           return idbRun('readonly', (s) => [s.getAllKeys(range), s.getAll(range)]).then((r) => {
-            if (!r.ok || !r.value) return [];
+            if (!r.ok || !r.value) return { ok: false, reason: r.reason || 'unavailable', entries: [] };
             const ks = r.value[0] || [];
             const vs = r.value[1] || [];
             const pairs = [];
             for (let i = 0; i < ks.length && i < vs.length; i++) pairs.push([ks[i], vs[i]]);
-            return collect(pairs);
+            return { ok: true, reason: '', entries: collect(pairs) };
           });
         }
         const pairs = [];
@@ -344,8 +422,8 @@
             if (strip(k, prefix) === null) continue;
             pairs.push([k, window.localStorage.getItem(k)]);
           }
-        } catch (_) { return []; }
-        return collect(pairs);
+        } catch (_) { return { ok: false, reason: 'unavailable', entries: [] }; }
+        return { ok: true, reason: '', entries: collect(pairs) };
       });
     },
 

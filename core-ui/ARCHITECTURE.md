@@ -770,14 +770,24 @@ settling rather than throwing:
 
 | Call | Resolves |
 | --- | --- |
-| `available()` | `{idb, ls}`, probed rather than feature-detected (Safari's private mode exposes `localStorage` and throws on every write) |
+| `available()` | `{idb, ls, engine}`, probed rather than feature-detected (Safari's private mode exposes `localStorage` and throws on every write). `engine` is the one that will actually answer: `idb`, `ls` or `none` |
 | `get(key)` | the stored value, or `undefined` when it is absent, unreadable, or no engine is available |
 | `set(key, value)` | `{ok, reason}`; `reason` is `""`, `encode` (the value is not JSON), `size` (over the fallback's tiny-value cap), `quota` or `unavailable` |
-| `remove(key)` | `{ok, reason}` |
-| `keys(prefix?)` | the sorted application keys this origin holds, namespace stripped — or only those under `prefix`, read as one IndexedDB key range rather than a scan (the component encoding is per character, so the encoded prefix is a prefix of every encoded key beneath it) |
-| `entries(prefix?)` | `[{key, value, size}]` under `prefix` (or the whole namespace), sorted by key, keys and values from one transaction; `size` is the stored UTF-8 length of the entry's JSON text |
+| `remove(key)` | `{ok, reason}`; the entry is dropped from BOTH engines, so a record a fallback session wrote cannot outlive a delete |
+| `keys(prefix?)` | `{ok, reason, keys}` — the sorted application keys this origin holds, namespace stripped, or only those under `prefix`, read as one IndexedDB key range rather than a scan (the component encoding is per character, so the encoded prefix is a prefix of every encoded key beneath it). A failed enumeration says so: an empty store and an aborted transaction are not the same answer, and a caller that deletes what it enumerated must be able to tell them apart |
+| `entries(prefix?)` | `{ok, reason, entries}`, entries being `[{key, value, size}]` under `prefix` (or the whole namespace), sorted by key, keys and values from one transaction; `size` is the stored UTF-8 length of the entry's JSON text. Settles like `keys` |
 | `subscribe(key, fn)` | an unsubscribe function; `fn(value, key)` runs when ANOTHER tab of this origin changes the key (BroadcastChannel, plus the `storage` event for the fallback engine). A tab never hears its own writes: both transports skip the writing context |
 | `watch(prefix, fn)` | an unwatch function; `fn(key)` runs when another tab changes any key under `prefix`. The key travels, never the value: the watcher re-reads. One watcher covers a whole group of records |
+
+**One store, not two.** The fallback is a fallback, never a second
+engine running beside the first: the first session that opens IndexedDB
+adopts every `gofastr.state.` entry a fallback session left in
+`localStorage` and empties the namespace there (one way — the fallback
+never receives). Without it those entries are records no IndexedDB
+session can read, overwrite or clear, which is a previous user's data
+surviving a logout. On the fallback engine a write announces only
+through the native `storage` event, never on BroadcastChannel too: one
+write must deliver once.
 
 **The contract is best-effort, and that is the design.** Private mode, a
 blocked origin, a full quota, a cleared store and a browser that
