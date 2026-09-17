@@ -35,7 +35,10 @@
 // Contract, the same promises the primitive keeps: every call settles,
 // nothing throws, a refusal says why ({ok:false, reason}), and the page
 // hears gofastr:local-error for the refusals an app should tell the
-// user about (key, size, full, quota, encode, unavailable, migration).
+// user about (key, size, full, quota, encode, unavailable, migration,
+// version). A collection whose migration did not complete is GATED:
+// every method refuses with reason 'migration' rather than answering
+// from records on a schema this build cannot read.
 // Truth still lives on the server. This is not offline sync: no queue,
 // no conflict resolution, no reconciliation.
 (() => {
@@ -199,11 +202,20 @@
       const target = spec.v > 0 ? spec.v : 1;
       const run = () => P.get(metaKey(coll)).then((meta) => {
         const have = meta && typeof meta.v === 'number' ? meta.v : 0;
-        if (have >= target) return true;
+        if (have === target) return true;
+        // A stored version ABOVE the declared one is a rollback: this
+        // build's steps cannot undo what a newer build wrote, and
+        // reading those records as if they were this schema is how a
+        // deploy that gets rolled back corrupts the browsers that
+        // already moved on. Refuse the collection and say so.
+        if (have > target) {
+          fail(app, coll, '', 'version', have, target);
+          return false;
+        }
         return P.entries(prefixOf(coll)).then((er) => {
           if (!er.ok) throw new Error('entries: ' + er.reason);
           const entries = er.entries;
-          if (have === 0 && entries.length === 0) return P.set(metaKey(coll), { v: target }).then(() => true);
+          if (have === 0 && entries.length === 0) return P.set(metaKey(coll), { v: target }).then((r) => r.ok || fail(app, coll, '', 'migration').ok);
           const from = have === 0 ? 1 : have;
           const steps = [];
           for (const m of spec.migrations || []) {
@@ -211,16 +223,30 @@
           }
           steps.sort((a, b) => a.v - b.v);
           const writes = [];
+          const done = [];
           for (const e of entries) {
             let rec = e.value;
             const key = e.key.slice(prefixOf(coll).length);
             for (const m of steps) for (const st of m.steps || []) rec = applyStep(st, rec, key);
+            done.push({ key: key, rec: rec });
             writes.push(P.set(e.key, rec));
           }
-          return Promise.all(writes).then(() => P.set(metaKey(coll), { v: target })).then(() => {
-            emit('gofastr:local-migrated', { app, collection: coll, from, to: target });
-            if (spec.mirror) for (const e of entries) mirror(app, coll, e.key.slice(prefixOf(coll).length), encode(e.value) || 'null');
-            return true;
+          return Promise.all(writes).then((rs) => {
+            // P.set settles {ok:false} on a quota refusal or an aborted
+            // transaction; it does not reject. Stamping the version over
+            // a half-rewritten collection records the migration as done,
+            // so it never runs again and every later read mixes two
+            // schemas. Every write has to have landed.
+            for (const r of rs) if (!r || !r.ok) return fail(app, coll, '', 'migration').ok;
+            return P.set(metaKey(coll), { v: target }).then((r) => {
+              if (!r.ok) return fail(app, coll, '', 'migration').ok;
+              emit('gofastr:local-migrated', { app, collection: coll, from, to: target });
+              // The MIGRATED record, not the one the entry carried:
+              // mirroring e.value would put the pre-migration shape in
+              // the cookie and hand the server the old schema.
+              if (spec.mirror) for (const d of done) mirror(app, coll, d.key, encode(d.rec) || 'null');
+              return true;
+            });
           });
         });
       }).catch(() => {
@@ -239,6 +265,13 @@
       if (!ready.has(coll)) ready.set(coll, migrate(coll, spec));
       return ready.get(coll);
     };
+    // gate is whenReady as a refusal: null when the collection is
+    // usable, {ok:false, reason:'migration'} when it is not. EVERY
+    // method goes through it. A collection whose migration failed holds
+    // records on a schema this build cannot read, and serving them
+    // anyway — which is what discarding whenReady's answer did — turns
+    // one failed rewrite into corrupt data everywhere the records go.
+    const gate = (coll) => whenReady(coll).then((ok) => (ok ? null : fail(app, coll, '', 'migration')));
 
     const collectionAPI = (coll) => {
       const spec = specOf(coll);
@@ -250,10 +283,12 @@
         name: coll,
         // available resolves what the engine underneath offers, after
         // the collection's migration settled.
-        available() { return whenReady(coll).then(() => P.available()); },
+        available() { return gate(coll).then((no) => no || P.available()); },
+        // get resolves undefined on a gated collection, like a missing
+        // key; the refusal itself rides gofastr:local-error.
         get(key) {
           if (!validKey(key)) return Promise.resolve(undefined);
-          return whenReady(coll).then(() => P.get(recordKey(coll, key)));
+          return gate(coll).then((no) => (no ? undefined : P.get(recordKey(coll, key))));
         },
         // put(key, value), or put(value) when the collection declares a
         // key field: the key is then value[keyField], a non-empty string.
@@ -270,7 +305,7 @@
           if (text === null) return Promise.resolve(fail(app, coll, key, 'encode'));
           const size = bytesOf(text);
           if (size > maxRecord) return Promise.resolve(fail(app, coll, key, 'size', size, maxRecord));
-          return whenReady(coll).then(() => P.entries(prefixOf(coll))).then((er) => {
+          return gate(coll).then((no) => no || P.entries(prefixOf(coll)).then((er) => {
             if (!er.ok) return fail(app, coll, key, er.reason || 'unavailable');
             const entries = er.entries;
             let total = size;
@@ -289,16 +324,16 @@
               notify(coll, key, 'local');
               return { ok: true, reason: '' };
             });
-          });
+          }));
         },
         delete(key) {
           if (!validKey(key)) return Promise.resolve(fail(app, coll, String(key), 'key'));
-          return whenReady(coll).then(() => P.remove(recordKey(coll, key))).then((r) => {
+          return gate(coll).then((no) => no || P.remove(recordKey(coll, key)).then((r) => {
             if (!r.ok) return fail(app, coll, key, r.reason);
             if (spec.mirror) mirror(app, coll, key, '');
             notify(coll, key, 'local');
             return { ok: true, reason: '' };
-          });
+          }));
         },
         // list resolves [{key, value}] sorted by key, or by opts.orderBy
         // (a top-level field; opts.desc reverses), after opts.where
@@ -308,7 +343,7 @@
         // the server does for server data.
         list(opts) {
           const o = opts && typeof opts === 'object' ? opts : {};
-          return whenReady(coll).then(() => P.entries(prefixOf(coll))).then((er) => {
+          return gate(coll).then((no) => (no ? [] : P.entries(prefixOf(coll)).then((er) => {
             const entries = er.entries;
             let out = [];
             for (const e of entries) {
@@ -333,9 +368,9 @@
             const lim = o.limit > 0 ? o.limit : out.length;
             if (off || lim < out.length) out = out.slice(off, off + lim);
             return out;
-          });
+          })));
         },
-        count() { return whenReady(coll).then(() => P.keys(prefixOf(coll))).then((r) => r.keys.length); },
+        count() { return gate(coll).then((no) => (no ? 0 : P.keys(prefixOf(coll)).then((r) => r.keys.length))); },
         // subscribe calls fn({app, collection, key, source}) after every
         // write to this collection: source 'local' for this tab's own
         // put/delete (including one a response wrote), 'tab' for another
@@ -354,7 +389,7 @@
         // survived. A removal that failed is the same lie one record
         // deep, so both are checked.
         clear() {
-          return whenReady(coll).then(() => P.keys(prefixOf(coll))).then((r) => {
+          return gate(coll).then((no) => no || P.keys(prefixOf(coll)).then((r) => {
             if (!r.ok) return fail(app, coll, '', r.reason || 'unavailable');
             const ks = r.keys;
             return Promise.all(ks.map((k) => P.remove(k))).then((rs) => {
@@ -368,7 +403,7 @@
               if (bad) return fail(app, coll, '', bad);
               return { ok: true, reason: '' };
             });
-          });
+          }));
         },
       };
       return api;

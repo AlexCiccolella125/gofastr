@@ -48,7 +48,17 @@ var (
 	e2eDrafts *Collection[e2eDraft]
 	e2ePref   *Collection[e2ePrefs]
 	e2eSeed   *SeededSignal[e2eDraft]
+	// Collections no marker on the page touches, so a test can plant a
+	// stored version and watch the FIRST migration of a collection run
+	// — the page's own markers migrate drafts and prefs at scan time.
+	e2eNotes  *Collection[e2eDraft]
+	e2eTagged *Collection[e2eTag]
 )
+
+type e2eTag struct {
+	Colour string `json:"colour,omitempty"`
+	Theme  string `json:"theme,omitempty"`
+}
 
 func e2eDeclare(t *testing.T) {
 	t.Helper()
@@ -60,6 +70,14 @@ func e2eDeclare(t *testing.T) {
 			Migrations: []Migration{{Version: 2, Steps: []Step{Rename("body", "text"), Func("drafts-v2")}}},
 		})
 		e2ePref = Define[e2ePrefs](e2eSite, "prefs", CollectionConfig{Version: 1, Mirror: true})
+		e2eNotes = Define[e2eDraft](e2eSite, "notes", CollectionConfig{
+			Version: 2, KeyField: "id",
+			Migrations: []Migration{{Version: 2, Steps: []Step{Rename("body", "text")}}},
+		})
+		e2eTagged = Define[e2eTag](e2eSite, "tagged", CollectionConfig{
+			Version: 2, Mirror: true,
+			Migrations: []Migration{{Version: 2, Steps: []Step{Rename("colour", "theme")}}},
+		})
 		e2eSeed = SeedSignal(e2eDrafts, "current", store.JSON[e2eDraft](store.New("e2elocal"), "current", e2eDraft{Title: "server default"}))
 	})
 }
@@ -239,7 +257,7 @@ func TestE2E_RecordSurvivesReloadAndSessionsAreIsolated(t *testing.T) {
 		t.Fatalf("put = %v", res)
 	}
 	var keys []string
-	evalJSON(t, ctx, `window.__gofastr.local.keys('local.e2e.drafts:')`, &keys)
+	evalJSON(t, ctx, `window.__gofastr.local.keys('local.e2e.drafts:').then((r) => r.keys)`, &keys)
 	if len(keys) != 1 || keys[0] != "local.e2e.drafts:a" {
 		t.Fatalf("primitive keys = %v: the record must live under local.<app>.<collection>:<key>", keys)
 	}
@@ -586,5 +604,141 @@ func TestE2E_ClearReportsAnEnumerationItCouldNotRead(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("gofastr:local-error never carried the refusal: %v", errs)
+	}
+}
+
+const notesJS = `window.__gofastr.localStore('e2e').collection('notes')`
+const taggedJS = `window.__gofastr.localStore('e2e').collection('tagged')`
+
+// plantV1 writes a record and a stored schema version straight through
+// the primitive, the way a browser that ran an older build would hold
+// them, so the next touch of the collection runs its first migration.
+func plantV1(t *testing.T, ctx context.Context, coll, key, json string, version int) {
+	t.Helper()
+	evalJSON(t, ctx, fmt.Sprintf(`Promise.all([
+        window.__gofastr.local.set('local.e2e.%s:%s', %s),
+        window.__gofastr.local.set('local.e2e.%s', { v: %d }),
+    ]).then(() => true)`, coll, key, json, coll, version), nil)
+}
+
+// A migration that only half happened must not be recorded as done, and
+// the collection it left behind must not answer.
+//
+// P.set settles {ok:false} on a quota refusal or an aborted transaction
+// rather than rejecting, so Promise.all resolved and the new version was
+// stamped over records that were still on the old schema — a corruption
+// that never re-runs. And whenReady's answer was discarded by every
+// method, so the records were served anyway.
+func TestE2E_AFailedMigrationNeitherStampsNorAnswers(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+	plantV1(t, ctx, "notes", "n1", `{ id: 'n1', body: 'old shape' }`, 1)
+
+	// Fault injection at the primitive's seam: every write from here on
+	// refuses the way a full quota refuses.
+	evalJSON(t, ctx, `Promise.resolve((() => {
+        window.__gofastr.local.set = () => Promise.resolve({ ok: false, reason: 'quota' });
+        return true;
+    })())`, nil)
+
+	// The first touch runs the migration.
+	var res map[string]any
+	evalJSON(t, ctx, notesJS+`.put({ id: 'n2', title: 'new' })`, &res)
+	if ok, _ := res["ok"].(bool); ok {
+		t.Fatalf("put = %v — a collection whose migration failed must refuse", res)
+	}
+	if res["reason"] != "migration" {
+		t.Fatalf("put = %v, want reason \"migration\"", res)
+	}
+	evalJSON(t, ctx, notesJS+`.delete('n1')`, &res)
+	if ok, _ := res["ok"].(bool); ok {
+		t.Fatalf("delete = %v — every method is gated, not just put", res)
+	}
+	evalJSON(t, ctx, notesJS+`.clear()`, &res)
+	if ok, _ := res["ok"].(bool); ok {
+		t.Fatalf("clear = %v — every method is gated", res)
+	}
+	var n int
+	evalJSON(t, ctx, notesJS+`.count()`, &n)
+	if n != 0 {
+		t.Fatalf("count = %d — a gated collection answers nothing", n)
+	}
+	var list []map[string]any
+	evalJSON(t, ctx, notesJS+`.list()`, &list)
+	if len(list) != 0 {
+		t.Fatalf("list = %v — a gated collection must not serve records on the old schema", list)
+	}
+
+	// And the stored version is untouched, so the next load re-runs it.
+	var meta map[string]any
+	evalJSON(t, ctx, `window.__gofastr.local.get('local.e2e.notes').then((v) => v || null)`, &meta)
+	if v, _ := meta["v"].(float64); int(v) != 1 {
+		t.Fatalf("the stored version is %v — a half-failed migration must never be stamped as done", meta)
+	}
+	var errs []map[string]any
+	evalJSON(t, ctx, `Promise.resolve(window.__errors)`, &errs)
+	found := false
+	for _, d := range errs {
+		if d["reason"] == "migration" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("gofastr:local-error never said \"migration\": %v", errs)
+	}
+}
+
+// A stored version ABOVE the declared one is a rollback: the build that
+// wrote those records is newer than this one, whose steps cannot undo
+// it. Accepting it silently (have >= target) served records of an
+// unknown schema as if they were this one.
+func TestE2E_AVersionDowngradeIsRefusedNotAccepted(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+	plantV1(t, ctx, "notes", "n1", `{ id: 'n1', title: 'from the future', extra: 1 }`, 7)
+
+	var res map[string]any
+	evalJSON(t, ctx, notesJS+`.put({ id: 'n2', title: 'new' })`, &res)
+	if ok, _ := res["ok"].(bool); ok {
+		t.Fatalf("put = %v — a collection a newer build wrote must be refused", res)
+	}
+	var got map[string]any
+	evalJSON(t, ctx, notesJS+`.get('n1').then((v) => v || null)`, &got)
+	if got != nil {
+		t.Fatalf("get = %v — a rolled-back build must not read records it cannot understand", got)
+	}
+	var errs []map[string]any
+	evalJSON(t, ctx, `Promise.resolve(window.__errors)`, &errs)
+	for _, d := range errs {
+		if d["reason"] == "version" {
+			return
+		}
+	}
+	t.Fatalf("gofastr:local-error never said \"version\": %v", errs)
+}
+
+// The mirror cookie carries the MIGRATED record. Re-encoding the
+// entry's pre-migration value handed the server the old schema on every
+// request, for as long as nothing wrote the record again — and the
+// server validates the cookie against the NEW type, so the record the
+// browser holds and the record the server reads disagree.
+func TestE2E_TheMirrorCarriesTheMigratedRecord(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+	plantV1(t, ctx, "tagged", "t1", `{ colour: 'dark' }`, 1)
+
+	var n int
+	evalJSON(t, ctx, taggedJS+`.count()`, &n)
+	if n != 1 {
+		t.Fatalf("count = %d, want the planted record migrated in place", n)
+	}
+	var cookie string
+	evalJSON(t, ctx, `Promise.resolve(decodeURIComponent(
+        (('; ' + document.cookie).split('; gofastr.local.' + encodeURIComponent('e2e.tagged.t1') + '=')[1] || '').split(';')[0]))`, &cookie)
+	if cookie != `{"theme":"dark"}` {
+		t.Fatalf("the mirror cookie holds %q, want the migrated record — the server would otherwise read the pre-migration shape", cookie)
 	}
 }
