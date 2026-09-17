@@ -496,6 +496,26 @@ inside one round trip still end with exactly one committed. Group
 members whose elements left the document are pruned on
 `gofastr:navigate`.
 
+The kernel's `local` module is the other one — the browser's own store,
+as one primitive. `window.__gofastr.local` is
+`available()` → `{idb, ls}`, `get(key)`, `set(key, value)` →
+`{ok, reason}`, `remove(key)`, `keys()` and
+`subscribe(key, fn)` → unsubscribe. The engine is **IndexedDB**;
+`localStorage` is the fallback, used only when IndexedDB will not open
+and only for values up to 8 KiB. Every entry, in either engine, lives
+under the literal `gofastr.state.` plus the component-encoded key, so
+an application key can never name another feature's storage.
+`subscribe` fires when ANOTHER tab of this origin changes the key
+(BroadcastChannel, plus the `storage` event for the fallback); a tab
+never hears its own writes. Every call is asynchronous and settles
+rather than throwing: the contract is **best-effort** — private mode, a
+blocked origin, a full quota and a cleared store are all normal, and
+`set` says which one refused it. Never keep something there whose loss
+is a bug; the server is still where truth lives, and this is not
+offline-first (see the capability map's non-goals). `core-ui/store`'s
+`Slice.Persist()` is the one consumer core-ui ships
+(`data-fui-signal-persist` in the table above).
+
 The framework's own `headless` module is registered this way by
 `framework/headless/behavior.go`, binding that package's `data-hui-*`
 hooks with the markers `[data-hui-reveal]`, `[data-hui-color]`,

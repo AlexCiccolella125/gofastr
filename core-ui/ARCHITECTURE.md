@@ -721,6 +721,55 @@ prefix matches the existing `gofastr:navigate` convention. The
 NetworkRetryBanner reads `lastEventAt` for its silence trigger and
 listens for the event to re-probe its health endpoint on reconnect.
 
+### Browser storage: the `local` primitive (`runtime/src/local.js`)
+
+The runtime had five hard-coded Web-storage keys and no way for
+anything else to keep a value in the browser: the sidebar's collapse
+boolean, a banner's dismiss bit, the colour scheme, a form draft
+(`data-fui-persist-storage`) and the scroll map. Each was written where
+it was needed and re-derived its own namespace; an app that wanted to
+remember anything of its own had to leave the framework and write a
+document script. `local` is that capability with one owner.
+
+Like `action` it is a PRIMITIVE: no marker, no `data-fui-*` attribute
+of its own, reached through `registry.Requires("local")` or an explicit
+`__gofastr.loadModule('local')`, and served, hashed, budgeted and
+linted like every other module. It adds nothing to the core bundle.
+
+**Engine.** IndexedDB, because a saved value is not a preference: it is
+asynchronous, it is not capped at the few megabytes `localStorage`
+shares across a whole origin, and a large read does not block the main
+thread. `localStorage` is the FALLBACK, used only when IndexedDB will
+not open and only for values up to 8 KiB. Both are browser APIs; the
+module adds no dependency.
+
+**Namespace.** Every entry, in either engine, is stored under the
+literal `gofastr.state.` plus the component-encoded application key,
+spelled at each sink. An application key can therefore never name
+another feature's storage, and `core-ui/check`'s `storage-key-raw` lint
+enforces both halves — including that the namespace is the framework's
+own and that it leads the key.
+
+**API** (`window.__gofastr.local`), every call asynchronous and
+settling rather than throwing:
+
+| Call | Resolves |
+| --- | --- |
+| `available()` | `{idb, ls}`, probed rather than feature-detected (Safari's private mode exposes `localStorage` and throws on every write) |
+| `get(key)` | the stored value, or `undefined` when it is absent, unreadable, or no engine is available |
+| `set(key, value)` | `{ok, reason}`; `reason` is `""`, `encode` (the value is not JSON), `size` (over the fallback's tiny-value cap), `quota` or `unavailable` |
+| `remove(key)` | `{ok, reason}` |
+| `keys()` | the sorted application keys this origin holds, namespace stripped |
+| `subscribe(key, fn)` | an unsubscribe function; `fn(value, key)` runs when ANOTHER tab of this origin changes the key (BroadcastChannel, plus the `storage` event for the fallback engine). A tab never hears its own writes: both transports skip the writing context |
+
+**The contract is best-effort, and that is the design.** Private mode, a
+blocked origin, a full quota, a cleared store and a browser that
+refuses to open a database are all normal. Never keep something here
+whose loss is a bug: the server is still where truth lives. This is
+not offline-first (`ui-capability-map.md` non-goals): there is no
+conflict resolution, no queue of pending mutations, no sync. Opinions
+of that shape belong in a layer ABOVE core-ui, never in the primitive.
+
 ### Sequenced WebSocket client (`__gofastr.connectWebSocket`)
 
 The `ws` demand module (`runtime/src/ws.js`) is the browser half of the
