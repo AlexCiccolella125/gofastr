@@ -3,11 +3,21 @@
 A `local.Store` declares, once per app, the collections a browser keeps
 for that app: a Go record type, a schema version with migrations, a key
 field, a size cap per record and per collection. The browser API is
-generated from that declaration and served as the runtime modules
-`local-store` (store, caps, migrations, mirror) and `local-bridge` (the
-seed, upload and download bridges), on top of the kernel's `local` storage primitive
-(IndexedDB, with a tiny-value localStorage fallback; no dependency).
+generated from that declaration and served as three runtime modules,
+split by responsibility: `local-store` (the store, the caps, the
+collection API), `local-bridge` (every way the store reaches a Go
+handler — seed, mirror cookie, upload, download; a store that keeps its
+records to itself never loads it) and `local-migrate` (`LoadIdle`: the
+version steps, asked for by name when a rewrite is due). All on top of
+the kernel's `local` storage primitive (IndexedDB, with a tiny-value
+localStorage fallback; no dependency).
 Every record lives under `gofastr.state.local.<app>.<collection>:<key>`.
+
+Three rules the package will not bend: a mirror read is a **client
+hint** (check the `local.Source`), a mirrored collection costs the
+Cookie header on every request (all of a store's share 4 KiB, a panic
+at `Define`), and the upload **fails closed** — a request whose declared
+records could not be attached is not sent.
 
 **Use this when** the prompt mentions: local-first, browser state,
 persisted draft, remember in the browser, teams/preferences without an

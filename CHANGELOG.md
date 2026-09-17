@@ -15,14 +15,25 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   field, a size cap per record and per collection, a schema version
   with `Rename`/`Default`/`Remove`/`Func` migrations the browser runs
   once). The browser API is generated from the declaration and served
-  as two runtime modules registered through the behaviour seam —
-  `local-store` (`Requires("local")`: the store, caps, migrations,
-  mirror) and `local-bridge` (`Requires("local-store")`: the bridges),
-  each under the per-module byte budget — on top of the kernel's
+  as three runtime modules registered through the behaviour seam, split
+  by responsibility and each under the per-module byte budget:
+  `local-store` (`Requires("local")`: the store, the caps and the
+  collection API), `local-bridge` (`Requires("local-store")`: every way
+  the store reaches a Go handler — the seed, the mirror cookie, the
+  upload and the download; a store that keeps its records to itself
+  never loads it) and `local-migrate` (`LoadIdle`: the version steps,
+  asked for by name the moment a rewrite is due, so a collection with no
+  version step never runs a line of it) — on top of the kernel's
   browser-store primitive (IndexedDB; no dependency): `get`, `put`, `delete`, `list`
   with filters and ordering, `count`, `subscribe` (this tab's writes and
   other tabs'), `clear`, `available`; every call settles, and a refusal
-  raises `gofastr:local-error` with its reason. Four explicit bridges to
+  raises `gofastr:local-error` with its reason. A collection whose
+  migration did not complete is **gated**: every method refuses with
+  reason `migration` rather than answer from records on a schema the
+  build cannot read, a half-finished rewrite is never stamped as done,
+  and a stored version above the declared one (a rolled-back deploy)
+  fails the collection with reason `version`. One collection's puts are
+  serialised, so racing writes cannot pass its declared cap. Four explicit bridges to
   Go screens and nothing in the background: `SeedSignal` fills a
   `core-ui/store` slice from a record after hydration and writes it
   back; a `Mirror` collection keeps tiny records in cookies so a render
@@ -31,8 +42,16 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   `Upload.Wrap` reads them (undeclared refused, caps enforced, the
   field stripped before the handler); `Put`/`Delete`/`Clear` write
   records back through the `X-Gofastr-Local` response header, and
-  `ClearOnNextLoad` covers a full-navigation logout. Local-first state,
-  not offline sync. Proof: `examples/site` at `/forms/draft-notes`, and
+  `ClearOnNextLoad` covers a full-navigation logout. Reads say where
+  the record came from — `local.SourceUpload` or `local.SourceMirror`,
+  a mirror being a **client hint** anyone on the origin can write —
+  and a store's mirrored collections share one 4 KiB cookie budget
+  (`MirrorStoreMaxBytes`, a panic at `Define`, refused in the browser
+  with reason `mirror`) so they cannot cook a Cookie header into a 431.
+  The upload bridge **fails closed**: a request whose declared records
+  could not be attached, or that is past the bound `Send` derives from
+  the declaration, is not sent at all. Local-first state, not offline
+  sync. Proof: `examples/site` at `/forms/draft-notes`, and
   `examples/team-builder`, the smallest app that shows why: a team the
   browser keeps with no account and no database, read by Go only on
   "Check team", the verdict written back, and a browser test that
@@ -42,8 +61,12 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   modules the runtime loads before dispatching, and the request hooks
   on `__gofastr._rpcHooks.request` decorate the request the fetch is
   built from; the response hooks run on a 2xx after the runtime's own
-  headers. The one seam `framework/local`'s bridges ride on. Browser
-  coverage in `core-ui/runtime/rpc_hooks_e2e_test.go`.
+  headers. A hook can mark the request fatal, and a module named here
+  that will not load or a hook that throws does so: the dispatch is
+  cancelled and the page hears `gofastr:rpc-refused`, because a trigger
+  that names a module is declaring it a precondition, not a hint. The
+  one seam `framework/local`'s bridges ride on. Browser coverage in
+  `core-ui/runtime/rpc_hooks_e2e_test.go`.
 - **The `local` browser store** (`core-ui/runtime/src/local.js`): the
   runtime's five hard-coded Web-storage keys, generalised into one
   primitive with one owner. `window.__gofastr.local` is `available()`,

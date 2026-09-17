@@ -242,26 +242,49 @@ form := ui.Form(ui.FormConfig{Action: "/drafts/upload", SubmitLabel: "Upload",
 _ = form
 
 mux.Handle("/drafts/upload", upload.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	draft, found, err := local.Get(r.Context(), Drafts, "current")
-	_, _, _ = draft, found, err
+	// Require the upload: a record that arrived on a cookie is a hint,
+	// not something a handler should act on.
+	draft, src, err := local.Get(r.Context(), Drafts, "current")
+	_, _, _ = draft, src == local.SourceUpload, err
 }))
 ```
 
-`Merge` puts three attributes on the RPC trigger: `data-local-store`,
-`data-local-send="drafts:current"` and `data-fui-rpc-with="local-bridge"`.
-The runtime loads the module before dispatching and its request hook
-attaches exactly the named records as the reserved field `__local`
+`Merge` puts four attributes on the RPC trigger: `data-local-store`,
+`data-local-send="drafts:current"`, `data-local-max` and
+`data-fui-rpc-with="local-bridge"`. The runtime loads the module before
+dispatching and its request hook attaches exactly the named records as
+the reserved field `__local`
 (`{"<collection>": [{"k": key, "v": value}, …]}`) in a JSON body, the form
 field `__local` in a form body, or a fresh JSON body when the trigger had
 none. A GET trigger carries nothing, and `Merge` panics on one.
 
+**The upload fails closed.** A trigger that declares records is promising
+the handler those records, so when they cannot be attached — no such
+store, a body the field cannot ride on, a gather that failed, or a
+payload past `data-local-max` — the request is not sent. The page hears
+`gofastr:local-error` with the reason and `gofastr:rpc-refused` with the
+path. Sending it anyway would give the handler something that looks
+complete and is not.
+
 `Upload.Wrap` (or `HandlerFunc`) reads the field on the server: the body
-is bounded by `Max` (256 KiB by default, 413 past it), a JSON body is
-decoded strictly (400 on a duplicate or case-folded key), an undeclared
-collection or key is a 400, a record over a cap is a 413, and the field
-is stripped so the wrapped handler decodes the body it always did. The
-records are then on the context for `Get`, `List` and `FromContext`, and
-an upload wins over a mirror cookie for the same key.
+is bounded by `Max` (413 past it), a JSON body is decoded strictly (400
+on a duplicate or case-folded key), an undeclared collection or key is a
+400, a record over a cap is a 413, and the field is stripped so the
+wrapped handler decodes the body it always did. The records are then on
+the context for `Get`, `List` and `FromContext` with
+`local.SourceUpload`, and an upload wins over a mirror cookie for the
+same key.
+
+`Max` defaults to what the `Send` named: the sum of those collections'
+declared caps plus slack, clamped into
+`[DefaultUploadMaxBytes, UploadMaxBytesLimit]`. A flat default smaller
+than a collection's own cap meant a store filled to the size its
+declaration allows failed every upload with a bare 413.
+
+Note that `Wrap` re-encodes a JSON body after lifting the field out, so
+the handler sees the same object with different bytes (map key order, no
+insignificant whitespace). A handler that hashes or signs the raw body
+must do it upstream of `Wrap`.
 
 ### Download: records written from a response
 
@@ -308,6 +331,22 @@ for the logout that never reaches `rpc.js`.
 - **Best-effort.** Private mode, a blocked origin, a full quota and a
   hand-cleared store are all normal; every call settles and says why it
   refused. Never keep something here whose loss is a bug.
+- **A migration is all-or-nothing, and a collection that did not migrate
+  answers nothing.** Every record's write is checked before the new
+  version is stamped, so a half-finished rewrite is never recorded as
+  done; until it succeeds, every method on that collection refuses with
+  reason `migration` rather than serve records on a schema this build
+  cannot read. A stored version ABOVE the declared one — a rolled-back
+  deploy meeting a browser that already moved on — fails the collection
+  with reason `version`. Roll a schema forward only; if you must roll
+  back, ship the new version number with a migration that is a no-op
+  rather than lowering it.
+- **The download bridge is advisory.** The response has already been
+  written when the browser reads `X-Gofastr-Local`, so an op the browser
+  refuses (a cap, a collection it does not know, no store at all) leaves
+  the server believing it wrote. Every refusal is warned and raised as
+  `gofastr:local-error{reason:"download"}`; nothing reports back to the
+  handler, and nothing can.
 - **No secrets, no session tokens.** The store is readable by any script
   on the origin, and a mirrored record travels on every request as a
   cookie. A session is a signed token in an `HttpOnly` cookie
