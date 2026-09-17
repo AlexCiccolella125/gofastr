@@ -821,6 +821,30 @@ func TestServeMountsTheRouteAndReturnsTheScriptURL(t *testing.T) {
 // the name has to come from Go rather than be retyped in JavaScript —
 // and it has to be the same string the binding carries as
 // data-fui-signal, or the script reads the DOM and writes somewhere else.
+func TestScriptMountsAfterTheHostWasBuilt(t *testing.T) {
+	s := fresh(t, "site")
+	Define[draft](s, "drafts", CollectionConfig{Version: 1})
+	// The order every uihost app is built in: the URL for the rail
+	// first, the router later.
+	url, mount := s.Script()
+	if want := s.ScriptURL(); url != want {
+		t.Fatalf("Script returned %q, want %q — the same URL Serve returns", url, want)
+	}
+	rt := &fakeRouter{}
+	if rt.pattern != "" {
+		t.Fatal("Script must not touch a router it was not given")
+	}
+	mount(rt)
+	if rt.pattern != s.ScriptPath() {
+		t.Fatalf("mount registered %q, want %q", rt.pattern, s.ScriptPath())
+	}
+	rec := httptest.NewRecorder()
+	rt.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "window.__gofastr_local") {
+		t.Fatalf("the mounted handler served %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestSeededSignalNamesTheSignalAPageScriptWrites(t *testing.T) {
 	s := fresh(t, "site")
 	d := Define[draft](s, "drafts", CollectionConfig{Version: 1})

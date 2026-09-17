@@ -88,8 +88,38 @@ type ScriptRouter interface {
 // ScriptPath, ScriptURL and ScriptHandler stay exported for a host that
 // mounts its own routes (a subrouter, an asset CDN, a test server).
 func (s *Store) Serve(rt ScriptRouter) string {
-	rt.Get(s.ScriptPath(), s.ScriptHandler())
-	return s.ScriptURL()
+	url, mount := s.Script()
+	mount(rt)
+	return url
+}
+
+// Script is Serve for an app whose host is built BEFORE its router. It
+// returns the same URL and the mount step, so the two halves can be
+// taken in either order:
+//
+//	url, mount := Site.Script()
+//	host := uihost.New(site, uihost.WithExtraScripts(url))
+//	app := framework.New(..., host)
+//	mount(app.Router())
+//
+// Serve asks for the router first, which is the right shape when the
+// router exists — one call, and the route and the rail cannot come
+// apart. But every uihost app builds the host first and gets its router
+// from the app the host went into, so Serve inverted the construction
+// order of the first real consumer: the subrouter had to be built three
+// statements earlier than it was. Returning the mount step instead of
+// demanding the router keeps both halves in one expression without
+// dictating when the second one runs.
+//
+// The forgettable half is now visible in the signature rather than
+// absent from it: an app that never calls mount serves a 404 at
+// ScriptPath, and the browser says so by name
+// ("no manifest for app <id> - is /__gofastr/local/<id>.js served?").
+// Like Serve, the first call freezes the declaration.
+func (s *Store) Script() (string, func(ScriptRouter)) {
+	return s.ScriptURL(), func(rt ScriptRouter) {
+		rt.Get(s.ScriptPath(), s.ScriptHandler())
+	}
 }
 
 // ScriptHandler serves ScriptJS as JavaScript with a strong ETag and
