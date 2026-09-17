@@ -200,7 +200,9 @@
       const run = () => P.get(metaKey(coll)).then((meta) => {
         const have = meta && typeof meta.v === 'number' ? meta.v : 0;
         if (have >= target) return true;
-        return P.entries(prefixOf(coll)).then((entries) => {
+        return P.entries(prefixOf(coll)).then((er) => {
+          if (!er.ok) throw new Error('entries: ' + er.reason);
+          const entries = er.entries;
           if (have === 0 && entries.length === 0) return P.set(metaKey(coll), { v: target }).then(() => true);
           const from = have === 0 ? 1 : have;
           const steps = [];
@@ -268,7 +270,9 @@
           if (text === null) return Promise.resolve(fail(app, coll, key, 'encode'));
           const size = bytesOf(text);
           if (size > maxRecord) return Promise.resolve(fail(app, coll, key, 'size', size, maxRecord));
-          return whenReady(coll).then(() => P.entries(prefixOf(coll))).then((entries) => {
+          return whenReady(coll).then(() => P.entries(prefixOf(coll))).then((er) => {
+            if (!er.ok) return fail(app, coll, key, er.reason || 'unavailable');
+            const entries = er.entries;
             let total = size;
             let n = 1;
             const mine = recordKey(coll, key);
@@ -304,7 +308,8 @@
         // the server does for server data.
         list(opts) {
           const o = opts && typeof opts === 'object' ? opts : {};
-          return whenReady(coll).then(() => P.entries(prefixOf(coll))).then((entries) => {
+          return whenReady(coll).then(() => P.entries(prefixOf(coll))).then((er) => {
+            const entries = er.entries;
             let out = [];
             for (const e of entries) {
               if (isObject(o.where) && !Object.keys(o.where).every((f) => isObject(e.value) && e.value[f] === o.where[f])) continue;
@@ -330,7 +335,7 @@
             return out;
           });
         },
-        count() { return whenReady(coll).then(() => P.keys(prefixOf(coll))).then((ks) => ks.length); },
+        count() { return whenReady(coll).then(() => P.keys(prefixOf(coll))).then((r) => r.keys.length); },
         // subscribe calls fn({app, collection, key, source}) after every
         // write to this collection: source 'local' for this tab's own
         // put/delete (including one a response wrote), 'tab' for another
@@ -342,16 +347,28 @@
           fns.add(fn);
           return () => { fns.delete(fn); };
         },
-        // clear removes every record of the collection.
+        // clear removes every record of the collection, and says so
+        // only when it did. An enumeration that aborted used to look
+        // exactly like an empty collection, so the logout path reported
+        // {ok:true} over records — and mirror cookies — that all
+        // survived. A removal that failed is the same lie one record
+        // deep, so both are checked.
         clear() {
-          return whenReady(coll).then(() => P.keys(prefixOf(coll))).then((ks) => Promise.all(ks.map((k) => P.remove(k))).then(() => {
-            for (const k of ks) {
-              const key = k.slice(prefixOf(coll).length);
-              if (spec.mirror) mirror(app, coll, key, '');
-              notify(coll, key, 'local');
-            }
-            return { ok: true, reason: '' };
-          }));
+          return whenReady(coll).then(() => P.keys(prefixOf(coll))).then((r) => {
+            if (!r.ok) return fail(app, coll, '', r.reason || 'unavailable');
+            const ks = r.keys;
+            return Promise.all(ks.map((k) => P.remove(k))).then((rs) => {
+              let bad = '';
+              for (let i = 0; i < ks.length; i++) {
+                if (!rs[i] || !rs[i].ok) { bad = (rs[i] && rs[i].reason) || 'unavailable'; continue; }
+                const key = ks[i].slice(prefixOf(coll).length);
+                if (spec.mirror) mirror(app, coll, key, '');
+                notify(coll, key, 'local');
+              }
+              if (bad) return fail(app, coll, '', bad);
+              return { ok: true, reason: '' };
+            });
+          });
         },
       };
       return api;
@@ -369,9 +386,15 @@
         return typeof name === 'string' && own(collections, name) ? collections[name] : null;
       },
       available() { return P.available(); },
-      // clear drops every record of every collection: logout.
+      // clear drops every record of every collection: logout. It
+      // reports the first collection that could not be cleared, because
+      // "the previous user's records are gone" is the only thing a
+      // logout is for.
       clear() {
-        return Promise.all(Object.keys(collections).map((c) => collections[c].clear())).then(() => ({ ok: true, reason: '' }));
+        return Promise.all(Object.keys(collections).map((c) => collections[c].clear())).then((rs) => {
+          for (const r of rs) if (!r || !r.ok) return { ok: false, reason: (r && r.reason) || 'unavailable' };
+          return { ok: true, reason: '' };
+        });
       },
     };
     stores.set(app, store);
@@ -389,8 +412,9 @@
     for (const name of Object.keys(collections)) {
       const spec = specOf(name);
       if (spec && spec.mirror) {
-        whenReady(name).then(() => P.entries(prefixOf(name))).then((entries) => {
-          for (const e of entries) mirror(app, name, e.key.slice(prefixOf(name).length), encode(e.value) || 'null');
+        whenReady(name).then(() => P.entries(prefixOf(name))).then((er) => {
+          if (!er.ok) return;
+          for (const e of er.entries) mirror(app, name, e.key.slice(prefixOf(name).length), encode(e.value) || 'null');
         });
       }
     }

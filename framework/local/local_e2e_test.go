@@ -530,3 +530,61 @@ func TestE2E_ClearOnNextLoad(t *testing.T) {
 		t.Fatalf("cookies after clear: %q", cookie)
 	}
 }
+
+// A logout that could not read the store must not report success.
+//
+// The primitive's enumerations settle {ok, reason, …} precisely so a
+// caller can tell an aborted transaction from an empty collection.
+// clear() built on the bare array could not: it reported {ok:true} for
+// a store whose records — and whose mirror cookies — all survived,
+// which on the logout path is the previous user's data left in the
+// browser with the UI saying it is gone.
+func TestE2E_ClearReportsAnEnumerationItCouldNotRead(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+
+	var res map[string]any
+	evalJSON(t, ctx, draftsJS+`.put({id: 'a', title: 'kept'})`, &res)
+	if ok, _ := res["ok"].(bool); !ok {
+		t.Fatalf("put = %v", res)
+	}
+	// Fault injection at the primitive's seam: the enumeration fails the
+	// way an aborted IndexedDB transaction fails. Reads still work, so
+	// the assertion below is about what clear reported, not about a
+	// browser that stopped answering.
+	evalJSON(t, ctx, `Promise.resolve((() => {
+        window.__gofastr.local.keys = () => Promise.resolve({ ok: false, reason: 'unavailable', keys: [] });
+        return true;
+    })())`, nil)
+
+	evalJSON(t, ctx, draftsJS+`.clear()`, &res)
+	if ok, _ := res["ok"].(bool); ok {
+		t.Fatalf("clear() = %v — an enumeration that failed is not an empty collection", res)
+	}
+	if res["reason"] != "unavailable" {
+		t.Fatalf("clear() = %v, want reason \"unavailable\"", res)
+	}
+	evalJSON(t, ctx, `window.__gofastr.localStore('e2e').clear()`, &res)
+	if ok, _ := res["ok"].(bool); ok {
+		t.Fatalf("store.clear() = %v — a logout has to report the collection it could not clear", res)
+	}
+	// The record is still there, which is exactly why the report matters.
+	var kept e2eDraft
+	evalJSON(t, ctx, draftsJS+`.get('a').then((v) => v || null)`, &kept)
+	if kept.Title != "kept" {
+		t.Fatalf("the record is %v — this test is not measuring what it says it is", kept)
+	}
+	// And the page heard about it.
+	var errs []map[string]any
+	evalJSON(t, ctx, `Promise.resolve(window.__errors)`, &errs)
+	found := false
+	for _, d := range errs {
+		if d["reason"] == "unavailable" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("gofastr:local-error never carried the refusal: %v", errs)
+	}
+}
