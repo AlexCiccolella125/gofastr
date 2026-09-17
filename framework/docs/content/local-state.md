@@ -134,6 +134,48 @@ numbers in Go are `Collection.Caps()` — `Version`, `KeyField`,
 page renders "up to 10 notes of 512 bytes" without repeating the
 declaration.
 
+## Recipe: a page script with no inline `<script>`
+
+`framework/local` never runs a line of your JavaScript for you: the
+declaration is Go, and the code that paints from a collection or writes a
+seeded signal is yours. It cannot be inline — the CSP is
+`script-src 'self'` and `make csp-check` enforces it — so it rides the
+same extra-script rail the manifest does. `go:embed` the file, then name
+it twice: once on the rail (`uihost.ScriptURL`, which appends the content
+hash) and once on the router (`uihost.ScriptHandler`, which serves it
+immutably at that hash). Both calls take the same path and the same
+bytes, which is what keeps the `?v=` on the rail and the ETag on the
+route in step.
+
+<!-- gofastr:compile
+import "github.com/DonaldMurillo/gofastr/core-ui/app"
+import "github.com/DonaldMurillo/gofastr/framework/local"
+import "github.com/DonaldMurillo/gofastr/framework/uihost"
+
+var appJS = []byte("// static/app.js, go:embed-ed")
+var Site = local.New("docs-rail")
+var rt local.ScriptRouter // app.Router()
+var site = app.NewApp("docs")
+-->
+```go
+const appScriptPath = "/__myapp/app.js"
+
+// On the rail, after runtime.js, on every full shell render.
+host := uihost.New(site, uihost.WithExtraScripts(
+	Site.Serve(rt),                          // the declaration
+	uihost.ScriptURL(appScriptPath, appJS),  // your page script
+))
+
+// On the router, at the same path, serving the same bytes.
+rt.Get(appScriptPath, uihost.ScriptHandler(appJS))
+_ = host
+```
+
+The script runs after `runtime.js` and before the marker scan, so it
+reaches the store with `await __gofastr.loadModule('local-store')` and
+then `__gofastr.localStore('<app>')`. Everything it does from there is
+the browser API above; it does not need the framework to know it exists.
+
 ## The browser API
 
 After `__gofastr.loadModule('local-store')` (or once any page markup
@@ -383,7 +425,8 @@ for the logout that never reaches `rpc.js`.
 
 - **No inline scripts.** Both modules are registered behaviours, the
   manifest and any migration function ride the extra-script rail;
-  `make csp-check` stays green.
+  `make csp-check` stays green. Your own page script rides it the same
+  way — see the recipe below.
 - **State survives soft navigation and the route cache.** The seed
   bridge re-applies the record on every scan, including the one after a
   client navigation whose DOM came back from the cache; a seeded slice is
@@ -455,6 +498,9 @@ and answers with a receipt it also writes back. Browser coverage:
   `List` see the upload only inside `Upload.Wrap`, and the mirror cookie
   only when the request is on the context (the host does this for
   screens; `Wrap` does it for handlers).
+- **Serving the declaration by halves.** The route and the extra script
+  are both required; either alone 404s the manifest and leaves
+  `localStore(app)` answering `null`. `Store.Serve` does both.
 - **Sending a collection on a GET.** An upload rides a mutating request;
   `Merge` panics on a GET trigger and the runtime sends nothing on one.
 - **Pushing a dataset through the response header.** The header is
