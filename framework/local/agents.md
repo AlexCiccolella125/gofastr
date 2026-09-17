@@ -28,6 +28,25 @@ secret or a session token.
 
 **Import:** `github.com/DonaldMurillo/gofastr/framework/local`
 
+**Until this is released**, the package exists only on the
+`feat/framework-local` branch of the fork, so an app in its own module
+cannot `go get` it. Pin the released version and point it at a checkout
+of the branch:
+
+```bash
+git clone https://github.com/AlexCiccolella125/gofastr
+git -C gofastr checkout feat/framework-local
+```
+
+```
+require github.com/DonaldMurillo/gofastr v0.85.0
+replace github.com/DonaldMurillo/gofastr => /absolute/path/to/gofastr
+```
+
+`go mod tidy` resolves the rest against the checkout. When the feature
+lands upstream, delete the `replace` and bump the `require` to the
+release that carries it — nothing else in the app changes.
+
 ## Shape
 
 This block compiles: `go test ./framework/docs -run TestDocExamplesCompile`

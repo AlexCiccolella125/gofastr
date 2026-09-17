@@ -57,6 +57,19 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   "Check team", the verdict written back, and a browser test that
   relaunches Chrome on one profile to show the team is still there.
   `gofastr docs local-state`.
+  Sharpened by the first consumer outside this repository (a GoFastr app
+  in its own module, building against the branch through a `replace`):
+  `Store.Serve(router)` mounts the manifest route and returns the
+  extra-script URL in one call, because doing one half without the other
+  404s the manifest and leaves `localStore(app)` answering `null` — which
+  the module now also warns about by name; `Collection.Caps()` reads the
+  declaration back after Define resolved it; `SeededSignal.Name()` names
+  the signal a page script writes with `setSignal`; the upload bound
+  `Send` derives is the smaller of a collection's two caps rather than
+  its `MaxBytes` alone, so a 5 KiB collection no longer declares a 1 MiB
+  body the fail-closed pre-flight can never refuse; and a `Get` or `List`
+  on an unwrapped request warns under `GOFASTR_DEV` instead of answering
+  an empty result in silence.
 - **`data-fui-rpc-with="<module>"`** (`rpc.js`): the trigger names the
   modules the runtime loads before dispatching, and the request hooks
   on `__gofastr._rpcHooks.request` decorate the request the fetch is
