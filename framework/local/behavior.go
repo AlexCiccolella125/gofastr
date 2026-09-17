@@ -25,7 +25,9 @@ const BehaviorName = "local-store"
 
 // BridgeName is the second module: every way the store reaches a Go
 // handler — the seed, the mirror cookie, the upload and the download.
-// It Requires BehaviorName and binds the data-local-seed markers; an
+// It Requires BehaviorName and binds the data-local-seed and
+// data-local-count markers (a record's value, and the collection's
+// size, joined to a core-ui/store slice); an
 // RPC trigger rendered by Upload.Attrs names it in data-fui-rpc-with
 // so rpc.js has it loaded before the fetch, and local-store asks for
 // it by name when a declaration mirrors a collection or a logout is
@@ -56,7 +58,7 @@ var _ = registry.RegisterBehavior(BehaviorName, localStoreJS,
 	registry.Requires("local"))
 
 var _ = registry.RegisterBehavior(BridgeName, localBridgeJS,
-	registry.Markers(`[data-local-seed]`),
+	registry.Markers(`[data-local-seed]`, `[data-local-count]`),
 	registry.Requires(BehaviorName))
 
 var _ = registry.RegisterBehavior(MigrateName, localMigrateJS,

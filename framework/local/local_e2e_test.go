@@ -51,6 +51,7 @@ var (
 	e2eDrafts *Collection[e2eDraft]
 	e2ePref   *Collection[e2ePrefs]
 	e2eSeed   *SeededSignal[e2eDraft]
+	e2eNum    *SeededCount[e2eDraft]
 	// Collections no marker on the page touches, so a test can plant a
 	// stored version and watch the FIRST migration of a collection run
 	// — the page's own markers migrate drafts and prefs at scan time.
@@ -88,6 +89,7 @@ func e2eDeclare(t *testing.T) {
 			Version: 2, KeyField: "id", MaxRecordBytes: 512, MaxRecords: 8, MaxBytes: 4096,
 			Migrations: []Migration{{Version: 2, Steps: []Step{Adopt("legacy-notes", "adopt-notes")}}},
 		})
+		e2eNum = SeedCount(e2eDrafts, store.New("e2elocal").Int("ndrafts", 0))
 		e2eSeed = SeedSignal(e2eDrafts, "current", store.JSON[e2eDraft](store.New("e2elocal"), "current", e2eDraft{Title: "server default"}))
 	})
 }
@@ -195,13 +197,14 @@ window.__migrations = []; window.addEventListener('gofastr:local-migrated', (e) 
 		w.Header().Set("Content-Type", "text/html")
 		ctx := context.Background()
 		seedEl := e2eSeed.Bind(ctx, "p", map[string]string{"id": "seeded"})
+		countEl := e2eNum.Bind(ctx, "span", map[string]string{"id": "ndrafts"})
 		form := `<form id="up" data-fui-rpc="/upload" data-fui-rpc-signal="up-result"` + attrString(up.Attrs()) + `><input name="note" value="hi"><button id="send" type="submit">send</button></form>`
 		fmt.Fprintf(w, `<!doctype html><html><head><title>local</title>`+
 			`<script type="application/json" id="gofastr-behaviors">%s</script></head><body>`+
-			`<main role="main"><span id="ready">ready</span>%s%s<span id="result" data-fui-signal="up-result"></span>`+
+			`<main role="main"><span id="ready">ready</span>%s%s%s<span id="result" data-fui-signal="up-result"></span>`+
 			`<a id="away" href="/other">other</a></main>`+
 			`<script src="/__gofastr/runtime.js"></script><script src="%s"></script><script src="/app.js"></script></body></html>`,
-			block, seedEl, form, e2eSite.ScriptURL())
+			block, seedEl, countEl, form, e2eSite.ScriptURL())
 	})
 	if len(tls) > 0 && tls[0] {
 		e.srv = httptest.NewTLSServer(mux)
@@ -466,6 +469,39 @@ func TestE2E_AdoptSeedsFromAForeignKeyOnceAndKeepsIt(t *testing.T) {
 	evalJSON(t, ctx, adoptedJS+`.list()`, &list)
 	if len(list) != 3 {
 		t.Fatalf("after reload the collection holds %d records — an adoption runs ONCE per browser", len(list))
+	}
+}
+
+// A seeded COUNT is the collection's size, not a record: the screen
+// says "N drafts" without the app keeping a summary record beside the
+// records, and it follows every write.
+func TestE2E_SeededCountFollowsTheCollection(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+
+	if !pollTrue(ctx, `Promise.resolve(document.getElementById('ndrafts').textContent === '0')`) {
+		t.Fatal("an empty collection must seed the count to 0")
+	}
+	var ok bool
+	evalJSON(t, ctx, `Promise.all([`+draftsJS+`.put({id:'a',title:'one'}),`+draftsJS+`.put({id:'b',title:'two'})]).then(rs => rs.every(r => r.ok))`, &ok)
+	if !ok {
+		t.Fatal("two records within the caps were refused")
+	}
+	if !pollTrue(ctx, `Promise.resolve(document.getElementById('ndrafts').textContent === '2')`) {
+		var txt string
+		evalJSON(t, ctx, `Promise.resolve(document.getElementById('ndrafts').textContent)`, &txt)
+		t.Fatalf("after two puts the count binding says %q, want \"2\"", txt)
+	}
+	evalJSON(t, ctx, draftsJS+`.delete('a').then(r => r.ok)`, &ok)
+	if !pollTrue(ctx, `Promise.resolve(document.getElementById('ndrafts').textContent === '1')`) {
+		t.Fatal("a delete must move the count too")
+	}
+	// Reload: the count is the records, so it comes back without anyone
+	// storing it.
+	openPage(t, ctx, e.srv.URL+"/")
+	if !pollTrue(ctx, `Promise.resolve(document.getElementById('ndrafts').textContent === '1')`) {
+		t.Fatal("after a reload the count must be read from the collection again")
 	}
 }
 

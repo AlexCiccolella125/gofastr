@@ -41,7 +41,7 @@
     return typeof text === 'string' ? text : null;
   };
 
-  const MARKER = '[data-local-seed]';
+  const MARKER = '[data-local-seed],[data-local-count]';
 
   // ─── the mirror bridge: a record a Go render reads at first paint ──
 
@@ -228,6 +228,27 @@
     c.get(key).then(apply);
   };
 
+  // A seeded COUNT is the same bridge one step wider: the signal is the
+  // collection's count(), refreshed on every write to the collection —
+  // this tab's and another's. One way, always: the count belongs to the
+  // records, so nothing here listens to the signal.
+  const counted = new Set();
+  const wireCount = (el, store) => {
+    const coll = el.getAttribute('data-local-count') || '';
+    const name = el.getAttribute('data-fui-signal');
+    if (!coll || !name || RESERVED.test(name)) return;
+    const c = store.collection(coll);
+    if (!c) return;
+    const push = () => c.count().then((n) => { NS.setSignal(name, n); });
+    // Per signal name, like the seeds: the slice is app-global, so the
+    // subscription outlives the page that painted it.
+    if (!counted.has(name)) {
+      counted.add(name);
+      c.subscribe(push);
+    }
+    push();
+  };
+
   // ─── the upload bridge: a request hook on data-fui-rpc ──────────
 
   // The trigger carries data-local-send="<coll>[:<key>][,<coll>…]" and
@@ -387,7 +408,9 @@
     const app = el.getAttribute('data-local-store');
     if (!app || RESERVED.test(app)) return;
     const store = openStore(app);
-    if (store) wireSeed(el, store);
+    if (!store) return;
+    if (el.hasAttribute('data-local-seed')) wireSeed(el, store);
+    if (el.hasAttribute('data-local-count')) wireCount(el, store);
   };
   const scan = (root) => {
     const scope = root && root.querySelectorAll ? root : document;

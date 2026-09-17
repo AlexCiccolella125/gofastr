@@ -211,6 +211,30 @@ func TestSeedSignalBindsWithMarkersAndGoesGlobal(t *testing.T) {
 	mustPanic(t, "one owner", func() { SeedSignal(d, "k", persisted) })
 }
 
+func TestSeedCountBindsTheCollectionNotARecord(t *testing.T) {
+	s := fresh(t, "site")
+	d := Define[draft](s, "drafts", CollectionConfig{Version: 1})
+	sl := store.New("counttest").Int("drafts", 0)
+	c := SeedCount(d, sl)
+	if sl.Scope() != store.ScopeGlobal {
+		t.Fatal("SeedCount must imply Global, like SeedSignal")
+	}
+	if c.Name() != "counttest.drafts" {
+		t.Fatalf("Name() = %q", c.Name())
+	}
+	html := string(c.Bind(context.Background(), "span", map[string]string{"id": "n"}))
+	for _, want := range []string{`data-local-store="site"`, `data-local-count="drafts"`, `data-fui-signal="counttest.drafts"`, `id="n"`} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("Bind lacks %s:\n%s", want, html)
+		}
+	}
+	if strings.Contains(html, "data-local-seed") {
+		t.Fatalf("a count is not a record seed:\n%s", html)
+	}
+	persisted := store.New("counttest").Int("persisted", 0).Persist()
+	mustPanic(t, "one owner", func() { SeedCount(d, persisted) })
+}
+
 // ─── send / upload ──────────────────────────────────────────────
 
 func TestSendAttrsNameOnlyTheDeclaration(t *testing.T) {
