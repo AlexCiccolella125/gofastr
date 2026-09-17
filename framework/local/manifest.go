@@ -68,6 +68,30 @@ func scriptHash(js []byte) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// ScriptRouter is the single method Serve needs: a GET route. The
+// framework's *router.Router satisfies it, and so does anything else
+// that mounts an http.Handler on a path.
+type ScriptRouter interface {
+	Get(pattern string, handler http.Handler)
+}
+
+// Serve mounts ScriptHandler at ScriptPath on rt and returns the
+// ScriptURL to hand uihost.WithExtraScripts:
+//
+//	host := uihost.New(site, uihost.WithExtraScripts(Site.Serve(app.Router())))
+//
+// The route and the extra script are two halves of one thing, and doing
+// only one of them fails SILENTLY: without the route the manifest 404s,
+// window.__gofastr_local stays undefined, localStore(app) answers null,
+// and the page script dies on a null read with nothing pointing at the
+// missing line. Serve is the half that cannot be forgotten.
+// ScriptPath, ScriptURL and ScriptHandler stay exported for a host that
+// mounts its own routes (a subrouter, an asset CDN, a test server).
+func (s *Store) Serve(rt ScriptRouter) string {
+	rt.Get(s.ScriptPath(), s.ScriptHandler())
+	return s.ScriptURL()
+}
+
 // ScriptHandler serves ScriptJS as JavaScript with a strong ETag and
 // immutable caching when the request's ?v= matches the content hash
 // (the policy every /__gofastr script follows). Mount it at

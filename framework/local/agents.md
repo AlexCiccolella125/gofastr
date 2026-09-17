@@ -39,8 +39,9 @@ var Drafts = local.Define[Draft](Site, "drafts", local.CollectionConfig{
 var Prefs = local.Define[Prefs](Site, "prefs", local.CollectionConfig{Version: 1, Mirror: true})
 
 // Serve the declaration on the extra-script rail (once, in main).
-router.Get(Site.ScriptPath(), Site.ScriptHandler())
-host := uihost.New(app, uihost.WithExtraScripts(Site.ScriptURL()))
+// Serve mounts the route AND returns the URL: doing only one half is
+// a silent 404, an undefined window.__gofastr_local and a null store.
+host := uihost.New(site, uihost.WithExtraScripts(Site.Serve(router)))
 
 // Seed a signal from a record; the runtime patches it in after hydration.
 title := local.SeedSignal(Drafts, "current", store.JSON[Draft](S, "draft", Draft{}))

@@ -95,21 +95,32 @@ full shell render and never inline. A declaration read from the DOM
 instead would let markup planted in an island response redefine a
 collection's caps or migrations.
 
+`Store.Serve` does both halves at once, and it is the only spelling that
+cannot be half-done: it mounts the handler on the router and returns the
+URL for the rail.
+
 <!-- gofastr:compile
 import "github.com/DonaldMurillo/gofastr/core-ui/app"
 import "github.com/DonaldMurillo/gofastr/framework/local"
 import "github.com/DonaldMurillo/gofastr/framework/uihost"
-import "net/http"
 
 var Site = local.New("docs-serve")
-var mux = http.NewServeMux()
+var rt local.ScriptRouter // app.Router()
 var site = app.NewApp("docs")
 -->
 ```go
-mux.Handle(Site.ScriptPath(), Site.ScriptHandler())            // /__gofastr/local/site.js
-host := uihost.New(site, uihost.WithExtraScripts(Site.ScriptURL())) // path + ?v=<hash>
+host := uihost.New(site, uihost.WithExtraScripts(Site.Serve(rt)))
 _ = host
 ```
+
+**Both lines are required, together.** Mount your own routes only if you
+must — `rt.Get(Site.ScriptPath(), Site.ScriptHandler())` AND
+`uihost.WithExtraScripts(Site.ScriptURL())`, never one without the other.
+Doing only one fails silently at runtime: the manifest 404s,
+`window.__gofastr_local` stays undefined, `__gofastr.localStore(app)`
+answers `null`, and a page script dies on a null read. The module warns
+in the console with the app id and the manifest URL it expected, which is
+the only breadcrumb there is.
 
 The global the script assigns is readable, and it carries the caps
 `Define` resolved rather than the ones you wrote:

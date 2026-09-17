@@ -1023,3 +1023,37 @@ func TestE2E_RacingPutsCannotPassTheCollectionCap(t *testing.T) {
 	}
 	t.Fatalf("nothing was refused with reason \"full\": %v", errs)
 }
+
+// Forgetting the manifest route used to fail silently: localStore(app)
+// answered null and the page script died on a null read with nothing
+// naming the missing line. /plain serves the runtime and the modules and
+// no manifest at all — the shape of an app that registered the extra
+// script and not the route, or neither.
+func TestE2E_AStoreWithNoManifestSaysWhichURLItWanted(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/plain")
+
+	var out struct {
+		Null   bool     `json:"null"`
+		Warned []string `json:"warned"`
+	}
+	evalJSON(t, ctx, `(() => {
+	  const seen = [];
+	  const orig = console.warn;
+	  console.warn = function () { seen.push(Array.prototype.map.call(arguments, String).join(' ')); };
+	  const s = window.__gofastr.localStore('e2e');
+	  console.warn = orig;
+	  return { null: s === null, warned: seen };
+	})()`, &out)
+
+	if !out.Null {
+		t.Fatal("localStore answered a store on a page with no manifest")
+	}
+	if len(out.Warned) != 1 {
+		t.Fatalf("console.warn calls = %v, want exactly one", out.Warned)
+	}
+	if !strings.Contains(out.Warned[0], "e2e") || !strings.Contains(out.Warned[0], e2eSite.ScriptPath()) {
+		t.Fatalf("the warning is %q — it must name the app and the manifest URL (%s)", out.Warned[0], e2eSite.ScriptPath())
+	}
+}

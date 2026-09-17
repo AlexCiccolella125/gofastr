@@ -215,17 +215,17 @@
         }
         steps.sort((a, b) => a.v - b.v);
         return NS.loadModule('local-migrate').then(() => NS._localMigrate({
-          P: P,
-          app: app,
-          coll: coll,
+          P,
+          app,
+          coll,
           prefix: prefixOf(coll),
           meta: metaKey(coll),
-          steps: steps,
-          from: from,
+          steps,
+          from,
           to: target,
           mirror: spec.mirror ? (key, text) => mirror(app, coll, key, text, budget) : null,
-          emit: emit,
-          fail: fail,
+          emit,
+          fail,
         }), () => fail(app, coll, '', 'migration').ok);
       }).catch(() => {
         fail(app, coll, '', 'migration');
@@ -421,7 +421,7 @@
       // ._localHelpers, which is a second public surface nothing
       // documents and anything on the origin can replace — and
       // replacing validKey is how a key escapes the namespace.
-      helpers: { validKey: validKey, encode: encode, isObject: isObject },
+      helpers: { validKey, encode, isObject },
       collection(name) {
         return typeof name === 'string' && own(collections, name) ? collections[name] : null;
       },
@@ -461,7 +461,12 @@
   // localStore(app) is the API an application script reaches after
   // __gofastr.loadModule('local-store'): the store for that app id, or
   // null when no manifest declared it.
-  NS.localStore = (app) => (typeof app === 'string' && !RESERVED.test(app) ? openStore(app) : null);
+  NS.localStore = (app) => {
+    if (typeof app !== 'string' || RESERVED.test(app)) return null;
+    const s = openStore(app);
+    if (!s) console.warn('[gofastr] local: no manifest for app', app, '- is /__gofastr/local/' + app + '.js served?');
+    return s;
+  };
 
   if (wantsBridge()) NS.loadModule('local-bridge').catch(() => {});
   scan(document);

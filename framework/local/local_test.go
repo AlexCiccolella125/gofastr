@@ -721,3 +721,38 @@ func TestCapsReadsBackTheResolvedDeclaration(t *testing.T) {
 		t.Fatalf("mirror Caps = %+v, want %+v", got, mirrored)
 	}
 }
+
+// fakeRouter records what Serve mounted.
+type fakeRouter struct {
+	pattern string
+	handler http.Handler
+}
+
+func (f *fakeRouter) Get(pattern string, handler http.Handler) {
+	f.pattern, f.handler = pattern, handler
+}
+
+// Serving the declaration is one call, because the route and the extra
+// script are two halves of one thing and doing only one of them fails
+// silently: the manifest 404s, window.__gofastr_local stays undefined
+// and localStore(app) answers null.
+func TestServeMountsTheRouteAndReturnsTheScriptURL(t *testing.T) {
+	s := fresh(t, "site")
+	Define[draft](s, "drafts", CollectionConfig{Version: 1})
+	rt := &fakeRouter{}
+	url := s.Serve(rt)
+	if rt.pattern != s.ScriptPath() {
+		t.Fatalf("Serve mounted %q, want %q", rt.pattern, s.ScriptPath())
+	}
+	if want := s.ScriptURL(); url != want {
+		t.Fatalf("Serve returned %q, want %q", url, want)
+	}
+	if !strings.HasPrefix(url, s.ScriptPath()+"?v=") {
+		t.Fatalf("Serve returned %q: the URL must carry the content hash", url)
+	}
+	rec := httptest.NewRecorder()
+	rt.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "window.__gofastr_local") {
+		t.Fatalf("the mounted handler served %d: %s", rec.Code, rec.Body.String())
+	}
+}
