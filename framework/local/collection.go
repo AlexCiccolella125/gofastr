@@ -1,0 +1,328 @@
+package local
+
+import (
+	"encoding/json"
+	"fmt"
+	"reflect"
+)
+
+// Default and ceiling caps. A record is re-serialised on every write
+// and a collection is re-read to enforce its cap, so the ceilings are
+// about what browser-owned state should cost, not what IndexedDB
+// could hold.
+const (
+	DefaultMaxRecordBytes = 64 << 10
+	MaxRecordBytesLimit   = 1 << 20
+	DefaultMaxRecords     = 1000
+	MaxRecordsLimit       = 100_000
+	DefaultMaxBytes       = 1 << 20
+	MaxBytesLimit         = 64 << 20
+
+	// A mirrored record rides a cookie on EVERY request to the origin,
+	// component-encoded (which can triple its size), inside the ~4 KiB
+	// a browser allows one cookie and the few dozen it allows a domain.
+	// The caps are therefore small and not raisable.
+	MirrorMaxRecordBytes = 1 << 10
+	MirrorMaxRecords     = 16
+)
+
+// CollectionConfig declares one collection.
+type CollectionConfig struct {
+	// Version is the schema version the browser must hold, 1 or more.
+	// Raising it runs the Migrations whose Version lies in
+	// (stored, Version] once per browser, in order, before the first
+	// read or write of the page.
+	Version int
+	// Migrations are the steps that bring a record from one version to
+	// the next. Every step is a data transform declared here (Rename,
+	// Default, Remove) or a host-registered browser function (Func);
+	// see Migration.
+	Migrations []Migration
+	// KeyField names the JSON field the browser's put(value) reads the
+	// key from, so a record can carry its own identity. Optional: with
+	// no key field, the browser API is put(key, value).
+	KeyField string
+	// MaxRecordBytes caps one record's JSON text. 0 means
+	// DefaultMaxRecordBytes (MirrorMaxRecordBytes when Mirror).
+	MaxRecordBytes int
+	// MaxRecords caps the number of records. 0 means DefaultMaxRecords
+	// (MirrorMaxRecords when Mirror).
+	MaxRecords int
+	// MaxBytes caps the sum of the collection's record sizes. 0 means
+	// DefaultMaxBytes.
+	MaxBytes int
+	// Mirror keeps each record in a cookie too, so a Go render sees it
+	// at first paint through Get/List. For tiny values only: the caps
+	// above are clamped to the Mirror* ceilings, and every record
+	// travels on every request.
+	Mirror bool
+}
+
+// Migration is one version step: the steps that turn every record of
+// version Version-1 into version Version.
+type Migration struct {
+	Version int
+	Steps   []Step
+}
+
+// Step is one declared transform over a record. Build one with Rename,
+// Default, Remove or Func.
+type Step struct {
+	op    string
+	from  string
+	to    string
+	field string
+	value any
+	name  string
+}
+
+// Rename moves field from to field to. A record without from, or one
+// that already has to, is left alone: the step is idempotent, which is
+// what lets two tabs run the same migration without a lock.
+func Rename(from, to string) Step { return Step{op: "rename", from: from, to: to} }
+
+// Default sets field to value on every record that lacks it. value
+// must be JSON-encodable.
+func Default(field string, value any) Step { return Step{op: "default", field: field, value: value} }
+
+// Remove deletes field from every record.
+func Remove(field string) Step { return Step{op: "remove", field: field} }
+
+// Func runs the browser function registered as
+// window.__gofastr._localMigrations[name] over every record,
+// (record, key) => record, loaded from the host's extra-script rail
+// like a computed reducer (never inline: the page stays CSP-clean).
+// A name with no function registered when the migration runs leaves
+// the records and the stored version untouched and raises
+// gofastr:local-error with reason "migration". Keep it idempotent.
+func Func(name string) Step { return Step{op: "func", name: name} }
+
+// MarshalJSON emits the step the browser reads.
+func (st Step) MarshalJSON() ([]byte, error) {
+	switch st.op {
+	case "rename":
+		return json.Marshal(map[string]any{"op": st.op, "from": st.from, "to": st.to})
+	case "default":
+		return json.Marshal(map[string]any{"op": st.op, "field": st.field, "value": st.value})
+	case "remove":
+		return json.Marshal(map[string]any{"op": st.op, "field": st.field})
+	case "func":
+		return json.Marshal(map[string]any{"op": st.op, "name": st.name})
+	}
+	return nil, fmt.Errorf("local: unknown migration step %q", st.op)
+}
+
+// collectionDef is the declaration the store keeps; the generic
+// Collection[T] is a typed handle on it.
+type collectionDef struct {
+	store      *Store
+	name       string
+	version    int
+	migrations []Migration
+	keyField   string
+	maxRecord  int
+	maxRecords int
+	maxBytes   int
+	mirror     bool
+}
+
+// Collection is a typed handle on one declared collection.
+type Collection[T any] struct {
+	def *collectionDef
+}
+
+// Define declares collection name on s with the record type T, which
+// must round-trip through encoding/json (a channel or a function
+// field panics here, not in a handler). It panics on an invalid name,
+// a duplicate name, a version below 1, a migration set with a gap or
+// a duplicate, a cap over its ceiling, or a store whose manifest was
+// already served.
+func Define[T any](s *Store, name string, cfg CollectionConfig) *Collection[T] {
+	if !reName.MatchString(name) {
+		panic(fmt.Sprintf("local: collection %q must match ^[a-z][a-z0-9-]{0,63}$", name))
+	}
+	var zero T
+	if _, err := json.Marshal(zero); err != nil {
+		panic(fmt.Sprintf("local: collection %q: %T does not round-trip through JSON: %v", name, zero, err))
+	}
+	if k := reflect.TypeFor[T]().Kind(); cfg.KeyField != "" && k != reflect.Struct && k != reflect.Map {
+		panic(fmt.Sprintf("local: collection %q: KeyField %q needs an object record type, not %s", name, cfg.KeyField, k))
+	}
+	if cfg.Version < 1 {
+		panic(fmt.Sprintf("local: collection %q: Version must be 1 or more, got %d", name, cfg.Version))
+	}
+	seen := map[int]bool{}
+	for _, m := range cfg.Migrations {
+		if m.Version < 2 || m.Version > cfg.Version {
+			panic(fmt.Sprintf("local: collection %q: migration to version %d is outside (1, %d]", name, m.Version, cfg.Version))
+		}
+		if seen[m.Version] {
+			panic(fmt.Sprintf("local: collection %q: two migrations to version %d", name, m.Version))
+		}
+		seen[m.Version] = true
+		for _, st := range m.Steps {
+			if st.op == "" {
+				panic(fmt.Sprintf("local: collection %q: a zero Step in the migration to version %d — use Rename, Default, Remove or Func", name, m.Version))
+			}
+			if st.op == "default" {
+				if _, err := json.Marshal(st.value); err != nil {
+					panic(fmt.Sprintf("local: collection %q: Default(%q) value does not encode: %v", name, st.field, err))
+				}
+			}
+		}
+	}
+	for v := 2; v <= cfg.Version; v++ {
+		if !seen[v] {
+			panic(fmt.Sprintf("local: collection %q: no migration to version %d — every version step needs one, even an empty Migration{Version: %d}", name, v, v))
+		}
+	}
+	def := &collectionDef{
+		store:      s,
+		name:       name,
+		version:    cfg.Version,
+		migrations: cfg.Migrations,
+		keyField:   cfg.KeyField,
+		mirror:     cfg.Mirror,
+	}
+	def.maxRecord = capOrDefault("MaxRecordBytes", name, cfg.MaxRecordBytes, DefaultMaxRecordBytes, MaxRecordBytesLimit)
+	def.maxRecords = capOrDefault("MaxRecords", name, cfg.MaxRecords, DefaultMaxRecords, MaxRecordsLimit)
+	def.maxBytes = capOrDefault("MaxBytes", name, cfg.MaxBytes, DefaultMaxBytes, MaxBytesLimit)
+	if cfg.Mirror {
+		def.maxRecord = capOrDefault("MaxRecordBytes", name, cfg.MaxRecordBytes, MirrorMaxRecordBytes, MirrorMaxRecordBytes)
+		def.maxRecords = capOrDefault("MaxRecords", name, cfg.MaxRecords, MirrorMaxRecords, MirrorMaxRecords)
+	}
+	if def.maxRecord > def.maxBytes {
+		panic(fmt.Sprintf("local: collection %q: MaxRecordBytes %d exceeds MaxBytes %d", name, def.maxRecord, def.maxBytes))
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.frozen {
+		panic(fmt.Sprintf("local: collection %q declared after store %q served its manifest — define every collection before the first render", name, s.app))
+	}
+	if _, dup := s.colls[name]; dup {
+		panic(fmt.Sprintf("local: collection %q is already declared on store %q", name, s.app))
+	}
+	s.colls[name] = def
+	return &Collection[T]{def: def}
+}
+
+func capOrDefault(what, coll string, v, def, limit int) int {
+	if v < 0 {
+		panic(fmt.Sprintf("local: collection %q: %s %d is negative", coll, what, v))
+	}
+	if v == 0 {
+		return def
+	}
+	if v > limit {
+		panic(fmt.Sprintf("local: collection %q: %s %d exceeds the ceiling %d", coll, what, v, limit))
+	}
+	return v
+}
+
+// Name returns the collection name.
+func (c *Collection[T]) Name() string { return c.def.name }
+
+// Store returns the declaring store.
+func (c *Collection[T]) Store() *Store { return c.def.store }
+
+// Version returns the declared schema version.
+func (c *Collection[T]) Version() int { return c.def.version }
+
+// MaxRecordBytes, MaxRecords and MaxBytes return the effective caps.
+func (c *Collection[T]) MaxRecordBytes() int { return c.def.maxRecord }
+func (c *Collection[T]) MaxRecords() int     { return c.def.maxRecords }
+func (c *Collection[T]) MaxBytes() int       { return c.def.maxBytes }
+
+// Mirrored reports whether records ride a cookie for first-paint reads.
+func (c *Collection[T]) Mirrored() bool { return c.def.mirror }
+
+// KeyOf returns the key the browser's put(value) would derive: the
+// declared KeyField of v, which must be a non-empty string. It errors
+// when the collection has no key field or the field is absent, not a
+// string, or not a valid key.
+func (c *Collection[T]) KeyOf(v T) (string, error) {
+	if c.def.keyField == "" {
+		return "", fmt.Errorf("local: collection %q declares no KeyField", c.def.name)
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return "", fmt.Errorf("local: collection %q: record is not a JSON object: %w", c.def.name, err)
+	}
+	var key string
+	if err := json.Unmarshal(obj[c.def.keyField], &key); err != nil {
+		return "", fmt.Errorf("local: collection %q: key field %q is not a string", c.def.name, c.def.keyField)
+	}
+	if !ValidKey(key) {
+		return "", fmt.Errorf("local: collection %q: key %q is not a valid key", c.def.name, key)
+	}
+	return key, nil
+}
+
+// Key names one record of the collection for Send.
+func (c *Collection[T]) Key(key string) Ref {
+	if !ValidKey(key) {
+		panic(fmt.Sprintf("local: collection %q: %q is not a valid key", c.def.name, key))
+	}
+	return Ref{def: c.def, key: key}
+}
+
+// Ref is one record of a collection, the unit Send accepts beside a
+// whole collection.
+type Ref struct {
+	def *collectionDef
+	key string
+}
+
+// sendItem is what Send records: a collection, and a key or "" for
+// the whole collection.
+type sendItem struct {
+	def *collectionDef
+	key string
+}
+
+// Sendable is a whole Collection or a Ref to one of its records.
+type Sendable interface{ sendItem() sendItem }
+
+func (c *Collection[T]) sendItem() sendItem { return sendItem{def: c.def} }
+func (r Ref) sendItem() sendItem            { return sendItem{def: r.def, key: r.key} }
+
+// manifestEntry is the per-collection block the browser reads.
+type manifestEntry struct {
+	Version    int             `json:"v"`
+	Key        string          `json:"key,omitempty"`
+	MaxRecord  int             `json:"maxRecord"`
+	MaxRecords int             `json:"maxRecords"`
+	MaxBytes   int             `json:"maxBytes"`
+	Mirror     bool            `json:"mirror"`
+	Migrations []manifestMigra `json:"migrations"`
+}
+
+type manifestMigra struct {
+	Version int    `json:"v"`
+	Steps   []Step `json:"steps"`
+}
+
+func (d *collectionDef) manifest() manifestEntry {
+	m := manifestEntry{
+		Version:    d.version,
+		Key:        d.keyField,
+		MaxRecord:  d.maxRecord,
+		MaxRecords: d.maxRecords,
+		MaxBytes:   d.maxBytes,
+		Mirror:     d.mirror,
+		Migrations: []manifestMigra{},
+	}
+	for _, mg := range d.migrations {
+		steps := mg.Steps
+		if steps == nil {
+			steps = []Step{}
+		}
+		m.Migrations = append(m.Migrations, manifestMigra{Version: mg.Version, Steps: steps})
+	}
+	return m
+}

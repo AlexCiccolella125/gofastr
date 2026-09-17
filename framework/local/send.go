@@ -1,0 +1,342 @@
+package local
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"net/http"
+	"sort"
+	"strings"
+
+	"github.com/DonaldMurillo/gofastr/core-ui/app"
+	"github.com/DonaldMurillo/gofastr/core/handler"
+)
+
+// The upload bridge. A trigger rendered with Upload.Attrs carries
+// data-local-send="<coll>[:<key>][,…]" and data-fui-rpc-with=
+// "local-store"; rpc.js loads the module before the fetch and its
+// request hook attaches the named records as the reserved field
+// __local: {"<coll>": [{"k": key, "v": value}, …]} in a JSON body, the
+// form field __local in a form body, or a fresh JSON body when the
+// trigger had none. Upload.Wrap reads the field on the server, refuses
+// anything the declaration did not name, enforces the caps, strips the
+// field so the wrapped handler decodes the body it always did, and
+// puts the records on the request context for Get, List and
+// FromContext.
+
+// The reserved field name, on both sides.
+const uploadField = "__local"
+
+// DefaultUploadMaxBytes bounds a wrapped request's whole body; raise
+// it with Upload.Max, up to UploadMaxBytesLimit.
+const (
+	DefaultUploadMaxBytes = 256 << 10
+	UploadMaxBytesLimit   = 8 << 20
+)
+
+var (
+	// ErrUndeclared is a collection or key in the upload the Send did
+	// not name — or a collection the store never declared.
+	ErrUndeclared = errors.New("local: undeclared collection or key")
+	// ErrTooLarge is a record, collection or header over its cap.
+	ErrTooLarge = errors.New("local: over the size cap")
+	// ErrBadKey is a key ValidKey refuses.
+	ErrBadKey = errors.New("local: invalid key")
+)
+
+// Upload is one declaration of what accompanies a request.
+type Upload struct {
+	store *Store
+	items []sendItem
+	max   int
+}
+
+// Send declares the collections (whole) or records (Collection.Key)
+// that ride on the requests of the trigger rendered with Attrs, and
+// that Wrap accepts on the server. Every item must belong to one
+// store; an empty Send panics.
+func Send(items ...Sendable) *Upload {
+	if len(items) == 0 {
+		panic("local: Send needs at least one collection or key")
+	}
+	u := &Upload{max: DefaultUploadMaxBytes}
+	for _, it := range items {
+		si := it.sendItem()
+		if u.store == nil {
+			u.store = si.def.store
+		} else if u.store != si.def.store {
+			panic(fmt.Sprintf("local: Send mixes stores %q and %q — one store per upload", u.store.app, si.def.store.app))
+		}
+		u.items = append(u.items, si)
+	}
+	return u
+}
+
+// Max caps the wrapped request's whole body (the records and the rest)
+// in bytes; outside (0, UploadMaxBytesLimit] panics.
+func (u *Upload) Max(bytes int) *Upload {
+	if bytes <= 0 || bytes > UploadMaxBytesLimit {
+		panic(fmt.Sprintf("local: Upload.Max %d is outside (0, %d]", bytes, UploadMaxBytesLimit))
+	}
+	u.max = bytes
+	return u
+}
+
+// Attrs returns the attributes the RPC trigger (a <form data-fui-rpc>
+// or a button) carries: data-local-store, data-local-send and
+// data-fui-rpc-with. Merge them into the trigger's attribute map. A
+// GET trigger carries nothing at request time, so pass attrs with a
+// data-fui-rpc-method of GET and Attrs panics.
+func (u *Upload) Attrs() map[string]string {
+	parts := make([]string, 0, len(u.items))
+	for _, it := range u.items {
+		if it.key == "" {
+			parts = append(parts, it.def.name)
+		} else {
+			parts = append(parts, it.def.name+":"+it.key)
+		}
+	}
+	return map[string]string{
+		"data-local-store":  u.store.app,
+		"data-local-send":   strings.Join(parts, ","),
+		"data-fui-rpc-with": BehaviorName,
+	}
+}
+
+// Merge returns attrs plus Attrs, panicking when attrs names a GET
+// method: an upload rides a mutating request.
+func (u *Upload) Merge(attrs map[string]string) map[string]string {
+	if strings.EqualFold(attrs["data-fui-rpc-method"], http.MethodGet) {
+		panic("local: Send on a GET trigger — an upload rides a mutating request")
+	}
+	out := make(map[string]string, len(attrs)+3)
+	for k, v := range attrs {
+		out[k] = v
+	}
+	for k, v := range u.Attrs() {
+		out[k] = v
+	}
+	return out
+}
+
+// allowed reports whether coll/key is inside the declaration.
+func (u *Upload) allowed(coll, key string) *collectionDef {
+	for _, it := range u.items {
+		if it.def.name != coll {
+			continue
+		}
+		if it.key == "" || it.key == key {
+			return it.def
+		}
+	}
+	return nil
+}
+
+// uploadRecord is one wire record.
+type uploadRecord struct {
+	K string          `json:"k"`
+	V json.RawMessage `json:"v"`
+}
+
+// records is what Wrap puts on the context: app → collection → key →
+// raw JSON. A map keyed by app so two stores' uploads on one request
+// do not collide.
+type records map[string]map[string]map[string]json.RawMessage
+
+type recordsKey struct{}
+
+func withRecords(ctx context.Context, app string, recs map[string]map[string]json.RawMessage) context.Context {
+	all, _ := ctx.Value(recordsKey{}).(records)
+	next := records{}
+	for a, m := range all {
+		next[a] = m
+	}
+	next[app] = recs
+	return context.WithValue(ctx, recordsKey{}, next)
+}
+
+func recordsFrom(ctx context.Context, app string) map[string]map[string]json.RawMessage {
+	all, _ := ctx.Value(recordsKey{}).(records)
+	return all[app]
+}
+
+// parse validates the reserved field's value against the declaration
+// and the caps. It returns app-scoped records, or an error that maps
+// to 400 (ErrUndeclared, ErrBadKey, malformed) or 413 (ErrTooLarge).
+func (u *Upload) parse(raw []byte) (map[string]map[string]json.RawMessage, error) {
+	var wire map[string][]uploadRecord
+	if err := handler.UnmarshalStrict(raw, &wire); err != nil {
+		return nil, fmt.Errorf("local: %s is not {collection: [{k, v}]}: %w", uploadField, err)
+	}
+	out := map[string]map[string]json.RawMessage{}
+	for coll, recs := range wire {
+		if len(recs) > 0 && u.allowed(coll, recs[0].K) == nil && u.store.defOf(coll) == nil {
+			return nil, fmt.Errorf("%w: %q", ErrUndeclared, coll)
+		}
+		total := 0
+		byKey := map[string]json.RawMessage{}
+		for _, rec := range recs {
+			if !ValidKey(rec.K) {
+				return nil, fmt.Errorf("%w: %q in %q", ErrBadKey, rec.K, coll)
+			}
+			def := u.allowed(coll, rec.K)
+			if def == nil {
+				return nil, fmt.Errorf("%w: %q/%q", ErrUndeclared, coll, rec.K)
+			}
+			if rec.V == nil {
+				return nil, fmt.Errorf("local: record %q/%q has no value", coll, rec.K)
+			}
+			v := bytes.TrimSpace(rec.V)
+			if len(v) > def.maxRecord {
+				return nil, fmt.Errorf("%w: record %q/%q is %d bytes, cap %d", ErrTooLarge, coll, rec.K, len(v), def.maxRecord)
+			}
+			if _, dup := byKey[rec.K]; dup {
+				return nil, fmt.Errorf("local: record %q/%q appears twice", coll, rec.K)
+			}
+			byKey[rec.K] = v
+			total += len(v)
+			if len(byKey) > def.maxRecords {
+				return nil, fmt.Errorf("%w: collection %q has more than %d records", ErrTooLarge, coll, def.maxRecords)
+			}
+			if total > def.maxBytes {
+				return nil, fmt.Errorf("%w: collection %q exceeds %d bytes", ErrTooLarge, coll, def.maxBytes)
+			}
+		}
+		out[coll] = byKey
+	}
+	return out, nil
+}
+
+// Wrap returns h with the upload read off the request first. The body
+// is bounded by Max (413 past it); a JSON body is decoded strictly
+// (400 on a duplicate or case-folded key, the rule every /__gofastr
+// endpoint keeps), the reserved field is removed and the rest is
+// re-encoded so h decodes what it always did; a form body has the
+// field removed from r.Form / r.PostForm / r.MultipartForm after
+// parsing. A request with no reserved field passes through with no
+// records. An undeclared collection or key is a 400; a record over a
+// cap is a 413. h then sees the records through Get, List and
+// FromContext, and app.RequestFromContext works inside it.
+func (u *Upload) Wrap(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(app.WithRequest(r.Context(), r))
+		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Body == nil {
+			h.ServeHTTP(w, r)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, int64(u.max))
+		ct, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		var raw []byte
+		var err error
+		switch ct {
+		case "application/json":
+			raw, err = u.stripJSON(r)
+		case "application/x-www-form-urlencoded", "multipart/form-data":
+			raw, err = u.stripForm(r, ct)
+		default:
+			h.ServeHTTP(w, r)
+			return
+		}
+		if err != nil {
+			respondUploadError(w, err)
+			return
+		}
+		if raw == nil {
+			h.ServeHTTP(w, r)
+			return
+		}
+		recs, err := u.parse(raw)
+		if err != nil {
+			respondUploadError(w, err)
+			return
+		}
+		h.ServeHTTP(w, r.WithContext(withRecords(r.Context(), u.store.app, recs)))
+	})
+}
+
+// HandlerFunc is Wrap over a plain function.
+func (u *Upload) HandlerFunc(fn func(http.ResponseWriter, *http.Request)) http.Handler {
+	return u.Wrap(http.HandlerFunc(fn))
+}
+
+func respondUploadError(w http.ResponseWriter, err error) {
+	var maxErr *http.MaxBytesError
+	switch {
+	case errors.Is(err, ErrTooLarge), errors.As(err, &maxErr):
+		http.Error(w, "local upload over the size cap", http.StatusRequestEntityTooLarge)
+	default:
+		http.Error(w, "local upload refused: "+err.Error(), http.StatusBadRequest)
+	}
+}
+
+// stripJSON reads the JSON body, lifts the reserved field out and
+// replaces the body with the rest. nil, nil when the field is absent
+// (the body is still replaced, byte for byte, so nothing was lost).
+func (u *Upload) stripJSON(r *http.Request) ([]byte, error) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		return nil, nil
+	}
+	var top map[string]json.RawMessage
+	if err := handler.UnmarshalStrict(body, &top); err != nil {
+		return nil, err
+	}
+	field, ok := top[uploadField]
+	if !ok {
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		r.ContentLength = int64(len(body))
+		return nil, nil
+	}
+	delete(top, uploadField)
+	rest, err := json.Marshal(top)
+	if err != nil {
+		return nil, err
+	}
+	r.Body = io.NopCloser(bytes.NewReader(rest))
+	r.ContentLength = int64(len(rest))
+	return field, nil
+}
+
+// stripForm parses the form and lifts the reserved field out of it.
+func (u *Upload) stripForm(r *http.Request, ct string) ([]byte, error) {
+	var err error
+	if ct == "multipart/form-data" {
+		err = r.ParseMultipartForm(int64(u.max))
+	} else {
+		err = r.ParseForm()
+	}
+	if err != nil {
+		return nil, err
+	}
+	vals := r.PostForm[uploadField]
+	if len(vals) == 0 {
+		return nil, nil
+	}
+	if len(vals) > 1 {
+		return nil, fmt.Errorf("local: %s appears %d times", uploadField, len(vals))
+	}
+	delete(r.PostForm, uploadField)
+	delete(r.Form, uploadField)
+	if r.MultipartForm != nil {
+		delete(r.MultipartForm.Value, uploadField)
+	}
+	return []byte(vals[0]), nil
+}
+
+// sortedKeys is the deterministic order List and FromContext use.
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}

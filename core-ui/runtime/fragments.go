@@ -388,6 +388,7 @@ var moduleAttrs = map[string][]string{
 	"rpc": {
 		"data-fui-rpc",
 		"data-fui-rpc-method",
+		"data-fui-rpc-with",
 		"data-fui-rpc-signal",
 		"data-fui-rpc-close",
 		"data-fui-rpc-reset",

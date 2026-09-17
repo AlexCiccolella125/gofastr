@@ -89,6 +89,7 @@ server side and the runtime does the work.
 |---|---|
 | `data-fui-rpc="<path>"` | Click / form-submit fires a request to `<path>` |
 | `data-fui-rpc-method="GET\|POST\|…"` | HTTP method (default POST) |
+| `data-fui-rpc-with="<module[,module]>"` | The runtime loads each named module before dispatching and runs the registered request hooks (`__gofastr._rpcHooks.request`) over the request object the fetch is built from; on a 2xx the response hooks run after the runtime's own headers. The seam `framework/local`'s upload (`data-local-send`) and download (`X-Gofastr-Local`) bridges ride on. See [Local state](local-state.md). |
 | `data-fui-rpc-signal="<name>"` | The response body is treated as a signal value and broadcast to bound nodes |
 | `data-fui-rpc-close` | Containing widget closes on 2xx |
 | `data-fui-rpc-reset` | Containing form resets on 2xx |

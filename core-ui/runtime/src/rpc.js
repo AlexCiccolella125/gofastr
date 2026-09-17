@@ -209,6 +209,30 @@
     if (widgetName) headers['X-FUI-Widget'] = widgetName;
     if (body && !bodyIsFormData) headers['Content-Type'] = 'application/json';
 
+    // The request as one object a hook can decorate. A trigger that
+    // names modules in data-fui-rpc-with has each loaded first (the
+    // loader is idempotent), so a module that must ride on this
+    // request — framework/local's upload bridge is the one that
+    // exists — is registered before the fetch, never racing the
+    // marker scan. Hooks are a seam, not a policy: NS._rpcHooks.request
+    // is awaited in order before the fetch, NS._rpcHooks.response runs
+    // on a 2xx after the headers the runtime itself reads.
+    const req = { path: resolvedPath, method, body, isFormData: bodyIsFormData, headers };
+    const withModules = node.getAttribute('data-fui-rpc-with');
+    if (withModules) {
+      for (const raw of withModules.split(',')) {
+        const modName = raw.trim();
+        if (!modName) continue;
+        try { await NS.loadModule(modName); }
+        catch (err) { console.warn('[gofastr] data-fui-rpc-with: module did not load', modName, err); }
+      }
+    }
+    const hooks = NS._rpcHooks || (NS._rpcHooks = { request: [], response: [] });
+    for (const hook of hooks.request) {
+      try { await hook(node, req); }
+      catch (err) { console.warn('[gofastr] rpc request hook failed', err); }
+    }
+
     // Signal-targeted requests stay clickable because their abort controller
     // makes rapid replacement safe. Other button/input triggers are disabled.
     const wantDisable = !responseSignal && (node.tagName === 'BUTTON' || node.tagName === 'INPUT');
@@ -216,11 +240,11 @@
     node.classList.add('fui-loading');
     node.setAttribute('aria-busy', 'true');
     try {
-      if (!NS._originOK(resolvedPath)) return;
-      const r = await fetch(resolvedPath, {
-        method,
-        headers,
-        body: body || undefined,
+      if (!NS._originOK(req.path)) return;
+      const r = await fetch(req.path, {
+        method: req.method,
+        headers: req.headers,
+        body: req.body || undefined,
         signal: ctl.signal,
         credentials: 'same-origin',
       });
@@ -249,6 +273,10 @@
 
       const toastHeader = r.headers.get('X-Gofastr-Toast');
       if (toastHeader) NS._dispatchToastHeader(toastHeader);
+      for (const hook of hooks.response) {
+        try { hook(node, r); }
+        catch (err) { console.warn('[gofastr] rpc response hook failed', err); }
+      }
       const ct = r.headers.get('content-type') || '';
       const data = ct.indexOf('application/json') >= 0 ? await r.json() : await r.text();
       if (responseSignal) NS.setSignal(responseSignal, data);
