@@ -211,7 +211,9 @@ func setupServer() *framework.App {
 		// external script (CSP-safe, no inline JS). Must load AFTER
 		// runtime.js, which is the WithExtraScripts order. The reducer
 		// mirrors dashStatusLabel in screen_livedash.go.
-		uihost.WithExtraScripts("/__site/livedash-reducers.js"),
+		// framework/local: the store's manifest and the draft-notes page
+		// script ride the same rail, after runtime.js.
+		uihost.WithExtraScripts("/__site/livedash-reducers.js", siteLocal.ScriptURL(), localNotesScriptPath),
 	)
 
 	// ── Presence demo wiring (additive) ────────────────────────────
@@ -642,6 +644,12 @@ func setupServer() *framework.App {
 	fwApp.Router().Get(wizardDemoPath, http.HandlerFunc(WizardDemoHandler))
 	fwApp.Router().Post(wizardDemoPath, http.HandlerFunc(WizardDemoHandler))
 
+	// Draft notes (framework/local demo): the store manifest, the page
+	// script, and the upload endpoint wrapped by the upload bridge.
+	fwApp.Router().Get(siteLocal.ScriptPath(), siteLocal.ScriptHandler())
+	fwApp.Router().Get(localNotesScriptPath, http.HandlerFunc(serveLocalNotesJS))
+	fwApp.Router().Post(localNotesUploadPath, notesUploadSend.HandlerFunc(localNotesUpload))
+
 	// battery/print demo documents under /print/*.
 	registerPrintDemos(fwApp)
 
@@ -768,6 +776,7 @@ var paletteCatalog = []paletteRoute{
 	{"Components: gallery index", "/components/"},
 	{"SEO: per-page meta, canonical, JSON-LD", "/seo"},
 	{"Forms wizard: multi-step round-trip", "/forms/wizard"},
+	{"Draft notes: local-first state (framework/local)", localNotesPath},
 	{"Print: invoice / receipt documents", "/print/invoice/1"},
 }
 
@@ -873,6 +882,7 @@ func registerScreens(site *app.App) {
 	// switch (wraps content in <article>, emits Article JSON-LD +
 	// og:type=article, derives the headline from ScreenTitle). Load it in
 	// Safari or Firefox and the browser's Reader icon lights up.
+	site.Register(localNotesPath, &LocalNotesScreen{}, nil)
 	site.Register("/reader", &ArticleScreen{}, nil, app.AsArticle())
 	// SEO demo pages (per-concern interfaces + the ScreenSEO bundle).
 	site.Register("/seo", &SEOScreen{}, nil)
