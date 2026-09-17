@@ -25,6 +25,8 @@ type actionSrv struct {
 	ok   atomic.Int32
 	fail atomic.Int32
 	slow atomic.Int32
+	// slowfail counts /slowfail: a failure that settles after /ok.
+	slowfail atomic.Int32
 }
 
 // actionPage is the arm script every test body appends its buttons
@@ -80,6 +82,13 @@ func startActionSrv(t *testing.T, body string) *actionSrv {
 		s.slow.Add(1)
 		time.Sleep(700 * time.Millisecond)
 		w.WriteHeader(http.StatusNoContent)
+	})
+	// /slowfail settles 422 after the same wait as /slow: a refusal that
+	// lands after a sibling's fast commit.
+	mux.HandleFunc("/slowfail", func(w http.ResponseWriter, r *http.Request) {
+		s.slowfail.Add(1)
+		time.Sleep(700 * time.Millisecond)
+		w.WriteHeader(http.StatusUnprocessableEntity)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -398,5 +407,192 @@ func TestActionGroupFailureRestoresTheSibling(t *testing.T) {
 	}
 	if n := s.fail.Load(); n != 1 || s.ok.Load() != 0 {
 		t.Fatalf("endpoints hit fail=%d ok=%d, want one failed request and no request for the sibling", n, s.ok.Load())
+	}
+}
+
+// Two members of one group clicked inside one round trip both pass the
+// per-element re-entry guard, and the click-time revoke only sees
+// committed siblings — so without the settlement-time revoke both would
+// commit. The group must converge on one committed member: the last
+// completer wins, the other ends idle, exactly one carries
+// aria-pressed="true".
+func TestActionGroupConcurrentClicksConvergeOnOne(t *testing.T) {
+	s := startActionSrv(t, `<button type="button" id="g1" data-state="idle" aria-pressed="false">
+  <span id="g1i">Starter</span><span id="g1d" hidden>Starter ✓</span>
+</button>
+<button type="button" id="g2" data-state="idle" aria-pressed="false">
+  <span id="g2i">Pro</span><span id="g2d" hidden>Pro ✓</span>
+</button>`)
+	ctx := actionPage(t, s)
+	// /slow holds both requests open, so the two clicks land while both
+	// buttons are pending — the race the settlement-time revoke closes.
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`window.__arm('g1', { endpoint: '/slow', group: 'plan', pressed: true, idle: document.getElementById('g1i'), done: document.getElementById('g1d') });
+            window.__arm('g2', { endpoint: '/slow', group: 'plan', pressed: true, idle: document.getElementById('g2i'), done: document.getElementById('g2d') });`, nil),
+		chromedp.Click(`#g1`, chromedp.ByID),
+		chromedp.Click(`#g2`, chromedp.ByID),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if !pollTrue(ctx, `['g1','g2'].filter(function (id) { return document.getElementById(id).getAttribute('data-state') === 'committed'; }).length === 1`) {
+		var states string
+		chromedp.Run(ctx, chromedp.Evaluate(`document.getElementById('g1').getAttribute('data-state') + '/' + document.getElementById('g2').getAttribute('data-state')`, &states))
+		t.Fatalf("after two concurrent commits the states were %s, want exactly one committed", states)
+	}
+	var probe struct {
+		Committed string `json:"committed"`
+		Other     string `json:"other"`
+		Pressed   int    `json:"pressed"`
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`(() => {
+  const a = document.getElementById('g1'), b = document.getElementById('g2');
+  const c = a.getAttribute('data-state') === 'committed' ? a : b;
+  const o = c === a ? b : a;
+  return { committed: c.getAttribute('data-state'), other: o.getAttribute('data-state'),
+           pressed: (c.getAttribute('aria-pressed') === 'true') + (o.getAttribute('aria-pressed') === 'true') };
+})()`, &probe),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if probe.Committed != "committed" || probe.Other != "idle" {
+		t.Fatalf("group did not converge: committed=%q other=%q, want committed/idle", probe.Committed, probe.Other)
+	}
+	if probe.Pressed != 1 {
+		t.Fatalf("exactly one button should carry aria-pressed=\"true\", got %d", probe.Pressed)
+	}
+	if n := s.slow.Load(); n != 2 {
+		t.Fatalf("slow endpoint hit %d times, want 2: both clicks fire their own request", n)
+	}
+}
+
+// A failed untoggle is the one silent arm: the button stays committed
+// (the revert was refused, there is nothing to roll back to), no
+// action:rolled-back is dispatched, and no rollback timer is armed —
+// the state must still be committed well past the 600ms error timer
+// that a rolled-back commit would have scheduled.
+func TestActionUntoggleFailureStaysCommittedQuietly(t *testing.T) {
+	s := startActionSrv(t, `<button type="button" id="t" data-state="committed" aria-pressed="true">
+  <span id="ti" hidden>Watch</span><span id="td">Watching</span>
+</button>`)
+	ctx := actionPage(t, s)
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`window.__arm('t', { endpoint: '/ok', untoggle: '/fail', pressed: true, idle: document.getElementById('ti'), done: document.getElementById('td') });
+            document.addEventListener('action:rolled-back', function () { window.__rolledBack = true; }, { once: true });`, nil),
+		chromedp.Click(`#t`, chromedp.ByID),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	// Well past the 600ms rollback timer: a timer armed by the failure
+	// would have flipped the button to idle by now.
+	time.Sleep(900 * time.Millisecond)
+	var probe struct {
+		State   string `json:"state"`
+		Pressed string `json:"pressed"`
+		Rolled  bool   `json:"rolled"`
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`(() => { const b = document.getElementById('t'); return { state: b.getAttribute('data-state'), pressed: b.getAttribute('aria-pressed'), rolled: !!window.__rolledBack }; })()`, &probe),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if probe.State != "committed" {
+		t.Fatalf("state = %q after a failed untoggle, want committed (the revert was refused)", probe.State)
+	}
+	if probe.Pressed != "true" {
+		t.Fatalf("aria-pressed = %q after a failed untoggle, want true", probe.Pressed)
+	}
+	if probe.Rolled {
+		t.Fatal("action:rolled-back was dispatched on a failed untoggle: there is nothing to roll back to")
+	}
+	if n := s.fail.Load(); n != 1 {
+		t.Fatalf("fail endpoint hit %d times, want 1", n)
+	}
+}
+
+// A refused untoggle returns its member to committed, and a sibling may
+// have committed inside the same round trip: the sibling's settlement
+// revoke skipped this member while it was pending. Returning to
+// committed must displace like any other commit, or the group ends with
+// two committed members, the state the settlement revoke exists to
+// make impossible.
+func TestActionRefusedUntoggleStillConvergesTheGroup(t *testing.T) {
+	s := startActionSrv(t, `<button type="button" id="a" data-state="committed" aria-pressed="true">
+  <span id="ai" hidden>Starter</span><span id="ad">Starter ✓</span>
+</button>
+<button type="button" id="b" data-state="idle" aria-pressed="false">
+  <span id="bi">Pro</span><span id="bd" hidden>Pro ✓</span>
+</button>`)
+	ctx := actionPage(t, s)
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`window.__arm('a', { endpoint: '/ok', untoggle: '/slowfail', group: 'plan', pressed: true, idle: document.getElementById('ai'), done: document.getElementById('ad') });
+            window.__arm('b', { endpoint: '/ok', group: 'plan', pressed: true, idle: document.getElementById('bi'), done: document.getElementById('bd') });`, nil),
+		// a's untoggle is in flight (pending) when b is clicked, so b's
+		// click-time and settlement revokes both skip a; then a's
+		// untoggle is refused and a returns to committed.
+		chromedp.Click(`#a`, chromedp.ByID),
+		chromedp.Click(`#b`, chromedp.ByID),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if !pollTrue(ctx, `document.getElementById('b').getAttribute('data-state') === 'committed'`) {
+		t.Fatal("b never committed while a's untoggle was in flight")
+	}
+	if !pollTrue(ctx, `document.getElementById('a').getAttribute('data-state') === 'committed'`) {
+		t.Fatal("a never returned to committed after its refused untoggle")
+	}
+	var probe struct {
+		A       string `json:"a"`
+		B       string `json:"b"`
+		Pressed int    `json:"pressed"`
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+  const a = document.getElementById('a'), b = document.getElementById('b');
+  return { a: a.getAttribute('data-state'), b: b.getAttribute('data-state'),
+           pressed: (a.getAttribute('aria-pressed') === 'true') + (b.getAttribute('aria-pressed') === 'true') };
+})()`, &probe)); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if probe.A != "committed" || probe.B != "idle" || probe.Pressed != 1 {
+		t.Fatalf("group did not converge after a refused untoggle: a=%s b=%s pressed=%d, want committed/idle/1", probe.A, probe.B, probe.Pressed)
+	}
+	if n := s.slowfail.Load(); n != 1 {
+		t.Fatalf("slowfail hit %d times, want 1", n)
+	}
+}
+
+// A settlement that arrives after an island swap replaced the group
+// belongs to a button that is no longer on the page: it must not
+// revoke the new page's committed member. The old member is detached
+// while its request is in flight; a fresh member arrives committed;
+// the old settlement lands and changes nothing.
+func TestActionSettlementOfADetachedMemberRevokesNothing(t *testing.T) {
+	s := startActionSrv(t, `<div id="grp"><button type="button" id="old" data-state="idle" aria-pressed="false">
+  <span id="oi">Starter</span><span id="od" hidden>Starter ✓</span>
+</button></div>`)
+	ctx := actionPage(t, s)
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`window.__arm('old', { endpoint: '/slow', group: 'plan', pressed: true, idle: document.getElementById('oi'), done: document.getElementById('od') });`, nil),
+		chromedp.Click(`#old`, chromedp.ByID),
+		// The swap: the old member leaves mid-flight, a new one arrives
+		// already committed and joins the same group.
+		chromedp.Evaluate(`(() => {
+  document.getElementById('grp').innerHTML = '<button type="button" id="fresh" data-state="committed" aria-pressed="true"><span id="fi" hidden>Pro</span><span id="fd">Pro ✓</span></button>';
+  window.__arm('fresh', { endpoint: '/ok', group: 'plan', pressed: true, idle: document.getElementById('fi'), done: document.getElementById('fd') });
+})()`, nil),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	// Past the slow route's settlement.
+	time.Sleep(1100 * time.Millisecond)
+	var state string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`document.getElementById('fresh').getAttribute('data-state')`, &state)); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if state != "committed" {
+		t.Fatalf("the fresh member is %q after the detached member settled, want committed: a settlement for a button that left the page revoked the new page's member", state)
+	}
+	if n := s.slow.Load(); n != 1 {
+		t.Fatalf("slow hit %d times, want 1", n)
 	}
 }

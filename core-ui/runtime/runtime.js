@@ -2479,7 +2479,14 @@
       // requires is the r array: the modules loadModule'd before this
       // one (see the loader above).
       return Object.entries(o).map(([n, v]) => ({ name: n, selector: v.s.join(','), idle: !!v.i, requires: v.r || [] }));
-    } catch (_) { return []; }
+    } catch (_) {
+      // Silent on purpose: the kernel boots on its own module table
+      // either way, and the bytes for a warning here do not clear the
+      // core budget (measured: +34 gz at level 6 for the long wording,
+      // +17 for the shortest, against 8 bytes of clearance). The
+      // finding is recorded in docs/spec-behavior-registry.md.
+      return [];
+    }
   })();
   function _scanForModules(root) {
     const scope = root && root.querySelectorAll ? root : document;

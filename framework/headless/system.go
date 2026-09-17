@@ -62,7 +62,8 @@ type SystemBannerProps struct {
 	// Dismiss renders the dismiss button. Nil means yes: a system
 	// message the reader cannot send away is furniture that outstays
 	// its news, and the cases that want it gone — the offline
-	// banner, whose ending is the reconnect — say so explicitly.
+	// banner, whose ending is the reconnect — say so explicitly:
+	// Dismiss on an Offline banner is refused at render.
 	Dismiss *bool
 	// DismissLabel names the dismiss control. Defaults to
 	// "Dismiss: <Title>", because three banners each called
@@ -118,6 +119,13 @@ func SystemBanner(p SystemBannerProps, s Skin) render.HTML {
 	if p.Offline && p.Shown {
 		panic("headless: SystemBanner Offline is the runtime's — it shows the banner when the connection is lost, so it cannot ship shown")
 	}
+	// The offline banner's ending is the reconnect, so it carries no
+	// dismiss: a dismissal remembered for the session would hide the
+	// next outage too, and the module skips the dismissed set for it
+	// precisely because there is nothing to dismiss.
+	if p.Offline && (p.Dismiss == nil || *p.Dismiss) {
+		panic("headless: an Offline SystemBanner carries no Dismiss — its ending is the reconnect, and a remembered dismissal would hide the next outage")
+	}
 
 	own := Merge(Safe(p.ExtraAttrs, "role", "aria-live", "hidden"), Attrs(map[string]string{
 		"data-hui-system-id": p.ID,
@@ -141,7 +149,10 @@ func SystemBanner(p SystemBannerProps, s Skin) render.HTML {
 	// ("WarningConnection lost"). Same shape as Alert's tone word,
 	// derived here because the tone is the banner's own prop.
 	title := []render.HTML{
-		El("span", s, PartVisuallyHidden, nil, render.Text(word+": ")),
+		// Through the Box: the tone word is the PartVisuallyHidden the
+		// spec declares, and attrs or binds a caller sets on it land
+		// here or they land nowhere.
+		b.El("span", PartVisuallyHidden, nil, render.Text(word+": ")),
 		render.Text(p.Title),
 	}
 	kids := []render.HTML{b.El("p", PartTitle, nil, title...)}
@@ -175,6 +186,7 @@ func init() {
 		},
 		Cases: func(k Kit) []Case {
 			s := k.Skin
+			noDismiss := false
 			return []Case{{
 				Name: "deploy in progress",
 				Why: "a message about the system, shown by the server's own render: role=status so it waits its turn, " +
@@ -188,9 +200,10 @@ func init() {
 			}, {
 				Name: "offline",
 				Why: "the built-in connection message, and the one system banner worth interrupting for: assertive, " +
-					"marked as the runtime's, and shipped hidden because the runtime — not the page — shows it",
+					"marked as the runtime's, shipped hidden because the runtime — not the page — shows it, and " +
+					"carrying no dismiss because its ending is the reconnect",
 				HTML: SystemBanner(SystemBannerProps{
-					ID: "sys-offline", Tone: "warning", Offline: true,
+					ID: "sys-offline", Tone: "warning", Offline: true, Dismiss: &noDismiss,
 					Title: "Connection lost",
 					Text:  "Changes are paused until the connection comes back.",
 				}, s),

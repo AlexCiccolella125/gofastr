@@ -137,6 +137,168 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   where the old module reverted in silence.
 
 ### Fixed
+- **Action groups converge on one committed member.** Two members of
+  one `data-fui-toggle-group` clicked inside one round trip both
+  passed the per-element re-entry guard, and the click-time revoke
+  only saw committed siblings, so both ended committed. The kernel's
+  action primitive (`core-ui/runtime/src/action.js`) now re-runs the
+  revoke when a commit settles: the last completer wins, the group
+  converges on exactly one committed button, and a failure of the
+  later click still restores the sibling it displaced. A refused
+  untoggle that returns its member to committed displaces the same
+  way, so a sibling that committed inside the same round trip does not
+  leave two committed. Covered by
+  `TestActionGroupConcurrentClicksConvergeOnOne` and
+  `TestActionRefusedUntoggleStillConvergesTheGroup`.
+- **Action group registry no longer retains navigated-away buttons.**
+  Group members were pruned only when a sibling committed; a group
+  navigated away from wholesale was held by the registry forever. The
+  primitive prunes disconnected members on `gofastr:navigate` (exposed
+  as a test-only `window.__gofastr.action._groupCount()`), covered by
+  `TestActionPrunesGroupMembersOnNavigate`.
+- **A half-failed action adapter can no longer double-install.** The
+  two registered action modules set their `loadedModules` flag at the
+  end of the file, so a script that failed halfway had its load
+  rejected and a retry re-executed it, installing every document
+  listener twice. Both adapters set the flag first, before anything
+  installs; the module contract now says so and source gates in
+  `framework/ui` and `core-ui/runtime` hold it
+  (`TestActionAdaptersSetLoadedFlagBeforeInstalling`,
+  `TestRegisteredBehaviorsSetLoadedFlagBeforeInstalling`).
+- **The per-module size budget covers registered behaviours.**
+  `TestRuntimeModuleSizeBudgets` measured `ModuleNames()`, which only
+  sees registrations linked into the test binary — none are, the
+  packages that register live above `core-ui/runtime`. The budget now
+  discovers every `registry.RegisterBehavior` source in the tree
+  through `check.RegisteredBehaviorSources`, minifies it through the
+  production minifier, and holds it to the same 3 KB goal.
+- **`serveRuntimeModule` serves registered behaviours immutably.**
+  Pinned by a test through the real route
+  (`TestServeRuntimeModuleServesRegisteredBehavior`): the immutable
+  year-long `Cache-Control`, the module's served bytes verbatim, and a
+  404 for an unknown name.
+- **A malformed behaviours manifest leaves the kernel standing, by
+  test.** Pinned by `TestBehaviorMalformedManifestsLeaveTheKernelStanding`:
+  a `window.__gofastr_behaviors` global that is not a descriptor map
+  and an inline `#gofastr-behaviors` block that is not JSON are both
+  ignored — the kernel boots on its own module table and loads
+  nothing from the broken registry. The catch stays silent: a
+  `console.warn` costs 17 gzipped bytes at the shortest useful
+  wording against the 8 bytes of clearance on the core budget line
+  (measured, recorded in the spec and the catch's comment).
+- **Requirement-cycle wording matches reality.** The panic fires at
+  the first render that builds the behaviours manifest, not at
+  startup (the registry is only complete once every package's init
+  has run). Spec, doc comments and
+  `TestCyclePanicSurfacesAs500ThroughARealHost` now say what actually
+  happens: through the framework's recovery middleware the panic is a
+  500 whose log line carries the cycle path.
+- **`framework/headless`: the when-scope and nesting fixes.** A
+  `data-hui-when` region read its watched control from the whole
+  document when it stood outside every form (two forms with a
+  same-named control decided it, and it never resynced after boot
+  because the listener scoped the sync to the changed control's form),
+  and a region inside a form could not watch a control outside it.
+  The module now looks in the region's own form first and only then in
+  the document, preferring controls no form owns, else the first in
+  document order. Nested regions share one re-enable mark, so an
+  inner region whose condition held re-enabled the controls an outer
+  hidden region had disabled: effective visibility is now computed
+  (own condition AND no hidden ancestor region), `hidden` is set on
+  every region in the scope first, and exactly the controls inside
+  any hidden region are disabled. The arrival scan also syncs every
+  enclosing region of an inserted subtree, outermost first, so a
+  control inserted alone inside a hidden region is disabled like its
+  siblings and a swap that restores an enclosing region's gating value
+  un-hides the regions inside the swap in the same pass.
+  Browser coverage in `behavior_e2e_test.go`.
+- **`framework/headless`: parts no longer drop attrs and binds on
+  non-root parts.** `paginationLink` (Pagination's anchors) and the
+  system banner's tone-word span rendered through the package `El`
+  instead of the caller's `Box`, so `Parts.Attrs` and `Binds` on
+  `PartPaginationLink`, `PartVisuallyHidden` — and `Card`'s title and
+  description — silently vanished. All four render through the Box,
+  and a new harness gate
+  (`TestEveryDrawnPartRoutesTheAttrsACallerSets`) holds every drawn
+  part of every `WithParts` fixture to the same rule the root gate
+  held.
+- **`framework/headless`: `ValidationSummary` requires `ID`.** Two
+  summaries without ids on one page shared the single fallback title
+  id `validation-summary-title`, breaking both labels. The ID is now
+  required at render (like `Field`'s `For`), the two-summaries
+  fixture pins both titles resolving, and every error link's
+  `href="#<For>"` goes through `urlsafe.CleanAnchor` — a `For` the
+  anchor policy refuses falls back to plain text, closing the one
+  href the docs claimed was covered and was not.
+- **`framework/headless`: the action lifecycle owns its attributes on
+  the root, whichever way a caller reaches it.** `aria-pressed`,
+  `aria-busy` and `aria-live` set through `Parts.Attrs` on an
+  OptimisticAction or ToggleAction root landed on the button (only
+  `ExtraAttrs` were refused), and a forged `aria-pressed` makes the
+  module read a one-shot button as a toggle. One shared owned list
+  now feeds both refusals, and the three keys joined the hostile set
+  in `TestOverridesCannotBreakAComponent`.
+- **`framework/headless`: binds refuse what would fight their
+  runtime.** A `text` or `html` Bind replaces a part's content, so a
+  root Bind could gut a Password's input and reveal button; a text or
+  html Bind is now allowed only on a part the spec lists as fillable
+  (the same set a Slot may fill), and an `attr` Bind may not name an
+  attribute the runtime rewrites as state moves (`aria-pressed`,
+  `aria-busy`, `aria-live`, `aria-invalid`, `aria-expanded`, `aria-current`,
+  `hidden`, `disabled`, `data-state`, and every `data-hui-*`). Both
+  refuse at render with the reason; harness gates hold the fillable
+  list to the spec's from both sides.
+- **`framework/headless`: island queries merge structurally.** The
+  href's query was joined onto the endpoint by string concatenation;
+  both are now parsed with `net/url`, the href's pairs are added after
+  the endpoint's own (a key present in both keeps both values in
+  order), and any fragment is dropped — the fragment names a place in
+  the document, never in the region the island fetches.
+- **`framework/headless`: the offline banner is fully the runtime's.**
+  The dismissed set applied to it on arrival against the module's own
+  comment, and a banner that arrived after the connection was lost
+  waited for the next event. The module now skips
+  `[data-hui-system-offline]` in the dismissed check and reads, on
+  arm, the state `sse.js` mirrors onto `window.__gofastr.sseStatus`
+  (a source gate pins the field names to the ones `sse.js` assigns).
+  At render, `Dismiss` on an `Offline` banner is refused — its ending
+  is the reconnect, and a remembered dismissal would hide the next
+  outage.
+- **`framework/headless`: the form-errors once-mark is spent only
+  when a summary was found.** A form whose `Errors` was not a summary
+  consumed its focus-once mark on the first pass, so the summary a
+  later render of the same form element brought never received focus
+  and the failed submit stayed unannounced.
+- **`framework/headless`: a drop zone follows a replaced input.** The
+  drop listener captured the input at arm time, so a swap that
+  replaced the input while the zone survived set files on a detached
+  element and the form submitted nothing. The input is resolved from
+  `data-hui-drop-input` on every event.
+- **`framework/headless`: the island form's error convention is
+  documented and pinned.** `FormProps.Island` and the docs now say
+  what the runtime's RPC actually lands: a failed validation is
+  answered 200 with the region's HTML (the errors are the answer, the
+  swap brings them in, the arrival pass focuses the summary); a
+  non-2xx lands in the signal as `{ok:false, status, text}` and
+  renders nothing, so it is for transport and server errors. A
+  browser test drives the whole chain.
+- **`framework/headless`: the module sets its loaded flag first.**
+  `behavior.js` set `loadedModules.headless` at the very end, after
+  `scan(document)`, so a half-failed evaluation could be retried into
+  a double install. The flag now follows the early-return guard, the
+  module contract every registered source keeps, and the
+  `sourceSkipPrefixes` debt entry for this package in
+  `core-ui/runtime/behavior_source_test.go` is gone:
+  `TestRegisteredBehaviorsSetLoadedFlagBeforeInstalling` holds the
+  module with nothing skipped.
+- **Docs: `framework/headless` says what is true.** A missing
+  `Strings` field is a runtime fallback to English, not a compile
+  error (agents.md, ui-headless.md and strings.go now say so);
+  `ConditionalFieldProps.Value` refuses the empty string, so "show
+  when unchecked" is not expressible (the doc says to watch a control
+  whose values are both stated); and the behaviour-module docs state
+  the when-scope rule, the nesting rule and the offline banner's
+  arm-time state read.
 - **`core-ui/check`: the JavaScript lints reach registered behaviours.**
   Every clean-tree lint (no-var and the runtime-shape rules) walked
   `core-ui/runtime` alone, so a module registered through

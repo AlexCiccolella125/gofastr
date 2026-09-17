@@ -17,6 +17,16 @@
   // The kernel fetches a module once per page, but anything that
   // evaluates this file a second time must bind nothing twice.
   if (NS.loadedModules && Object.prototype.hasOwnProperty.call(NS.loadedModules, NAME)) return;
+  // The loaded flag goes up BEFORE anything installs: a script that
+  // fails halfway rejects its load and the loader drops the cached
+  // promise, so a retry re-executes this file — and every listener the
+  // first pass installed would be installed a second time. With the
+  // flag first, the retry stops at the guard above. The trade: a
+  // module that fails after this point stays "loaded", half-installed
+  // rather than double-installed, which is the failure that can be
+  // recovered from.
+  (NS.loadedModules = NS.loadedModules || {})[NAME] = true;
+
 
   const MARKER = '[data-fui-comp="ui-optimistic-action"]';
 
@@ -63,5 +73,4 @@
   NS._moduleScanners = NS._moduleScanners || {};
   NS._moduleScanners[NAME] = scan;
   NS.optimisticaction = { rescan: scan };
-  (NS.loadedModules = NS.loadedModules || {})[NAME] = true;
 })();

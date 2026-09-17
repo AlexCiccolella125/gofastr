@@ -1,6 +1,7 @@
 package headless
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -81,14 +82,44 @@ func checkLabelsDiffer(component, idle, done string) {
 	}
 }
 
+// actionLifecycleAttrs names the attribute keys the mutation
+// lifecycle owns on an action button's root, whichever way a caller
+// reaches it. Through ExtraAttrs, safeActionExtras drops them; through
+// Parts.Attrs on the root, renderAction strips them below — one
+// shared list, because Box.El refuses only what the component's own
+// attrs carry, and the button owns none of the three the runtime
+// writes until it writes them. A forged aria-pressed is the worst of
+// them: the module reads it to tell a toggle from a one-shot, so an
+// OptimisticAction carrying one is bound as a toggle that reverts,
+// and a caller-set aria-busy or aria-live announces a state the
+// button is not in.
+var actionLifecycleAttrs = []string{
+	"type", "disabled", "data-state", "aria-busy", "aria-pressed", "aria-live",
+}
+
 // safeActionExtras is Safe with the prefixes the lifecycle owns added:
 // a caller may not forge a data-hui-* hook any more than a data-fui-*
 // one, and the names Safe takes exactly — type, disabled, data-state,
-// aria-busy, aria-pressed — are the ones the runtime rewrites as the
-// mutation moves. An extra that won any of them would desynchronise
-// the button from its own lifecycle.
+// aria-busy, aria-pressed, aria-live — are the ones the runtime
+// rewrites as the mutation moves. An extra that won any of them would
+// desynchronise the button from its own lifecycle.
 func safeActionExtras(extra html.Attrs) html.Attrs {
-	return Safe(extra, "type", "disabled", "data-state", "aria-busy", "aria-pressed")
+	return Safe(extra, actionLifecycleAttrs...)
+}
+
+// stripLifecycleAttrs is safeActionExtras's half for the attrs a
+// caller sets through Parts on the root: the same owned list, dropped
+// rather than refused the way Safe drops them, because class must
+// still append and the keys Safe refuses outright never reach
+// allowedPartAttrs to begin with.
+func stripLifecycleAttrs(a html.Attrs) html.Attrs {
+	out := html.Attrs{}
+	for k, v := range a {
+		if !slices.Contains(actionLifecycleAttrs, strings.ToLower(k)) {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // OptimisticActionProps is a button that commits once: the success
@@ -323,6 +354,20 @@ func renderAction(a action, s Skin) render.HTML {
 	if a.group != "" {
 		own["data-hui-action-group"] = a.group
 	}
+	// The root's part attrs go through the same owned list as
+	// ExtraAttrs: the copies are shallow and the caller's maps are
+	// never written to, only a replacement map with the root's entry
+	// stripped.
+	parts := a.parts
+	if root, ok := parts.Attrs[PartRoot]; ok && len(root) > 0 {
+		stripped := PartAttrs{}
+		for k, v := range parts.Attrs {
+			stripped[k] = v
+		}
+		stripped[PartRoot] = stripLifecycleAttrs(root)
+		parts.Attrs = stripped
+	}
+	b := parts.Box(s)
 	if a.allowUntoggle {
 		own["data-hui-action-untoggle"] = a.untoggle
 	}
@@ -344,7 +389,6 @@ func renderAction(a action, s Skin) render.HTML {
 		own["class"] = joinClasses(own["class"], cls)
 	}
 
-	b := a.parts.Box(s)
 	kids := []render.HTML{
 		actionSpan(b, PartActionIdle, a.state == "committed", a.idleLabel, a.idleIcon),
 		actionSpan(b, PartActionDone, a.state != "committed", a.doneLabel, a.doneIcon),

@@ -16,6 +16,7 @@ import (
 	"go/token"
 	"io/fs"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -335,6 +336,9 @@ func TestOverridesCannotBreakAComponent(t *testing.T) {
 		"Data-Island":   "smuggled",
 		"class":         "mine",
 		"data-testid":   "card",
+		"aria-pressed":  "stuck",
+		"aria-busy":     "stuck",
+		"aria-live":     "assertive",
 	}
 	for _, sp := range Specs() {
 		if sp.WithParts == nil {
@@ -362,6 +366,19 @@ func TestOverridesCannotBreakAComponent(t *testing.T) {
 			}
 			if !strings.Contains(string(got), "real") || !strings.Contains(string(got), "mine") {
 				t.Errorf("class must append, never replace — a component that arrives unstyled is worse than one with an extra class:\n%s", got)
+			}
+			// The mutation lifecycle owns these three on an action's
+			// root, whichever way the caller reaches it: a forged
+			// aria-pressed makes the module read a one-shot button as
+			// a toggle, and a caller-set aria-busy or aria-live
+			// announces a state the button is not in. Elsewhere they
+			// are inert decoration and no rule refuses them.
+			if sp.Name == "OptimisticAction" || sp.Name == "ToggleAction" {
+				for _, dead := range []string{`aria-pressed="stuck"`, `aria-busy="stuck"`, `aria-live="assertive"`} {
+					if strings.Contains(string(got), dead) {
+						t.Errorf("a caller set %s on an action's root: the lifecycle owns it, and a stale value desynchronises the button from its own state machine", dead)
+					}
+				}
 			}
 		})
 	}
@@ -622,18 +639,108 @@ func TestEverySVGInAFixtureDeclaresItsSize(t *testing.T) {
 // break a component; this proves a benign binding on the root ARRIVES,
 // for every component that offers its parts — which is the same as
 // proving the root is rendered through the Box rather than around it.
+// The root of most components is not fillable, and a text Bind there
+// is refused (the gates below): those bind an attribute instead,
+// which every root may carry.
 func TestEveryComponentWithPartsRoutesABindToItsRoot(t *testing.T) {
 	for _, sp := range Specs() {
 		if sp.WithParts == nil {
 			continue
 		}
 		t.Run(sp.Name, func(t *testing.T) {
-			got := sp.WithParts(nil, Parts{Binds: Binds{PartRoot: {Signal: "probe"}}})
+			bind := Bind{Signal: "probe", Mode: "attr", Attr: "title"}
+			if slices.Contains(sp.Fillable, PartRoot) {
+				bind = Bind{Signal: "probe"}
+			}
+			got := sp.WithParts(nil, Parts{Binds: Binds{PartRoot: bind}})
 			if !strings.Contains(string(got), `data-fui-signal="probe"`) {
 				t.Errorf("a binding on the root never arrived: the root is rendered around the Box, "+
 					"so overrides on it are dropped the same way:\n%s", got)
 			}
 		})
+	}
+}
+
+// TestEveryDrawnPartRoutesTheAttrsACallerSets is the sweep the root
+// gate above used to stand in for: every part the fixture DRAWS must
+// carry what a caller sets on it, not only the root. A part rendered
+// around the Box — a pager's links, a banner's tone word — drops
+// attrs and binds the same way the root once could, and nothing else
+// notices: the class still lands, the contract still passes, and the
+// caller's attribute is gone. Drawn-ness is decided by a probe class
+// on the part, the same evidence TestEveryDeclaredPartIsActuallyDrawn
+// uses, so a part the fixture never renders demands nothing.
+func TestEveryDrawnPartRoutesTheAttrsACallerSets(t *testing.T) {
+	for _, sp := range Specs() {
+		if sp.WithParts == nil {
+			continue
+		}
+		for _, p := range sp.Anatomy {
+			probe := "probe-" + string(p)
+			if !drawsClass(string(sp.WithParts(Skin{p: probe}, Parts{})), probe) {
+				continue
+			}
+			t.Run(sp.Name+"/"+string(p), func(t *testing.T) {
+				got := sp.WithParts(nil, Parts{Attrs: PartAttrs{p: {"data-part-route": string(p)}}})
+				if !strings.Contains(string(got), `data-part-route="`+string(p)+`"`) {
+					t.Errorf("part %q is drawn and drops the attrs a caller sets on it: it is rendered around the Box\n%s", p, got)
+				}
+			})
+		}
+	}
+}
+
+// A text or html Bind replaces a part's content, so it is allowed
+// exactly where a Slot is: on a part the spec lists as fillable.
+// Everywhere else it would gut whatever guarantee the part carries —
+// a Password's input and reveal button, an action's two labels — and
+// the refusal fires at render, where the mistake is a panic with a
+// reason rather than a component that quietly lost its content. Only
+// parts the fixture draws are asserted, the same probe-class evidence
+// as the routing sweep above.
+func TestATextBindNeedsAFillablePart(t *testing.T) {
+	for _, sp := range Specs() {
+		if sp.WithParts == nil {
+			continue
+		}
+		for _, p := range sp.Anatomy {
+			if slices.Contains(sp.Fillable, p) {
+				continue
+			}
+			probe := "probe-" + string(p)
+			if !drawsClass(string(sp.WithParts(Skin{p: probe}, Parts{})), probe) {
+				continue
+			}
+			t.Run(sp.Name+"/"+string(p), func(t *testing.T) {
+				defer func() {
+					if recover() == nil {
+						t.Errorf("%s draws part %q and a text Bind on it rendered: it would replace the part's content", sp.Name, p)
+					}
+				}()
+				sp.WithParts(nil, Parts{Binds: Binds{p: {Signal: "probe"}}})
+			})
+		}
+	}
+}
+
+// The other direction of the same rule, so the fillable list a
+// component hands its Box cannot drift from the one its spec
+// declares: a text Bind on every part the spec lists as fillable
+// must arrive, or the Box's list is narrower than the spec's and a
+// legitimate binding is refused.
+func TestEveryFillablePartTakesATextBind(t *testing.T) {
+	for _, sp := range Specs() {
+		if sp.WithParts == nil {
+			continue
+		}
+		for _, p := range sp.Fillable {
+			t.Run(sp.Name+"/"+string(p), func(t *testing.T) {
+				got := sp.WithParts(nil, Parts{Binds: Binds{p: {Signal: "probe"}}})
+				if !strings.Contains(string(got), `data-fui-signal="probe"`) {
+					t.Errorf("part %q is fillable and a text Bind on it never arrived: the Box's fillable list is narrower than the spec's\n%s", p, got)
+				}
+			})
+		}
 	}
 }
 

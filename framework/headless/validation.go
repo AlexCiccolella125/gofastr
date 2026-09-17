@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/DonaldMurillo/gofastr/core-ui/html"
+	"github.com/DonaldMurillo/gofastr/core-ui/urlsafe"
 	"github.com/DonaldMurillo/gofastr/core/render"
 )
 
@@ -34,7 +35,10 @@ type ValidationSummaryProps struct {
 	// Level is the title's heading level, 2 by default.
 	Level  int
 	Errors []FieldError
-
+	// ID names the summary's root. Required, like the control ids the
+	// errors link to: the title's id is derived from it, and two
+	// summaries on one page without ids would share one title id —
+	// breaking both labels and both announcements.
 	ID         string
 	ExtraAttrs html.Attrs
 
@@ -71,6 +75,9 @@ type ValidationSummaryProps struct {
 // problem" box that announces itself is a lie that interrupts.
 func ValidationSummary(p ValidationSummaryProps, s Skin) render.HTML {
 	b := p.Parts.Box(s)
+	if p.ID == "" {
+		panic("headless: ValidationSummary requires ID — two summaries on one page would share one title id, breaking both labels")
+	}
 	if len(p.Errors) == 0 {
 		return ""
 	}
@@ -80,9 +87,18 @@ func ValidationSummary(p ValidationSummaryProps, s Skin) render.HTML {
 			panic("headless: FieldError requires Message")
 		}
 		var inner render.HTML
+		// Every href a component writes goes through the anchor
+		// policy, this one included: the policy accepts a bare
+		// fragment, and a For that is empty or that the policy
+		// refuses is rendered as text rather than as a link nowhere
+		// should follow.
+		jump := ""
 		if e.For != "" {
+			jump = urlsafe.CleanAnchor("#" + e.For)
+		}
+		if jump != "" {
 			inner = b.El("a", PartErrorLink,
-				Attrs(map[string]string{"href": "#" + e.For}), render.Text(e.Message))
+				Attrs(map[string]string{"href": jump}), render.Text(e.Message))
 		} else {
 			inner = render.Text(e.Message)
 		}
@@ -104,11 +120,9 @@ func ValidationSummary(p ValidationSummaryProps, s Skin) render.HTML {
 
 // titleIDFor names the heading the summary is labelled by. The
 // fallback prefix is structural, not the skin's class namespace: this
-// layer does not know what anyone calls their classes.
+// layer does not know what anyone calls their classes. The ID is
+// required, so the name is always the summary's own.
 func titleIDFor(id string) string {
-	if id == "" {
-		return "validation-summary-title"
-	}
 	return id + "-title"
 }
 
@@ -238,8 +252,17 @@ func init() {
 			}, {
 				Name: "nothing wrong",
 				Why:  "no errors renders nothing at all, so a page can ask for the summary unconditionally and not get an empty red box on first load",
-				HTML: group(ValidationSummary(ValidationSummaryProps{Title: "x"}, s),
+				HTML: group(ValidationSummary(ValidationSummaryProps{Title: "x", ID: "errors-empty"}, s),
 					render.HTML("<p>Nothing to report.</p>")),
+			}, {
+				Name: "two summaries on one page",
+				Why: "two forms that failed on one page label two summaries, and the required ids are what keep the titles from " +
+					"sharing one name — the reference gate reads both labels and both resolve to their own heading",
+				HTML: group(
+					ValidationSummary(ValidationSummaryProps{ID: "errors-left",
+						Errors: []FieldError{{For: "left-name", Message: "Enter a name."}}}, s),
+					ValidationSummary(ValidationSummaryProps{ID: "errors-right",
+						Errors: []FieldError{{For: "right-name", Message: "Enter a name."}}}, s)),
 			}}
 		},
 	})

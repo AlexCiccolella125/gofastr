@@ -53,15 +53,25 @@ value on the props, with three maps keyed by part:
   `ExtraAttrs` goes through the same refusal.
 - **Binds** keep a part in step with a client signal (text, html or one
   attribute), refusing reserved signal names and attributes outside the
-  runtime's own allow-list.
+  runtime's own allow-list. Two ownership rules on top: a `text` or
+  `html` Bind replaces a part's content, so it is allowed only on a
+  part the component lists as fillable — the same set a Slot may fill —
+  and an `attr` Bind may not name an attribute the runtime rewrites as
+  state moves (`aria-pressed`, `aria-busy`, `aria-live`, `aria-invalid`,
+  `aria-expanded`, `aria-current`, `hidden`, `disabled`, `data-state`,
+  and every `data-hui-*` hook). Both refuse at render, with the
+  reason.
 
 **Strings** are the strings a component says, a prop of its own: one
 typed struct, nil for English, for a layer above to resolve once per
-request from the framework's `i18nui` keys. A missing field is a
-compile error, not a stray English word on a French page, and a
-partial value keeps the English default for every field it leaves
-empty. The list of parts a component draws is its `Spec.Anatomy`, the
-word Ark UI, Chakra and Radix use for the same list.
+request from the framework's `i18nui` keys. A field left empty falls
+back to its English default at runtime — a partial translation is
+safe, and the one that misses shows as a stray English word on the
+translated page, not as a compile error; the probe golden
+(`spec_golden_strings.txt`) is what catches a component saying a word
+no `Strings` field carries. The list of parts a component draws is its
+`Spec.Anatomy`, the word Ark UI, Chakra and Radix use for the same
+list.
 
 Two more are not per part. A `Button` takes an **Action**, the
 framework's request contract, on itself; `ExtraAttrs` cannot carry one.
@@ -112,15 +122,26 @@ headless.Pagination(headless.PaginationProps{
 Where the change would otherwise be a route the Island is required:
 `Pagination`, `ToolbarSearch`, a `Tag` with a dismiss and an `Alert`
 with a dismiss panic without one, so the link-only render cannot be
-built. On a `Form` it is optional, for a page that is the form.
+built. On a `Form` it is optional, for a page that is the form — and
+an island form answers a failed validation with **200 and the
+region's HTML**: the errors are the answer, the runtime swaps them
+into the signal-bound region, and the arrival pass focuses the
+summary. A non-2xx lands in the signal as `{ok:false, status, text}`
+and renders nothing, so it is for transport and server errors, never
+for validation.
 
 Every href a component writes goes through the framework's anchor
 policy, `urlsafe.CleanAnchor`: a `Button` whose href is rejected
-renders the disabled-link posture, and a form action, a dismiss href
-or a pager pattern that is rejected is refused at render.
+renders the disabled-link posture; a form action, a dismiss href and
+a pager pattern that are rejected are refused at render; and a
+summary's field link the policy refuses falls back to plain text.
 
-The endpoint keeps the href's query, so the page and the island answer
-the same question. `data-fui-push-state` is rendered only for a GET
+The endpoint keeps the href's query, merged pair by pair onto its own,
+so the page and the island answer the same question. State keys (page,
+sort, filter) belong in the href and nowhere else: when the endpoint
+carries a key the href also carries, both values survive, the endpoint's
+first, and a handler that reads `Query().Get` sees the endpoint's stale
+one. `data-fui-push-state` is rendered only for a GET
 with a href to write; a mutation's URL is the server's to set through
 `X-Gofastr-Push-State`.
 
@@ -189,8 +210,19 @@ What it does, one line per behaviour:
 - **when** hides a `data-hui-when` region whose watched field does not
   carry `data-hui-when-value`, disabling its controls under the
   runtime-owned `data-hui-when-off` mark so only those re-enable.
+  The watched control is looked up in the region's own form first,
+  and only then in the document — preferring controls no form owns,
+  else the first in document order — so two forms with a same-named
+  control cannot decide a region that belongs to neither. Regions
+  nest: a region is shown only when its own condition holds and no
+  enclosing `data-hui-when` region is hidden, and the controls inside
+  any hidden region stay disabled no matter what an inner region's
+  own condition says.
 - **form-errors** moves focus to the summary inside
-  `data-hui-form-errors`, once per form element.
+  `data-hui-form-errors`, once per form element — and the once-mark
+  is spent only when a summary was found, so a form whose `Errors`
+  is not a summary yet still focuses the summary a later render
+  brings.
 - **action** binds `[data-hui-action]` buttons through the kernel's
   `action` primitive (`window.__gofastr.action.bind`), reading the
   endpoint, method, group and untoggle hooks and the two label parts;
@@ -202,10 +234,18 @@ What it does, one line per behaviour:
   from the words the root carries (`data-hui-drop-one` and
   `data-hui-drop-many`, from `Strings.FileSelected` and
   `Strings.FilesSelected`), and takes a real drop on the zone with the
-  runtime-owned `data-hui-drop-over` state.
+  runtime-owned `data-hui-drop-over` state. The input is resolved
+  from `data-hui-drop-input` on every event, so a swap that replaced
+  it while the zone survived still lands the drop on the control the
+  form submits.
 - **system** keeps a dismissed banner hidden for the session, and
   shows the offline one (`data-hui-system-offline`) when the framework
-  reports the connection lost with a retry scheduled.
+  reports the connection lost with a retry scheduled — reading, on
+  arm, the state `sse.js` mirrors onto `window.__gofastr.sseStatus`,
+  so a banner that arrives during an outage shows at once. The
+  dismissed set never applies to it: losing the connection again must
+  show it again, which is also why the offline banner carries no
+  dismiss.
 
 Two attributes are the module's own, written by it and rendered by no
 component: `data-hui-when-off` and `data-hui-drop-over`.

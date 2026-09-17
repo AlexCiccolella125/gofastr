@@ -274,7 +274,7 @@ func Pagination(p PaginationProps, s Skin) render.HTML {
 	next := orDefault(p.NextLabel, w.Next)
 
 	links := make([]render.HTML, 0, 10)
-	links = append(links, paginationLink(s, p.Island, p.Page-1, prev, p.HrefPattern, p.Page == 1, false))
+	links = append(links, paginationLink(b, p.Island, p.Page-1, prev, p.HrefPattern, p.Page == 1, false))
 	for _, n := range pageWindow(p.Page, p.Pages) {
 		if n == 0 {
 			links = append(links, b.El("span", PartPaginationGap,
@@ -282,9 +282,9 @@ func Pagination(p PaginationProps, s Skin) render.HTML {
 				render.Text("…")))
 			continue
 		}
-		links = append(links, paginationLink(s, p.Island, n, strconv.Itoa(n), p.HrefPattern, false, n == p.Page))
+		links = append(links, paginationLink(b, p.Island, n, strconv.Itoa(n), p.HrefPattern, false, n == p.Page))
 	}
-	links = append(links, paginationLink(s, p.Island, p.Page+1, next, p.HrefPattern, p.Page == p.Pages, false))
+	links = append(links, paginationLink(b, p.Island, p.Page+1, next, p.HrefPattern, p.Page == p.Pages, false))
 
 	return b.El("nav", PartRoot,
 		Merge(Safe(p.ExtraAttrs), Attrs(map[string]string{
@@ -297,8 +297,11 @@ func Pagination(p PaginationProps, s Skin) render.HTML {
 // paginationLink renders one pagination anchor. Disabled end links
 // stay anchors that say aria-disabled and keep out of the tab order —
 // the same posture as a disabled Button anchor, and better than a
-// link that silently navigates to the page you are on.
-func paginationLink(s Skin, isle Island, page int, label, pattern string, disabled, current bool) render.HTML {
+// link that silently navigates to the page you are on. It renders
+// through the caller's Box, because the link is a named part: the
+// attrs and binds a caller sets on PartPaginationLink land here or
+// they land nowhere.
+func paginationLink(b Box, isle Island, page int, label, pattern string, disabled, current bool) render.HTML {
 	attrs := html.Attrs{}
 	if current {
 		attrs["aria-current"] = "page"
@@ -314,7 +317,7 @@ func paginationLink(s Skin, isle Island, page int, label, pattern string, disabl
 		// it, and the query is shared so the two answer one question.
 		attrs = Merge(attrs, isle.attrs(href, "GET"))
 	}
-	return El("a", s, PartPaginationLink, attrs, render.Text(label))
+	return b.El("a", PartPaginationLink, attrs, render.Text(label))
 }
 
 // pageWindow picks which page numbers to render: the first and last

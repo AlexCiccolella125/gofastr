@@ -39,6 +39,27 @@ func TestIslandAttrsShape(t *testing.T) {
 		t.Errorf("query join = %q", joined["data-fui-rpc"])
 	}
 
+	// A fragment never reaches the endpoint: it names a place inside
+	// the document the href renders, not a place inside the region
+	// the island fetches.
+	frag := isle.attrs("/apps?page=3#results", "GET")
+	if frag["data-fui-rpc"] != "/island/apps?page=3" {
+		t.Errorf("a fragment reached the endpoint: %q", frag["data-fui-rpc"])
+	}
+	if frag["data-fui-push-state"] != "/apps?page=3#results" {
+		t.Errorf("push-state must keep the href as written, fragment and all: %q", frag["data-fui-push-state"])
+	}
+
+	// A key present in both keeps both values in order, the
+	// endpoint's first — the endpoint names the resource and the href
+	// narrows it, and a silent overwrite would drop whichever pair
+	// lost the race.
+	both := Island{Endpoint: "/island/apps?sort=name", Signal: "apps"}.
+		attrs("/apps?sort=age&page=2", "GET")
+	if both["data-fui-rpc"] != "/island/apps?page=2&sort=name&sort=age" {
+		t.Errorf("a shared key merged to %q, want both values with the endpoint's first", both["data-fui-rpc"])
+	}
+
 	// A mutation writes no URL: where the change lands is the server's
 	// to say through X-Gofastr-Push-State.
 	post := isle.attrs("/apps/blog", "POST")

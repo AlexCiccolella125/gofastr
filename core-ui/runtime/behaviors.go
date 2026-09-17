@@ -158,12 +158,18 @@ func BehaviorsJSON() []byte {
 }
 
 // validateRequirements refuses a dependency graph the loader could
-// never satisfy, here at manifest time so the failure is a startup
-// panic naming the culprit rather than a page whose module waits
-// forever. A requirement must be an embedded module (embedded modules
-// declare no requirements of their own, so they are the graph's
-// leaves) or another registered behaviour; a cycle among registered
-// behaviours is refused with its path.
+// never satisfy, here at manifest time so the failure names the
+// culprit rather than leaving a page whose module waits forever. The
+// check runs when the block is first built — the first render (or
+// first /__gofastr/manifest.js request), not process startup: the
+// registry is only complete once every package's init has run, and
+// this is the first reader of the whole graph. On a host whose chain
+// carries the framework's recovery middleware (framework.App wires
+// core/middleware.RecoveryFn) the panic surfaces as a 500 carrying
+// the cycle path in the log line. A requirement must be an embedded
+// module (embedded modules declare no requirements of their own, so
+// they are the graph's leaves) or another registered behaviour; a
+// cycle among registered behaviours is refused with its path.
 func validateRequirements(all []*registry.BehaviorEntry) {
 	byName := make(map[string]*registry.BehaviorEntry, len(all))
 	for _, e := range all {

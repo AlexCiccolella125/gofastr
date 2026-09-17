@@ -9,10 +9,13 @@ package headless
 // French reader needs those guarantees in French, and a key map
 // ("dismiss.label" → "Fermer") would put the finding of a missing
 // string on a rendered page. So the words are a typed struct: one
-// field per string, a doc comment saying its shape, and a missing
-// field a compile error rather than a stray English word on a French
-// page. The framework's own translated strings live in
-// framework/i18nui as keys; a layer above this one resolves each
+// field per string, a doc comment saying its shape, and a field left
+// empty falling back to its English default at RUNTIME — a partial
+// translation is safe, and the miss is a stray English word on a
+// French page, not a compile error. The probe golden
+// (spec_golden_strings.txt) is what catches a component saying a
+// word no field carries. The framework's own translated strings live
+// in framework/i18nui as keys; a layer above this one resolves each
 // field from those keys once per request.
 //
 // The field is Strings on every component's props: nil means the

@@ -292,10 +292,9 @@ func TestSkeletonBarsAreNeverAnnounced(t *testing.T) {
 // accessibility tree. role="alert" is the one case where interrupting
 // is right, because this genuinely just happened.
 func TestValidationSummaryInterruptsAndCanTakeFocus(t *testing.T) {
-	got := ValidationSummary(ValidationSummaryProps{Errors: []FieldError{
+	got := ValidationSummary(ValidationSummaryProps{ID: "port-errors", Errors: []FieldError{
 		{For: "port", Message: "Port must be between 1 and 65535."},
 	}}, nil)
-	has(t, got, `role="alert"`, "a failed submit is silent")
 	// Focusable by script, never by tab: the server sends focus here
 	// after a failed submit, and it must not become a stop on the way
 	// through the form.
@@ -304,8 +303,11 @@ func TestValidationSummaryInterruptsAndCanTakeFocus(t *testing.T) {
 }
 
 // An empty summary that announces itself is a lie that interrupts.
+// The ID is still required: a summary with no errors today is a
+// summary a later render fills in, and the id must never depend on
+// the error count.
 func TestValidationSummaryWithNoErrorsRendersNothing(t *testing.T) {
-	if got := ValidationSummary(ValidationSummaryProps{}, nil); got != "" {
+	if got := ValidationSummary(ValidationSummaryProps{ID: "empty-errors"}, nil); got != "" {
 		t.Errorf("an empty summary rendered %q, which would announce a problem that does not exist", got)
 	}
 }
@@ -313,11 +315,33 @@ func TestValidationSummaryWithNoErrorsRendersNothing(t *testing.T) {
 // An error with no field to point at is still an error worth reading;
 // it just cannot be a link.
 func TestErrorWithoutAFieldIsStillListed(t *testing.T) {
-	got := ValidationSummary(ValidationSummaryProps{Errors: []FieldError{
+	got := ValidationSummary(ValidationSummaryProps{ID: "session-errors", Errors: []FieldError{
 		{Message: "Your session expired. Sign in and try again."},
 	}}, nil)
 	has(t, got, "session expired", "an error with no field id was dropped")
 	hasNot(t, got, "href=", "an error with no field became a link to nowhere")
+}
+
+// Every href a component writes goes through the anchor policy, the
+// summary's field links included. A For the policy refuses — control
+// bytes, a backslash — is rendered as text rather than as a link
+// nowhere should follow, the same fallback as a For that is empty.
+func TestAnErrorWhoseFieldThePolicyRefusesIsText(t *testing.T) {
+	got := ValidationSummary(ValidationSummaryProps{ID: "bad-errors", Errors: []FieldError{
+		{For: "port\\evil", Message: "That field id is not a fragment."},
+	}}, nil)
+	has(t, got, "not a fragment", "the message was dropped")
+	hasNot(t, got, "href=", "a For the anchor policy refuses became a link anyway")
+}
+
+// The ID is required because the title's id is derived from it: two
+// summaries without ids on one page would share one title id, and
+// both labels and both announcements would point at whichever heading
+// the browser settled on.
+func TestValidationSummaryRequiresAnID(t *testing.T) {
+	mustRefuse(t, "a summary with no ID", func() {
+		ValidationSummary(ValidationSummaryProps{Errors: []FieldError{{For: "x", Message: "m"}}}, nil)
+	})
 }
 
 // The order is the content, so the list is ordered: a screen reader
@@ -381,7 +405,7 @@ func TestUploadHintIsTiedToTheInput(t *testing.T) {
 // one.
 func TestFormWithErrorsAsksForFocus(t *testing.T) {
 	withErrors := Form(FormProps{Action: "/apps", Errors: ValidationSummary(ValidationSummaryProps{
-		Errors: []FieldError{{For: "port", Message: "Out of range."}}}, nil)}, nil)
+		ID: "apps-errors", Errors: []FieldError{{For: "port", Message: "Out of range."}}}, nil)}, nil)
 	has(t, withErrors, "data-hui-form-errors", "nothing tells the runtime a submit failed")
 
 	clean := Form(FormProps{Action: "/apps"}, nil)

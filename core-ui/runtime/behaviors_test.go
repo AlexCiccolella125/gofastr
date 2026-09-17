@@ -165,8 +165,11 @@ func mustPanicNames(t *testing.T, want string, fn func()) {
 // A valid requirement rides the behaviours block as r, so the kernel
 // loads the primitive before the behaviour that needs it. A
 // requirement that is neither an embedded module nor a registered
-// behaviour, and a cycle, panic at BehaviorsJSON time with the names,
-// which is a startup failure rather than a module that waits forever.
+// behaviour, and a cycle, panic at BehaviorsJSON time with the names:
+// the first render that builds the manifest, not startup (the
+// registry is only complete once every package's init has run) — see
+// TestCyclePanicSurfacesAs500ThroughARealHost for what that panic
+// does to a real request.
 func TestBehaviorsJSONRequirements(t *testing.T) {
 	registry.IsolateForTest(t)
 	registry.RegisterBehavior("dep", probeJS, registry.Markers("[data-dep]"))

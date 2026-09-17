@@ -115,9 +115,20 @@ func FieldRow(s Skin, fields ...render.HTML) render.HTML {
 type ConditionalFieldProps struct {
 	// When is the NAME of the watched field. Required: a region that
 	// watches nothing is always shown, which is a div.
+	//
+	// The scope the runtime reads the name in: the region's own form
+	// first — two forms can each carry a "plan" control and the region
+	// follows the one it belongs to — and, when the region has no
+	// form or its form holds no control of that name, the document,
+	// preferring controls no form owns (a page-level switch) and
+	// otherwise the first in document order.
 	When string
 	// Value is the watched field's value that shows the region.
 	// Required: shown on every value is the same as always shown.
+	// The empty string is refused, so "show when unchecked" — a
+	// checkbox whose unchecked value is "" — is not expressible here;
+	// watch a select or a radio pair whose values are both stated
+	// instead.
 	Value string
 
 	ID         string
