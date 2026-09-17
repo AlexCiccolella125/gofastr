@@ -29,14 +29,21 @@ func TestBehaviorIsRegisteredAndServed(t *testing.T) {
 			t.Fatalf("runtime.Module(%q) does not serve the registered source", name)
 		}
 	}
+	// The migration engine is never on the critical path: it loads at
+	// idle, and local-store forces it by name the moment a rewrite is
+	// due.
+	m, ok := registry.LookupBehavior(MigrateName)
+	if !ok || !m.Idle || len(m.Requires) != 1 || m.Requires[0] != BehaviorName {
+		t.Fatalf("%s = %+v, want LoadIdle and Requires(%q)", MigrateName, m, BehaviorName)
+	}
 }
 
-// The module is held to the JavaScript lints every embedded module is
-// held to — and those lints still refuse a raw storage key. The clean
-// half runs over this package's own source; the refusing half runs
-// over a mutated copy, so the guard is watched failing, not reasoned
-// about.
-func TestStorageKeyLintReachesTheModuleAndStillRefusesARawKey(t *testing.T) {
+// Every registered module of this package is held to the JavaScript
+// lints every embedded module is held to — and those lints still refuse
+// a raw storage key and an unencoded cookie key. The clean half runs
+// over this package's own source; the refusing half runs over mutated
+// copies, so each guard is watched failing, not reasoned about.
+func TestStorageKeyLintReachesTheModulesAndStillRefusesARawKey(t *testing.T) {
 	here, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -53,54 +60,98 @@ func TestStorageKeyLintReachesTheModuleAndStillRefusesARawKey(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 		if res.HasErrors() {
-			t.Errorf("%s over local-store.js:\n%s", name, res.Error())
+			t.Errorf("%s over this package's modules:\n%s", name, res.Error())
 		}
 	}
 
-	// Mutations: a key from a marker attribute reaches localStorage raw
-	// (the raw arm), the cookie namespace is dropped in favour of an
-	// application-chosen prefix (the namespace arm), and the mirror
-	// cookie concatenates the key unencoded (the cookie lint).
+	// The storage-key lint has three arms and they say different things.
+	// Asserting on the word "raw", or on the "[storage-key-raw]" prefix
+	// every one of them carries, asserts nothing: the message always
+	// contains both, so the mutation could stop failing and the test
+	// could not tell. Each arm is asserted on ITS OWN wording, and the
+	// wording is pinned against the lint's source so a rewrite there
+	// breaks this test rather than silently hollowing it out.
+	for _, tc := range []struct {
+		name    string
+		mutate  func(string) string
+		wantMsg string
+	}{
+		{
+			// A key from a marker attribute reaches localStorage raw.
+			name:    "a raw attribute-borne key",
+			wantMsg: "uses \"el.getAttribute('data-fui-signal')\" raw",
+			mutate: func(src string) string {
+				return strings.Replace(src, "const wire = (el) => {",
+					"const wire = (el) => {\n    localStorage.setItem(el.getAttribute('data-fui-signal'), '1');", 1)
+			},
+		},
+		{
+			// The namespace is an application-chosen prefix, not the
+			// framework's: an attribute value still names every key
+			// under it.
+			name:    "a foreign namespace",
+			wantMsg: "behind a namespace that is not the framework's",
+			mutate: func(src string) string {
+				return strings.Replace(src, "const wire = (el) => {",
+					"const wire = (el) => {\n    localStorage.setItem('local.' + encodeURIComponent(el.getAttribute('data-local-seed')), '1');", 1)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			mutated := tc.mutate(localStoreJS)
+			if mutated == localStoreJS {
+				t.Fatal("the mutation did not apply: the anchor moved")
+			}
+			if err := os.WriteFile(filepath.Join(dir, "local-store.js"), []byte(mutated), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			res, err := check.LintStorageKeyRaw(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(res.Error(), tc.wantMsg) {
+				t.Fatalf("the storage-key lint did not raise the %s arm (%q):\n%s", tc.name, tc.wantMsg, res.Error())
+			}
+		})
+	}
+
+	// And the cookie lint, over the module that writes the cookies.
 	dir := t.TempDir()
-	src := localStoreJS
-	mutated := strings.Replace(src,
-		"const wire = (el) => {",
-		"const wire = (el) => {\n    localStorage.setItem(el.getAttribute('data-fui-signal'), '1');\n    localStorage.setItem('local.' + encodeURIComponent(el.getAttribute('data-local-seed')), '1');",
-		1)
-	if mutated == src {
-		t.Fatal("the mutation did not apply: the anchors moved")
-	}
-	if err := os.WriteFile(filepath.Join(dir, "local-store.js"), []byte(mutated), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	res, err := check.LintStorageKeyRaw(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	msg := res.Error()
-	if !strings.Contains(msg, "raw") && !strings.Contains(msg, "storage-key-raw") {
-		t.Fatalf("the storage-key lint let a raw attribute-borne key through:\n%s", msg)
-	}
-	if !strings.Contains(msg, "not the framework's") {
-		t.Fatalf("the storage-key lint let a foreign namespace through:\n%s", msg)
-	}
-	// The cookies moved to local-bridge.js with the rest of the mirror.
-	bridgeDir := t.TempDir()
-	bridge := strings.Replace(localBridgeJS,
+	mutated := strings.Replace(localBridgeJS,
 		"document.cookie = 'gofastr.local.' + encodeURIComponent(app + '.' + coll + '.' + key) + '=' + encodeURIComponent(text) + '; path=/; max-age=31536000; SameSite=Lax; Secure';",
 		"document.cookie = 'gofastr.local.' + key + '=' + encodeURIComponent(text) + '; path=/; max-age=31536000; SameSite=Lax; Secure';",
 		1)
-	if bridge == localBridgeJS {
+	if mutated == localBridgeJS {
 		t.Fatal("the cookie mutation did not apply: the anchor moved")
 	}
-	if err := os.WriteFile(filepath.Join(bridgeDir, "local-bridge.js"), []byte(bridge), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "local-bridge.js"), []byte(mutated), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	res, err = check.LintCookieConcat(bridgeDir)
+	res, err := check.LintCookieConcat(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.HasErrors() {
-		t.Fatal("the cookie lint let an unencoded mirror key through")
+	if !strings.Contains(res.Error(), "document.cookie concatenates \"key\" raw") {
+		t.Fatalf("the cookie lint let an unencoded mirror key through:\n%s", res.Error())
+	}
+}
+
+// The wordings the assertions above depend on are the lint's own. If a
+// rewrite in core-ui/check changes them, this fails here rather than
+// leaving the mutation assertions unable to fail.
+func TestTheLintWordingsThisPackageAssertsStillExist(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "core-ui", "check", "runtimeshapes.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"uses %q raw",
+		"behind a namespace that is not the framework's",
+		"document.cookie concatenates %q raw",
+	} {
+		if !strings.Contains(string(src), want) {
+			t.Errorf("core-ui/check no longer emits %q — the mutation assertions in this file are asserting a message that does not exist", want)
+		}
 	}
 }
