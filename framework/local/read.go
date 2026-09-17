@@ -143,7 +143,7 @@ func (s *Store) decodeCookie(c *http.Cookie) (coll, key string, raw json.RawMess
 	}
 	coll, key = rest[:dot], rest[dot+1:]
 	def := s.defOf(coll)
-	if def == nil || !def.mirror || !ValidKey(key) {
+	if def == nil || !def.mirror || !validRecordKey(key) {
 		return "", "", nil, false
 	}
 	text, err := url.PathUnescape(c.Value)

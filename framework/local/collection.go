@@ -253,22 +253,21 @@ func (c *Collection[T]) Name() string { return c.def.name }
 // Store returns the declaring store.
 func (c *Collection[T]) Store() *Store { return c.def.store }
 
-// Version returns the declared schema version.
-func (c *Collection[T]) Version() int { return c.def.version }
+// The effective declaration, read back. Unexported: the caller wrote
+// the CollectionConfig, and the only thing that reads these is the test
+// that pins the clamping. An accessor nothing calls is a promise the
+// package has to keep for nothing.
+func (c *Collection[T]) version() int        { return c.def.version }
+func (c *Collection[T]) maxRecordBytes() int { return c.def.maxRecord }
+func (c *Collection[T]) maxRecords() int     { return c.def.maxRecords }
+func (c *Collection[T]) maxBytes() int       { return c.def.maxBytes }
+func (c *Collection[T]) mirrored() bool      { return c.def.mirror }
 
-// MaxRecordBytes, MaxRecords and MaxBytes return the effective caps.
-func (c *Collection[T]) MaxRecordBytes() int { return c.def.maxRecord }
-func (c *Collection[T]) MaxRecords() int     { return c.def.maxRecords }
-func (c *Collection[T]) MaxBytes() int       { return c.def.maxBytes }
-
-// Mirrored reports whether records ride a cookie for first-paint reads.
-func (c *Collection[T]) Mirrored() bool { return c.def.mirror }
-
-// KeyOf returns the key the browser's put(value) would derive: the
+// keyOf returns the key the browser's put(value) would derive: the
 // declared KeyField of v, which must be a non-empty string. It errors
 // when the collection has no key field or the field is absent, not a
 // string, or not a valid key.
-func (c *Collection[T]) KeyOf(v T) (string, error) {
+func (c *Collection[T]) keyOf(v T) (string, error) {
 	if c.def.keyField == "" {
 		return "", fmt.Errorf("local: collection %q declares no KeyField", c.def.name)
 	}
@@ -284,7 +283,7 @@ func (c *Collection[T]) KeyOf(v T) (string, error) {
 	if err := json.Unmarshal(obj[c.def.keyField], &key); err != nil {
 		return "", fmt.Errorf("local: collection %q: key field %q is not a string", c.def.name, c.def.keyField)
 	}
-	if !ValidKey(key) {
+	if !validRecordKey(key) {
 		return "", fmt.Errorf("local: collection %q: key %q is not a valid key", c.def.name, key)
 	}
 	return key, nil
@@ -292,7 +291,7 @@ func (c *Collection[T]) KeyOf(v T) (string, error) {
 
 // Key names one record of the collection for Send.
 func (c *Collection[T]) Key(key string) Ref {
-	if !ValidKey(key) {
+	if !validRecordKey(key) {
 		panic(fmt.Sprintf("local: collection %q: %q is not a valid key", c.def.name, key))
 	}
 	return Ref{def: c.def, key: key}

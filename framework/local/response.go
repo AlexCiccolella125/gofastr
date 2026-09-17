@@ -49,7 +49,7 @@ type responseMsg struct {
 // over the collection's record cap, a header already carrying another
 // store, or a header over ResponseHeaderMaxBytes.
 func Put[T any](w http.ResponseWriter, c *Collection[T], key string, value T) error {
-	if !ValidKey(key) {
+	if !validRecordKey(key) {
 		return fmt.Errorf("%w: %q", ErrBadKey, key)
 	}
 	raw, err := json.Marshal(value)
@@ -64,7 +64,7 @@ func Put[T any](w http.ResponseWriter, c *Collection[T], key string, value T) er
 
 // Delete removes record key of c from the browser on this response.
 func Delete[T any](w http.ResponseWriter, c *Collection[T], key string) error {
-	if !ValidKey(key) {
+	if !validRecordKey(key) {
 		return fmt.Errorf("%w: %q", ErrBadKey, key)
 	}
 	return appendOp(w, c.def.store, responseOp{C: c.def.name, K: key, D: true})

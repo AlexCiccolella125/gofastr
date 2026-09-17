@@ -69,10 +69,13 @@ var (
 // cap keeps a key from being the payload.
 const KeyMaxLen = 256
 
-// ValidKey reports whether key may name a record: non-empty, at most
-// KeyMaxLen bytes, and not a name the browser's object model reserves.
-// Mirrors validKey in local-store.js.
-func ValidKey(key string) bool {
+// validRecordKey reports whether key may name a record: non-empty, at
+// most KeyMaxLen bytes, and not a name the browser's object model
+// reserves. Mirrors validKey in local-store.js, which counts the same
+// UTF-8 bytes. Unexported: Collection.Key panics with the reason, Put
+// and Delete return ErrBadKey, and the browser refuses with reason
+// 'key' — nothing a caller does needs to ask the question separately.
+func validRecordKey(key string) bool {
 	if key == "" || len(key) > KeyMaxLen {
 		return false
 	}
@@ -124,8 +127,8 @@ func New(app string) *Store {
 // App returns the store's app id.
 func (s *Store) App() string { return s.app }
 
-// Collections returns the declared collection names, sorted.
-func (s *Store) Collections() []string {
+// collections returns the declared collection names, sorted.
+func (s *Store) collections() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]string, 0, len(s.colls))

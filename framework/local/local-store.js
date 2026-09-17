@@ -82,7 +82,12 @@
   const bytesOf = (text) => {
     try { return new TextEncoder().encode(text).length; } catch (_) { return text.length; }
   };
-  const validKey = (key) => typeof key === 'string' && key !== '' && key.length <= 256 && !RESERVED.test(key);
+  // KeyMaxLen in local.go, in the same unit: BYTES. String.length is
+  // UTF-16 code units, so 200 accented characters passed here and were
+  // refused by the Go validator — a key the browser wrote happily and
+  // the server would not read, on a record that then only exists on one
+  // side. The two validators mirror each other or they do not.
+  const validKey = (key) => typeof key === 'string' && key !== '' && bytesOf(key) <= 256 && !RESERVED.test(key);
   const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 
@@ -127,13 +132,10 @@
   // pays for them.
   const wantsBridge = () => {
     const all = window.__gofastr_local;
-    if (!all || typeof all !== 'object') return false;
-    for (const app of Object.keys(all)) {
+    for (const app of Object.keys(all && typeof all === 'object' ? all : {})) {
       if (cookieNamed('gofastr.local.clear.' + encodeURIComponent(app))) return true;
-      const m = all[app];
-      const cs = m && typeof m === 'object' && isObject(m.collections) ? m.collections : null;
-      if (!cs) continue;
-      for (const n of Object.keys(cs)) if (cs[n] && cs[n].mirror) return true;
+      const cs = (all[app] || {}).collections;
+      for (const n of Object.keys(isObject(cs) ? cs : {})) if (cs[n] && cs[n].mirror) return true;
     }
     return false;
   };
@@ -399,6 +401,12 @@
     const store = {
       app,
       collections,
+      // The validators local-bridge needs, on the object it already
+      // fetches. They were an undocumented global bag, __gofastr
+      // ._localHelpers, which is a second public surface nothing
+      // documents and anything on the origin can replace — and
+      // replacing validKey is how a key escapes the namespace.
+      helpers: { validKey: validKey, encode: encode, isObject: isObject },
       collection(name) {
         return typeof name === 'string' && own(collections, name) ? collections[name] : null;
       },
@@ -439,8 +447,6 @@
   // __gofastr.loadModule('local-store'): the store for that app id, or
   // null when no manifest declared it.
   NS.localStore = (app) => (typeof app === 'string' && !RESERVED.test(app) ? openStore(app) : null);
-  // Shared with the bridge module.
-  NS._localHelpers = { validKey: validKey, encode: encode, isObject: isObject, RESERVED: RESERVED };
 
   if (wantsBridge()) NS.loadModule('local-bridge').catch(() => {});
   scan(document);

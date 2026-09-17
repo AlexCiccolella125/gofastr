@@ -21,13 +21,25 @@
   // Flag first (see local-store.js).
   (NS.loadedModules = NS.loadedModules || {})[NAME] = true;
 
-  const H = NS._localHelpers;
-  const validKey = H.validKey;
-  const encode = H.encode;
-  const isObject = H.isObject;
-  const RESERVED = H.RESERVED;
+  // The reserved-name guard is spelled here because this file needs it
+  // BEFORE it has a store — an app id off a marker names the store it
+  // would fetch. Everything else comes off the store object this file
+  // already fetches, so there is no second global surface for a script
+  // on the origin to replace.
+  const RESERVED = /^(__proto__|constructor|prototype)$/;
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
   const openStore = (app) => NS.localStore(app);
+  // validKey is the one validator with real content — a byte length and
+  // a reserved-name set that must agree with the Go side — so it comes
+  // off the store rather than being spelled twice. encode and isObject
+  // are two lines each and are spelled here.
+  const validKeyOf = (store) => (store && store.helpers && store.helpers.validKey) || (() => false);
+  const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+  const encode = (value) => {
+    let text;
+    try { text = JSON.stringify(value); } catch (_) { return null; }
+    return typeof text === 'string' ? text : null;
+  };
 
   const MARKER = '[data-local-seed]';
 
@@ -173,6 +185,7 @@
     if (colon <= 0 || !name || RESERVED.test(name)) return;
     const coll = spec.slice(0, colon);
     const key = spec.slice(colon + 1);
+    const validKey = validKeyOf(store);
     const c = store.collection(coll);
     if (!c || !validKey(key)) return;
     let entry = seeds.get(name);
@@ -183,15 +196,19 @@
       try { NS.setSignal(name, value); } finally { entry.echoing = false; }
     };
     if (!entry) {
+      // Spelled at the sink, and BEFORE the entry is inserted. wireSeed
+      // already refused a reserved name above, so this is unreachable —
+      // but core-ui/check's proto-key-write lint reads the guard
+      // immediately before the write, deliberately: a guard a function
+      // scope away is one the next edit moves out from under, and
+      // data-fui-signal="__proto__" re-parents the whole signal store.
+      // It sat AFTER seeds.set, so the one path that could reach it
+      // left a half-wired entry behind; it no longer can.
+      if (name === '__proto__' || name === 'constructor' || name === 'prototype') return;
       entry = { echoing: false, last: null };
       seeds.set(name, entry);
-      // The kernel's own reserved-key refusal, spelled here because
-      // this module creates the signal slot (persist.js's idiom): a
-      // planted data-fui-signal="__proto__" would otherwise re-parent
-      // the shared signal store. Own-property read, computed.js's
-      // idiom: a name like "constructor" resolves through the
-      // prototype chain otherwise.
-      if (name === '__proto__' || name === 'constructor' || name === 'prototype') return;
+      // Own-property read, computed.js's idiom: a name like
+      // "constructor" resolves through the prototype chain otherwise.
       if (!Object.prototype.hasOwnProperty.call(NS._signals, name) || !NS._signals[name]) NS._signals[name] = { value: undefined, listeners: [] };
       NS._signals[name].listeners.push((v) => {
         if (entry.echoing) return; // a restore or a mirror is not a new write
@@ -331,6 +348,7 @@
       console.warn('[gofastr] local download: no store declared for', msg.app, '- the response wrote nothing');
       return;
     }
+    const validKey = validKeyOf(store);
     const settle = (coll, key, p) => p.then((r) => {
       if (r && r.ok) return;
       // The op carries the store's own gofastr:local-error too; this

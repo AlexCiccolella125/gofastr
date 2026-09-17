@@ -34,7 +34,7 @@ type SeededSignal[T any] struct {
 // client-side navigation, and the app-global merge rule is what keeps
 // a partial render from clobbering it.
 func SeedSignal[T any](c *Collection[T], key string, slice *store.Slice[T]) *SeededSignal[T] {
-	if !ValidKey(key) {
+	if !validRecordKey(key) {
 		panic(fmt.Sprintf("local: SeedSignal on %q: %q is not a valid key", c.def.name, key))
 	}
 	if slice.Persisted() {
@@ -44,8 +44,10 @@ func SeedSignal[T any](c *Collection[T], key string, slice *store.Slice[T]) *See
 	return &SeededSignal[T]{coll: c, key: key, slice: slice}
 }
 
-// Slice returns the bound slice.
-func (s *SeededSignal[T]) Slice() *store.Slice[T] { return s.slice }
+// boundSlice returns the bound slice. Unexported: the caller passed the
+// slice in and still holds it; handing it back was a second name for
+// something nothing asked for.
+func (s *SeededSignal[T]) boundSlice() *store.Slice[T] { return s.slice }
 
 // Attrs returns the two marker attributes a binding carries:
 // data-local-store="<app>" and data-local-seed="<collection>:<key>".

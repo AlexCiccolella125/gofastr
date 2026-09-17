@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -88,8 +89,8 @@ func TestDefineValidatesTheDeclaration(t *testing.T) {
 
 	// Mirror clamps to the cookie-sized defaults and ceilings.
 	p := Define[prefs](s, "prefs", CollectionConfig{Version: 1, Mirror: true})
-	if p.MaxRecordBytes() != MirrorDefaultMaxRecordBytes || p.MaxRecords() != MirrorDefaultMaxRecords {
-		t.Fatalf("mirror caps = %d/%d, want %d/%d", p.MaxRecordBytes(), p.MaxRecords(), MirrorDefaultMaxRecordBytes, MirrorDefaultMaxRecords)
+	if p.maxRecordBytes() != MirrorDefaultMaxRecordBytes || p.maxRecords() != MirrorDefaultMaxRecords {
+		t.Fatalf("mirror caps = %d/%d, want %d/%d", p.maxRecordBytes(), p.maxRecords(), MirrorDefaultMaxRecordBytes, MirrorDefaultMaxRecords)
 	}
 	mustPanic(t, "exceeds the ceiling", func() {
 		Define[prefs](s, "prefs2", CollectionConfig{Version: 1, Mirror: true, MaxRecordBytes: 4096})
@@ -172,15 +173,15 @@ func TestManifestCarriesTheDeclaration(t *testing.T) {
 func TestKeyOfReadsTheDeclaredField(t *testing.T) {
 	s := fresh(t, "site")
 	d := Define[draft](s, "drafts", CollectionConfig{Version: 1, KeyField: "id"})
-	k, err := d.KeyOf(draft{ID: "abc"})
+	k, err := d.keyOf(draft{ID: "abc"})
 	if err != nil || k != "abc" {
 		t.Fatalf("KeyOf = %q, %v", k, err)
 	}
-	if _, err := d.KeyOf(draft{}); err == nil {
+	if _, err := d.keyOf(draft{}); err == nil {
 		t.Fatal("an empty key field must not be a key")
 	}
 	n := Define[draft](s, "nokey", CollectionConfig{Version: 1})
-	if _, err := n.KeyOf(draft{ID: "x"}); err == nil {
+	if _, err := n.keyOf(draft{ID: "x"}); err == nil {
 		t.Fatal("KeyOf on a collection with no KeyField must error")
 	}
 	mustPanic(t, "not a valid key", func() { d.Key("") })
@@ -579,5 +580,83 @@ func TestAReadSaysWhetherItCameFromTheUploadOrTheMirror(t *testing.T) {
 	// an answer.
 	if _, src, _ := Get(app.WithRequest(context.Background(), httptest.NewRequest("POST", "/x", nil)), p, "theme"); src != SourceNone || src.Found() {
 		t.Fatalf("an absent record = %q, want SourceNone", src)
+	}
+}
+
+// The two key validators mirror each other, in the same unit.
+//
+// Go bounds KeyMaxLen BYTES; the browser bounded String.length, which
+// counts UTF-16 code units. 200 accented characters are 200 units and
+// 400 bytes, so the browser wrote the record and the server refused to
+// read it: a record that exists on one side of the bridge only, with no
+// error anywhere to say why. The browser now counts UTF-8 bytes too
+// (validKey in local-store.js); this pins the Go half of the pair.
+func TestKeyLengthIsCountedInBytesNotCharacters(t *testing.T) {
+	long := strings.Repeat("é", 200) // 200 UTF-16 units, 400 UTF-8 bytes
+	if len([]rune(long)) > KeyMaxLen {
+		t.Fatalf("the sample is %d characters — it has to be under the cap in characters and over it in bytes", len([]rune(long)))
+	}
+	if validRecordKey(long) {
+		t.Fatalf("a %d-byte key passed a %d-byte cap", len(long), KeyMaxLen)
+	}
+	if !validRecordKey(strings.Repeat("a", KeyMaxLen)) {
+		t.Fatal("a key exactly at the cap must pass")
+	}
+}
+
+// An undeclared collection is refused even when it carries no records.
+//
+// The pre-check only looked at the FIRST record, so {"nope": []} —
+// a collection the store never declared, with nothing in it — passed
+// through and landed on the context as an empty collection a handler
+// could read back. The loop below it already refused every record of an
+// undeclared collection, which is what made that check both unreachable
+// for the cases it was meant to cover and wrong for this one.
+func TestAnUndeclaredCollectionIsRefusedEvenWhenEmpty(t *testing.T) {
+	s := fresh(t, "undecl")
+	d := Define[draft](s, "drafts", CollectionConfig{Version: 1})
+	u := Send(d)
+	if _, err := u.parse([]byte(`{"nope":[]}`)); !errors.Is(err, ErrUndeclared) {
+		t.Fatalf("parse({\"nope\":[]}) = %v, want ErrUndeclared", err)
+	}
+	// A declared collection with no records is still fine.
+	recs, err := u.parse([]byte(`{"drafts":[]}`))
+	if err != nil || len(recs["drafts"]) != 0 {
+		t.Fatalf("parse({\"drafts\":[]}) = %v %v", recs, err)
+	}
+}
+
+// The Content-Length header matches the body Wrap left behind.
+//
+// stripJSON re-marshals the rest of the object after lifting the
+// reserved field out, so the body is a different length. r.ContentLength
+// was corrected and the HEADER was not, and a stale Content-Length is
+// what a proxy, a middleware that re-reads the body, or a handler that
+// trusts the header will believe over the reader.
+func TestStripJSONLeavesNoStaleContentLength(t *testing.T) {
+	s := fresh(t, "clen")
+	d := Define[draft](s, "drafts", CollectionConfig{Version: 1})
+	u := Send(d)
+	body := `{"note":"hi","__local":{"drafts":[{"k":"a","v":{"id":"a"}}]}}`
+	req := httptest.NewRequest("POST", "/x", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Length", strconv.Itoa(len(body)))
+
+	var gotHeader string
+	var gotLen int64
+	var read int
+	h := u.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get("Content-Length")
+		gotLen = r.ContentLength
+		b, _ := io.ReadAll(r.Body)
+		read = len(b)
+	}))
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	if read == len(body) {
+		t.Fatal("the body was not rewritten — this test is not measuring what it says it is")
+	}
+	if gotHeader != strconv.Itoa(read) || gotLen != int64(read) {
+		t.Fatalf("Content-Length header %q, r.ContentLength %d, body %d bytes — all three have to agree", gotHeader, gotLen, read)
 	}
 }

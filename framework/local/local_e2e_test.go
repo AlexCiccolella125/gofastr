@@ -954,3 +954,26 @@ func TestE2E_ARefusedDownloadOpIsReported(t *testing.T) {
 		t.Fatalf("the response wrote a record the browser refused and nothing said so: %v", errs)
 	}
 }
+
+// The browser half of the same pair: a key the Go validator refuses
+// must be a key the browser refuses, in the same unit.
+func TestE2E_TheBrowserCountsKeyBytesLikeGoDoes(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+
+	var res map[string]any
+	// 200 accented characters: 200 UTF-16 units, 400 UTF-8 bytes.
+	evalJSON(t, ctx, draftsJS+`.put('é'.repeat(200), { title: 'x' })`, &res)
+	if ok, _ := res["ok"].(bool); ok {
+		t.Fatalf("put = %v — a key the server will not read must not be written here either", res)
+	}
+	if res["reason"] != "key" {
+		t.Fatalf("put = %v, want reason \"key\"", res)
+	}
+	// And a key at the cap in bytes still works.
+	evalJSON(t, ctx, draftsJS+`.put('a'.repeat(256), { title: 'x' })`, &res)
+	if ok, _ := res["ok"].(bool); !ok {
+		t.Fatalf("put at the cap = %v — the bound is 256 bytes, not fewer", res)
+	}
+}

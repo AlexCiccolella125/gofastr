@@ -212,13 +212,17 @@ func (u *Upload) parse(raw []byte) (map[string]map[string]json.RawMessage, error
 	}
 	out := map[string]map[string]json.RawMessage{}
 	for coll, recs := range wire {
-		if len(recs) > 0 && u.allowed(coll, recs[0].K) == nil && u.store.defOf(coll) == nil {
+		// The collection, once, before any record: a name the store
+		// never declared is refused even when it carries no records,
+		// which the old per-first-record pre-check let through as an
+		// empty collection on the context.
+		if u.store.defOf(coll) == nil {
 			return nil, fmt.Errorf("%w: %q", ErrUndeclared, coll)
 		}
 		total := 0
 		byKey := map[string]json.RawMessage{}
 		for _, rec := range recs {
-			if !ValidKey(rec.K) {
+			if !validRecordKey(rec.K) {
 				return nil, fmt.Errorf("%w: %q in %q", ErrBadKey, rec.K, coll)
 			}
 			def := u.allowed(coll, rec.K)
@@ -314,6 +318,14 @@ func respondUploadError(w http.ResponseWriter, err error) {
 // stripJSON reads the JSON body, lifts the reserved field out and
 // replaces the body with the rest. nil, nil when the field is absent
 // (the body is still replaced, byte for byte, so nothing was lost).
+//
+// When the field WAS present the rest is re-marshalled, so the wrapped
+// handler sees semantically the same object with a different encoding:
+// keys in Go's map order, no insignificant whitespace. A handler that
+// hashes or signs the raw body must do it upstream of Wrap. Both
+// r.ContentLength and the Content-Length HEADER are corrected — a stale
+// header is what a downstream proxy, a middleware that re-reads the
+// body, or a test that trusts it will believe over the reader.
 func (u *Upload) stripJSON(r *http.Request) ([]byte, error) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -331,6 +343,7 @@ func (u *Upload) stripJSON(r *http.Request) ([]byte, error) {
 	if !ok {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		r.ContentLength = int64(len(body))
+		r.Header.Set("Content-Length", strconv.Itoa(len(body)))
 		return nil, nil
 	}
 	delete(top, uploadField)
@@ -340,6 +353,7 @@ func (u *Upload) stripJSON(r *http.Request) ([]byte, error) {
 	}
 	r.Body = io.NopCloser(bytes.NewReader(rest))
 	r.ContentLength = int64(len(rest))
+	r.Header.Set("Content-Length", strconv.Itoa(len(rest)))
 	return field, nil
 }
 
