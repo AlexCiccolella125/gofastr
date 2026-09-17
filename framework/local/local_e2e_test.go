@@ -391,7 +391,7 @@ func TestE2E_MigrationRunsOnce(t *testing.T) {
 		t.Fatalf("the func migration ran %d times on one record", n)
 	}
 	var ev []map[string]any
-	evalJSON(t, ctx, `window.__migrations`, &ev)
+	evalJSON(t, ctx, `Promise.resolve(window.__migrations.filter((d) => d.collection === 'drafts'))`, &ev)
 	if len(ev) != 1 || ev[0]["from"] != float64(1) || ev[0]["to"] != float64(2) {
 		t.Fatalf("gofastr:local-migrated = %v", ev)
 	}

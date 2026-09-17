@@ -24,8 +24,10 @@ func TestBehaviorIsRegisteredAndServed(t *testing.T) {
 	if len(e.Requires) != 1 || e.Requires[0] != "local" {
 		t.Fatalf("requires = %v, want the local primitive", e.Requires)
 	}
-	if _, ok := runtime.Module(BehaviorName); !ok {
-		t.Fatalf("runtime.Module(%q) does not serve the registered source", BehaviorName)
+	for _, name := range []string{BehaviorName, BridgeName, MigrateName} {
+		if _, ok := runtime.Module(name); !ok {
+			t.Fatalf("runtime.Module(%q) does not serve the registered source", name)
+		}
 	}
 }
 
@@ -65,10 +67,6 @@ func TestStorageKeyLintReachesTheModuleAndStillRefusesARawKey(t *testing.T) {
 		"const wire = (el) => {",
 		"const wire = (el) => {\n    localStorage.setItem(el.getAttribute('data-fui-signal'), '1');\n    localStorage.setItem('local.' + encodeURIComponent(el.getAttribute('data-local-seed')), '1');",
 		1)
-	mutated = strings.Replace(mutated,
-		"document.cookie = 'gofastr.local.' + encodeURIComponent(app + '.' + coll + '.' + key) + '=' + encodeURIComponent(text) + '; path=/; max-age=31536000; SameSite=Lax';",
-		"document.cookie = 'gofastr.local.' + key + '=' + encodeURIComponent(text) + '; path=/; max-age=31536000; SameSite=Lax';",
-		1)
 	if mutated == src {
 		t.Fatal("the mutation did not apply: the anchors moved")
 	}
@@ -86,7 +84,19 @@ func TestStorageKeyLintReachesTheModuleAndStillRefusesARawKey(t *testing.T) {
 	if !strings.Contains(msg, "not the framework's") {
 		t.Fatalf("the storage-key lint let a foreign namespace through:\n%s", msg)
 	}
-	res, err = check.LintCookieConcat(dir)
+	// The cookies moved to local-bridge.js with the rest of the mirror.
+	bridgeDir := t.TempDir()
+	bridge := strings.Replace(localBridgeJS,
+		"document.cookie = 'gofastr.local.' + encodeURIComponent(app + '.' + coll + '.' + key) + '=' + encodeURIComponent(text) + '; path=/; max-age=31536000; SameSite=Lax; Secure';",
+		"document.cookie = 'gofastr.local.' + key + '=' + encodeURIComponent(text) + '; path=/; max-age=31536000; SameSite=Lax; Secure';",
+		1)
+	if bridge == localBridgeJS {
+		t.Fatal("the cookie mutation did not apply: the anchor moved")
+	}
+	if err := os.WriteFile(filepath.Join(bridgeDir, "local-bridge.js"), []byte(bridge), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err = check.LintCookieConcat(bridgeDir)
 	if err != nil {
 		t.Fatal(err)
 	}

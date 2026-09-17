@@ -1,10 +1,18 @@
-// local-bridge: the three bridges between framework/local's browser
+// local-bridge: the four bridges between framework/local's browser
 // store and Go screens — the seed (a signal filled from a record), the
-// upload (records that ride an RPC request) and the download (records
-// a response writes back). Requires local-store, which owns the store,
-// the caps, the migrations and the mirror; this file owns the markers
-// data-local-seed and data-local-send, the request/response hooks on
-// rpc.js's data-fui-rpc-with seam, and nothing else.
+// mirror (a record a render reads at first paint, through a cookie),
+// the upload (records that ride an RPC request) and the download
+// (records a response writes back). Requires local-store, which owns
+// the store, the caps and the migrations; this file owns the markers
+// data-local-seed and data-local-send, the cookies, the
+// request/response hooks on rpc.js's data-fui-rpc-with seam, and
+// nothing else.
+//
+// The line between the two modules is a responsibility, not a byte
+// count: local-store keeps records, local-bridge is every way those
+// records reach a Go handler. A page whose store keeps its records to
+// itself never loads this file; local-store asks for it when a
+// declaration mirrors a collection or a logout is pending.
 (() => {
   'use strict';
   const NAME = 'local-bridge';
@@ -22,6 +30,134 @@
   const openStore = (app) => NS.localStore(app);
 
   const MARKER = '[data-local-seed]';
+
+  // ─── the mirror bridge: a record a Go render reads at first paint ──
+
+  // A mirrored collection keeps every record in a cookie too, so a Go
+  // screen can read it at FIRST PAINT (the IndexedDB read lands after
+  // hydration, by construction). The name is the framework's namespace
+  // plus one component-encoded segment, the value the component-
+  // encoded JSON text: neither can carry the cookie grammar. Same
+  // shape as banner.js's dismissal cookie, which is the one channel a
+  // browser-held value had to the server before this module.
+  //
+  // On https the cookie is Secure, like every cookie the Go side sets
+  // (response.go follows the request scheme). Without it a single
+  // plain-http request to the origin — a typo, a stripped link, a
+  // captive portal — carries every mirrored record in clear text.
+  // Spelled as whole literal writes per case rather than a
+  // concatenated suffix: the cookie lint reads a document.cookie
+  // assignment operand by operand and refuses any non-literal that is
+  // not component-encoded, which is the rule that keeps a value from
+  // planting its own cookie name and attributes.
+  const SECURE = (() => {
+    try { return window.location.protocol === 'https:'; } catch (_) { return false; }
+  })();
+  const cookieNamed = (name) => {
+    try { return ('; ' + document.cookie).indexOf('; ' + name + '=') >= 0; } catch (_) { return false; }
+  };
+
+  // mirrorUsed is what this store's OTHER mirror cookies already cost
+  // the Cookie header, which is the number the budget is about: a
+  // record costs more encoded than stored, and a header block past the
+  // 8-16 KiB most proxies allow is a 431 the user can only clear by
+  // hand.
+  const mirrorUsed = (app, seg) => {
+    let all = '';
+    try { all = document.cookie; } catch (_) { return 0; }
+    let used = 0;
+    for (const part of all.split('; ')) {
+      const eq = part.indexOf('=');
+      if (eq < 0) continue;
+      const nm = part.slice(0, eq);
+      if (nm.indexOf('gofastr.local.' + app + '.') !== 0 || nm === 'gofastr.local.' + seg) continue;
+      used += part.length + 2;
+    }
+    return used;
+  };
+
+  // mirror writes the record's cookie, or clears it when text is ''
+  // (a zero max-age is the deletion). Over budget the write is refused
+  // and the page hears it; the record itself is kept, only its
+  // shortcut to first paint is not.
+  const mirror = (app, coll, key, text, budget) => {
+    const seg = encodeURIComponent(app + '.' + coll + '.' + key);
+    if (text) {
+      const enc = encodeURIComponent(text);
+      // The name, the '=', the encoded value and the '; ' a browser
+      // puts between cookies.
+      const cost = 'gofastr.local.'.length + seg.length + 1 + enc.length + 2;
+      if (budget > 0 && mirrorUsed(app, seg) + cost > budget) {
+        try {
+          window.dispatchEvent(new CustomEvent('gofastr:local-error', {
+            detail: { app: app, collection: coll, key: key, reason: 'mirror', size: cost, max: budget },
+          }));
+        } catch (_) { /* best-effort */ }
+        return;
+      }
+    }
+    try {
+      if (text && SECURE) document.cookie = 'gofastr.local.' + encodeURIComponent(app + '.' + coll + '.' + key) + '=' + encodeURIComponent(text) + '; path=/; max-age=31536000; SameSite=Lax; Secure';
+      else if (text) document.cookie = 'gofastr.local.' + encodeURIComponent(app + '.' + coll + '.' + key) + '=' + encodeURIComponent(text) + '; path=/; max-age=31536000; SameSite=Lax';
+      else if (SECURE) document.cookie = 'gofastr.local.' + encodeURIComponent(app + '.' + coll + '.' + key) + '=; path=/; max-age=0; SameSite=Lax; Secure';
+      else document.cookie = 'gofastr.local.' + encodeURIComponent(app + '.' + coll + '.' + key) + '=; path=/; max-age=0; SameSite=Lax';
+    } catch (_) { /* best-effort */ }
+  };
+  // Take the seam over: local-store queued every mirror call made
+  // before this file evaluated, and they run now, in order.
+  NS._localMirror(mirror);
+
+  // Clear-on-next-load: a full-navigation logout cannot ride an RPC
+  // response header, so the Go side plants a bit in a cookie and this
+  // module honours it once, then drops the cookie — but only once the
+  // clear actually succeeded, or a logout that could not reach the
+  // store would be forgotten.
+  //
+  // Honoured over every app the manifest declares, not only the ones a
+  // marker on this page names: the page a logout redirects to need not
+  // carry that app's marker at all.
+  const honourClearBits = () => {
+    const all = window.__gofastr_local;
+    if (!all || typeof all !== 'object') return;
+    for (const app of Object.keys(all)) {
+      if (RESERVED.test(app) || !cookieNamed('gofastr.local.clear.' + encodeURIComponent(app))) continue;
+      const store = openStore(app);
+      if (!store) continue;
+      store.clear().then((r) => {
+        if (!r.ok) return;
+        try {
+          if (SECURE) document.cookie = 'gofastr.local.clear.' + encodeURIComponent(app) + '=; path=/; max-age=0; SameSite=Lax; Secure';
+          else document.cookie = 'gofastr.local.clear.' + encodeURIComponent(app) + '=; path=/; max-age=0; SameSite=Lax';
+        } catch (_) { /* best-effort */ }
+      });
+    }
+  };
+
+  // A mirrored collection re-stamps its cookies when this module loads,
+  // so a cookie the browser dropped while the record survived comes
+  // back.
+  const restampMirrors = () => {
+    const all = window.__gofastr_local;
+    if (!all || typeof all !== 'object') return;
+    for (const app of Object.keys(all)) {
+      if (RESERVED.test(app)) continue;
+      const store = openStore(app);
+      if (!store) continue;
+      const m = all[app];
+      const cs = m && isObject(m.collections) ? m.collections : null;
+      const budget = m && m.mirrorMax > 0 ? m.mirrorMax : 0;
+      if (!cs) continue;
+      for (const name of Object.keys(cs)) {
+        if (!cs[name] || !cs[name].mirror || !store.collection(name)) continue;
+        const prefix = 'local.' + app + '.' + name + ':';
+        const coll = name;
+        store.collection(name).count().then(() => NS.local.entries(prefix)).then((er) => {
+          if (!er.ok) return;
+          for (const e of er.entries) mirror(app, coll, e.key.slice(prefix.length), encode(e.value) || 'null', budget);
+        });
+      }
+    }
+  };
 
   // ─── the seed bridge: a signal filled from a record ─────────────
 
@@ -174,6 +310,8 @@
     scope.querySelectorAll(MARKER).forEach(wire);
   };
 
+  honourClearBits();
+  restampMirrors();
   scan(document);
   NS._moduleScanners = NS._moduleScanners || {};
   NS._moduleScanners[NAME] = scan;

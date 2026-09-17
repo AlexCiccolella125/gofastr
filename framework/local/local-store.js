@@ -98,113 +98,44 @@
     return m && typeof m === 'object' && isObject(m.collections) ? m : null;
   };
 
-  // ─── cookies (the mirror, and the clear-on-next-load bit) ────────
+  // ─── the mirror seam ────────────────────────────────────────────
 
-  // A mirrored collection keeps every record in a cookie too, so a Go
-  // screen can read it at FIRST PAINT (the IndexedDB read lands after
-  // hydration, by construction). The name is the framework's namespace
-  // plus one component-encoded segment, the value the component-
-  // encoded JSON text: neither can carry the cookie grammar. Same
-  // shape as banner.js's dismissal cookie, which is the one channel a
-  // browser-held value had to the server before this module.
-  // On https the mirror cookie is Secure, like every cookie the Go
-  // side sets (response.go follows the request scheme). Without it a
-  // single plain-http request to the origin — a typo, a stripped link,
-  // a captive portal — carries every mirrored record in clear text.
-  // Spelled as two whole literal writes per operation rather than a
-  // concatenated suffix: the cookie lint reads a document.cookie
-  // assignment operand by operand and refuses any non-literal that is
-  // not component-encoded, which is the rule that keeps a value from
-  // planting its own cookie name and attributes.
-  const SECURE = (() => {
-    try { return window.location.protocol === 'https:'; } catch (_) { return false; }
-  })();
-
-  // mirrorBytes is what one mirror cookie costs the Cookie header: the
-  // name, the '=', the encoded value and the '; ' a browser puts
-  // between cookies. Encoding is not free, which is why the budget is
-  // measured here and not only in the Go declaration.
-  const mirrorBytes = (seg, enc) => 'gofastr.local.'.length + seg.length + 1 + enc.length + 2;
-  // mirrorUsed is what this store's OTHER mirror cookies already cost.
-  const mirrorUsed = (app, seg) => {
-    let all = '';
-    try { all = document.cookie; } catch (_) { return 0; }
-    let used = 0;
-    for (const part of all.split('; ')) {
-      const eq = part.indexOf('=');
-      if (eq < 0) continue;
-      const nm = part.slice(0, eq);
-      if (nm.indexOf('gofastr.local.' + app + '.') !== 0 || nm === 'gofastr.local.' + seg) continue;
-      used += part.length + 2;
-    }
-    return used;
-  };
-
-  // mirror writes the record's cookie, or clears it when text is ''
-  // (a zero max-age is the deletion). Two writes, every operand a
-  // literal or component-encoded: the cookie lint reads them as such.
+  // The mirror is a BRIDGE to a Go screen — a cookie a render reads at
+  // first paint — not part of keeping records, so it lives with the
+  // other three in local-bridge.js and this file holds one seam to it.
+  // Calls made before the bridge installs itself are queued, never
+  // dropped: a cookie is read on the NEXT request, so the only thing
+  // that matters is that it is written, not when.
   //
-  // A write is refused when the store's mirrored cookies would pass
-  // budget — the same bound Define enforces on the declaration, here
-  // on what the browser actually holds. Over it, the Cookie header
-  // stops being a hint and becomes a 431 the user cannot clear without
-  // opening browser settings; the record itself is kept, only its
-  // shortcut to first paint is not.
+  // Splitting here rather than at a byte count: local-store is the
+  // store, local-bridge is every way the store reaches a Go handler.
+  const seam = { fn: null, queue: [] };
   const mirror = (app, coll, key, text, budget) => {
-    const seg = encodeURIComponent(app + '.' + coll + '.' + key);
-    if (text) {
-      const enc = encodeURIComponent(text);
-      const cost = mirrorBytes(seg, enc);
-      if (budget > 0 && mirrorUsed(app, seg) + cost > budget) {
-        return fail(app, coll, key, 'mirror', cost, budget);
-      }
-    }
-    try {
-      if (text && SECURE) document.cookie = 'gofastr.local.' + encodeURIComponent(app + '.' + coll + '.' + key) + '=' + encodeURIComponent(text) + '; path=/; max-age=31536000; SameSite=Lax; Secure';
-      else if (text) document.cookie = 'gofastr.local.' + encodeURIComponent(app + '.' + coll + '.' + key) + '=' + encodeURIComponent(text) + '; path=/; max-age=31536000; SameSite=Lax';
-      else if (SECURE) document.cookie = 'gofastr.local.' + encodeURIComponent(app + '.' + coll + '.' + key) + '=; path=/; max-age=0; SameSite=Lax; Secure';
-      else document.cookie = 'gofastr.local.' + encodeURIComponent(app + '.' + coll + '.' + key) + '=; path=/; max-age=0; SameSite=Lax';
-    } catch (_) { /* best-effort */ }
-    return { ok: true, reason: '' };
+    if (seam.fn) seam.fn(app, coll, key, text, budget);
+    else seam.queue.push([app, coll, key, text, budget]);
+  };
+  // installMirror is how local-bridge takes the seam over.
+  NS._localMirror = (fn) => {
+    seam.fn = fn;
+    for (const a of seam.queue.splice(0)) fn.apply(null, a);
   };
   const cookieNamed = (name) => {
     try { return ('; ' + document.cookie).indexOf('; ' + name + '=') >= 0; } catch (_) { return false; }
   };
-
-  // ─── migrations ─────────────────────────────────────────────────
-
-  // applyStep runs one declared step over one record. Steps are data
-  // transforms declared in Go (rename, default, remove) plus `func`,
-  // a host-registered function on window.__gofastr._localMigrations
-  // — a real function loaded from the script rail, never text, so the
-  // page stays CSP-clean. A rename onto an existing field, or of a
-  // missing one, is a no-op, which is what lets two tabs migrate the
-  // same collection without a lock: every declared step is
-  // idempotent; a func step is asked to be.
-  const applyStep = (step, record, key) => {
-    if (!isObject(record) || !step) return record;
-    switch (step.op) {
-      case 'rename':
-        if (own(record, step.from) && !own(record, step.to)) {
-          record[step.to] = record[step.from];
-          delete record[step.from];
-        }
-        return record;
-      case 'default':
-        if (!own(record, step.field)) record[step.field] = step.value;
-        return record;
-      case 'remove':
-        delete record[step.field];
-        return record;
-      case 'func': {
-        const fns = NS._localMigrations;
-        const fn = fns && own(fns, step.name) ? fns[step.name] : null;
-        if (typeof fn !== 'function') throw new Error('migration function not registered: ' + step.name);
-        const out = fn(record, key);
-        return out === undefined ? record : out;
-      }
+  // The bridges are wanted when a declaration mirrors a collection or a
+  // logout is pending; a store that keeps its records to itself never
+  // pays for them.
+  const wantsBridge = () => {
+    const all = window.__gofastr_local;
+    if (!all || typeof all !== 'object') return false;
+    for (const app of Object.keys(all)) {
+      if (cookieNamed('gofastr.local.clear.' + encodeURIComponent(app))) return true;
+      const m = all[app];
+      const cs = m && typeof m === 'object' && isObject(m.collections) ? m.collections : null;
+      if (!cs) continue;
+      for (const n of Object.keys(cs)) if (cs[n] && cs[n].mirror) return true;
     }
-    return record;
+    return false;
   };
 
   // ─── one store ──────────────────────────────────────────────────
@@ -250,6 +181,17 @@
     // whose function is not registered leaves the records and the
     // version untouched and raises gofastr:local-error with reason
     // 'migration': the data is worth more than the schema.
+    // migrate brings one collection to its declared version, once per
+    // page, under the Web Locks API when the browser has it so two tabs
+    // do not race the same rewrite.
+    //
+    // The rewrite itself is local-migrate.js, a third module this one
+    // asks for by name. Schema evolution is not the same job as keeping
+    // records — different failure mode, different blast radius, and a
+    // collection that declares no version step never runs a line of it
+    // — so it is a module of its own, registered LoadIdle so it is
+    // never on the critical path yet always there before the first read
+    // of a versioned collection.
     const migrate = (coll, spec) => {
       const target = spec.v > 0 ? spec.v : 1;
       const run = () => P.get(metaKey(coll)).then((meta) => {
@@ -264,43 +206,31 @@
           fail(app, coll, '', 'version', have, target);
           return false;
         }
-        return P.entries(prefixOf(coll)).then((er) => {
-          if (!er.ok) throw new Error('entries: ' + er.reason);
-          const entries = er.entries;
-          if (have === 0 && entries.length === 0) return P.set(metaKey(coll), { v: target }).then((r) => r.ok || fail(app, coll, '', 'migration').ok);
-          const from = have === 0 ? 1 : have;
-          const steps = [];
-          for (const m of spec.migrations || []) {
-            if (m && m.v > from && m.v <= target) steps.push(m);
-          }
-          steps.sort((a, b) => a.v - b.v);
-          const writes = [];
-          const done = [];
-          for (const e of entries) {
-            let rec = e.value;
-            const key = e.key.slice(prefixOf(coll).length);
-            for (const m of steps) for (const st of m.steps || []) rec = applyStep(st, rec, key);
-            done.push({ key: key, rec: rec });
-            writes.push(P.set(e.key, rec));
-          }
-          return Promise.all(writes).then((rs) => {
-            // P.set settles {ok:false} on a quota refusal or an aborted
-            // transaction; it does not reject. Stamping the version over
-            // a half-rewritten collection records the migration as done,
-            // so it never runs again and every later read mixes two
-            // schemas. Every write has to have landed.
-            for (const r of rs) if (!r || !r.ok) return fail(app, coll, '', 'migration').ok;
-            return P.set(metaKey(coll), { v: target }).then((r) => {
-              if (!r.ok) return fail(app, coll, '', 'migration').ok;
-              emit('gofastr:local-migrated', { app, collection: coll, from, to: target });
-              // The MIGRATED record, not the one the entry carried:
-              // mirroring e.value would put the pre-migration shape in
-              // the cookie and hand the server the old schema.
-              if (spec.mirror) for (const d of done) mirror(app, coll, d.key, encode(d.rec) || 'null', budget);
-              return true;
-            });
-          });
-        });
+        const from = have === 0 ? 1 : have;
+        const steps = [];
+        for (const m of spec.migrations || []) {
+          if (m && m.v > from && m.v <= target) steps.push(m);
+        }
+        if (steps.length === 0) {
+          // Nothing to rewrite: stamp the version. A refused stamp is a
+          // failed migration like any other, or the steps would run
+          // again over records that already moved.
+          return P.set(metaKey(coll), { v: target }).then((r) => r.ok || fail(app, coll, '', 'migration').ok);
+        }
+        steps.sort((a, b) => a.v - b.v);
+        return NS.loadModule('local-migrate').then(() => NS._localMigrate({
+          P: P,
+          app: app,
+          coll: coll,
+          prefix: prefixOf(coll),
+          meta: metaKey(coll),
+          steps: steps,
+          from: from,
+          to: target,
+          mirror: spec.mirror ? (key, text) => mirror(app, coll, key, text, budget) : null,
+          emit: emit,
+          fail: fail,
+        }), () => fail(app, coll, '', 'migration').ok);
       }).catch(() => {
         fail(app, coll, '', 'migration');
         return false;
@@ -486,17 +416,6 @@
     };
     stores.set(app, store);
 
-    // A mirrored collection re-stamps its cookies on open, so a cookie
-    // the browser dropped while the record survived comes back.
-    for (const name of Object.keys(collections)) {
-      const spec = specOf(name);
-      if (spec && spec.mirror) {
-        whenReady(name).then(() => P.entries(prefixOf(name))).then((er) => {
-          if (!er.ok) return;
-          for (const e of er.entries) mirror(app, name, e.key.slice(prefixOf(name).length), encode(e.value) || 'null', budget);
-        });
-      }
-    }
     return store;
   };
 
@@ -523,34 +442,7 @@
   // Shared with the bridge module.
   NS._localHelpers = { validKey: validKey, encode: encode, isObject: isObject, RESERVED: RESERVED };
 
-  // Clear-on-next-load: a full-navigation logout cannot ride an RPC
-  // response header, so the Go side plants a bit in a cookie and this
-  // module honours it once, then drops the cookie — but only once the
-  // clear actually succeeded, or a logout that could not reach the
-  // store would be forgotten.
-  //
-  // Honoured at MODULE LOAD over every app the manifest declares, not
-  // inside openStore: the page a logout redirects to need not carry
-  // that app's marker, and a page carrying app A's marker used to skip
-  // app B's pending clear entirely.
-  const honourClearBits = () => {
-    const all = window.__gofastr_local;
-    if (!all || typeof all !== 'object') return;
-    for (const app of Object.keys(all)) {
-      if (RESERVED.test(app) || !cookieNamed('gofastr.local.clear.' + encodeURIComponent(app))) continue;
-      const store = openStore(app);
-      if (!store) continue;
-      store.clear().then((r) => {
-        if (!r.ok) return;
-        try {
-          if (SECURE) document.cookie = 'gofastr.local.clear.' + encodeURIComponent(app) + '=; path=/; max-age=0; SameSite=Lax; Secure';
-          else document.cookie = 'gofastr.local.clear.' + encodeURIComponent(app) + '=; path=/; max-age=0; SameSite=Lax';
-        } catch (_) { /* best-effort */ }
-      });
-    }
-  };
-
-  honourClearBits();
+  if (wantsBridge()) NS.loadModule('local-bridge').catch(() => {});
   scan(document);
   NS._moduleScanners = NS._moduleScanners || {};
   NS._moduleScanners[NAME] = scan;

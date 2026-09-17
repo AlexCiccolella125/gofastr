@@ -12,6 +12,9 @@ var localStoreJS string
 //go:embed local-bridge.js
 var localBridgeJS string
 
+//go:embed local-migrate.js
+var localMigrateJS string
+
 // BehaviorName is the runtime module that binds this package's
 // data-local-* markers and exposes window.__gofastr.localStore(app).
 // The host serves it at /__gofastr/runtime/local-store.js and the
@@ -20,14 +23,25 @@ var localBridgeJS string
 // __gofastr.loadModule('local-store').
 const BehaviorName = "local-store"
 
-// BridgeName is the second module: the seed, upload and download
-// bridges to Go screens. It Requires BehaviorName and binds the
-// data-local-seed markers; an RPC trigger rendered by Upload.Attrs
-// names it in data-fui-rpc-with so rpc.js has it loaded before the
-// fetch. Two files because the runtime holds every registered
-// behaviour to one per-module byte budget, and a page that only reads
-// records never pays for the bridges.
+// BridgeName is the second module: every way the store reaches a Go
+// handler — the seed, the mirror cookie, the upload and the download.
+// It Requires BehaviorName and binds the data-local-seed markers; an
+// RPC trigger rendered by Upload.Attrs names it in data-fui-rpc-with
+// so rpc.js has it loaded before the fetch, and local-store asks for
+// it by name when a declaration mirrors a collection or a logout is
+// pending. A page whose store keeps its records to itself never loads
+// it.
 const BridgeName = "local-bridge"
+
+// MigrateName is the third module: schema evolution, the steps that
+// rewrite a collection from one version to the next. A different job
+// from keeping records — once per browser per version, every record of
+// a collection at a time, and a failure leaves a collection on two
+// schemas — so it is its own file, registered LoadIdle because it is
+// never on the critical path, and asked for by name at the moment a
+// rewrite is due. A collection that declares no version step never
+// runs a line of it.
+const MigrateName = "local-migrate"
 
 // The marker: every element this package renders carries
 // data-local-store="<app>", and the seed or send attribute beside it
@@ -44,3 +58,8 @@ var _ = registry.RegisterBehavior(BehaviorName, localStoreJS,
 var _ = registry.RegisterBehavior(BridgeName, localBridgeJS,
 	registry.Markers(`[data-local-seed]`),
 	registry.Requires(BehaviorName))
+
+var _ = registry.RegisterBehavior(MigrateName, localMigrateJS,
+	registry.Markers(`[data-local-store]`),
+	registry.Requires(BehaviorName),
+	registry.LoadIdle())
