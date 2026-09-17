@@ -58,6 +58,7 @@ func TestBindRefusesWhatTheRuntimeWouldRefuse(t *testing.T) {
 		{"html on an unfillable part", Bind{Signal: "s", Mode: "html"}, "not a fillable part"},
 		{"the lifecycle's pressed", Bind{Signal: "s", Mode: "attr", Attr: "aria-pressed"}, "the runtime owns it"},
 		{"the lifecycle's busy", Bind{Signal: "s", Mode: "attr", Attr: "aria-busy"}, "the runtime owns it"},
+		{"the lifecycle's live region", Bind{Signal: "s", Mode: "attr", Attr: "aria-live"}, "the runtime owns it"},
 		{"a field's invalid", Bind{Signal: "s", Mode: "attr", Attr: "aria-invalid"}, "the runtime owns it"},
 		{"an expander's expanded", Bind{Signal: "s", Mode: "attr", Attr: "aria-expanded"}, "the runtime owns it"},
 		{"a nav's current", Bind{Signal: "s", Mode: "attr", Attr: "aria-current"}, "the runtime owns it"},

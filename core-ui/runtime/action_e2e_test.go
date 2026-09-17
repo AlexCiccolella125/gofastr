@@ -560,3 +560,39 @@ func TestActionRefusedUntoggleStillConvergesTheGroup(t *testing.T) {
 		t.Fatalf("slowfail hit %d times, want 1", n)
 	}
 }
+
+// A settlement that arrives after an island swap replaced the group
+// belongs to a button that is no longer on the page: it must not
+// revoke the new page's committed member. The old member is detached
+// while its request is in flight; a fresh member arrives committed;
+// the old settlement lands and changes nothing.
+func TestActionSettlementOfADetachedMemberRevokesNothing(t *testing.T) {
+	s := startActionSrv(t, `<div id="grp"><button type="button" id="old" data-state="idle" aria-pressed="false">
+  <span id="oi">Starter</span><span id="od" hidden>Starter ✓</span>
+</button></div>`)
+	ctx := actionPage(t, s)
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`window.__arm('old', { endpoint: '/slow', group: 'plan', pressed: true, idle: document.getElementById('oi'), done: document.getElementById('od') });`, nil),
+		chromedp.Click(`#old`, chromedp.ByID),
+		// The swap: the old member leaves mid-flight, a new one arrives
+		// already committed and joins the same group.
+		chromedp.Evaluate(`(() => {
+  document.getElementById('grp').innerHTML = '<button type="button" id="fresh" data-state="committed" aria-pressed="true"><span id="fi" hidden>Pro</span><span id="fd">Pro ✓</span></button>';
+  window.__arm('fresh', { endpoint: '/ok', group: 'plan', pressed: true, idle: document.getElementById('fi'), done: document.getElementById('fd') });
+})()`, nil),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	// Past the slow route's settlement.
+	time.Sleep(1100 * time.Millisecond)
+	var state string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`document.getElementById('fresh').getAttribute('data-state')`, &state)); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if state != "committed" {
+		t.Fatalf("the fresh member is %q after the detached member settled, want committed: a settlement for a button that left the page revoked the new page's member", state)
+	}
+	if n := s.slow.Load(); n != 1 {
+		t.Fatalf("slow hit %d times, want 1", n)
+	}
+}

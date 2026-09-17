@@ -121,6 +121,16 @@
     return revoked;
   }
 
+  // stillGrouped reports whether el is still a member of its group in
+  // the document: a settlement that arrives after an island swap
+  // replaced the group must not revoke the new page's committed member
+  // on behalf of a button that is no longer there.
+  function stillGrouped(spec, el) {
+    if (!spec.group || !el.isConnected) return false;
+    const members = groups.get(spec.group);
+    return !!members && members.has(el);
+  }
+
   // bind attaches the lifecycle, once per element.
   //
   // spec: endpoint (the commit URL), method (default POST), idle and
@@ -170,7 +180,7 @@
           // (its settlement revoke skipped this one while it was
           // pending). Returning to committed displaces like any other
           // commit, so the group still converges on one member.
-          if (!ok && spec.group) revokeGroupSiblings(spec.group, el);
+          if (!ok && stillGrouped(spec, el)) revokeGroupSiblings(spec.group, el);
         });
         return;
       }
@@ -189,7 +199,7 @@
           // settlement makes the last completer win and the group
           // converge on one committed member. A failure of the later
           // one still restores the sibling it displaced (below).
-          if (spec.group) revokeGroupSiblings(spec.group, el);
+          if (stillGrouped(spec, el)) revokeGroupSiblings(spec.group, el);
           return;
         }
         // The server refused the new member, so the sibling it

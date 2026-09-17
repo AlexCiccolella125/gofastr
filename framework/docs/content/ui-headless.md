@@ -57,7 +57,7 @@ value on the props, with three maps keyed by part:
   `html` Bind replaces a part's content, so it is allowed only on a
   part the component lists as fillable — the same set a Slot may fill —
   and an `attr` Bind may not name an attribute the runtime rewrites as
-  state moves (`aria-pressed`, `aria-busy`, `aria-invalid`,
+  state moves (`aria-pressed`, `aria-busy`, `aria-live`, `aria-invalid`,
   `aria-expanded`, `aria-current`, `hidden`, `disabled`, `data-state`,
   and every `data-hui-*` hook). Both refuse at render, with the
   reason.

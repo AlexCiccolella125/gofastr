@@ -1268,3 +1268,30 @@ func TestE2E_WhenOutsideTheFormsPrefersTheLooseControl(t *testing.T) {
 		t.Fatal("the region never followed the loose radio")
 	}
 }
+
+// A form's controls are the ones it owns, not the ones inside it: a
+// select outside the form element with form="id" belongs to the form,
+// and a region inside that form watching it must follow it, ahead of
+// a same-named loose control that stands earlier in the document.
+func TestE2E_WhenFollowsAFormAssociatedControlOutsideTheFormElement(t *testing.T) {
+	page := `<input type="radio" name="mode" value="custom" id="decoy" checked>` +
+		string(Form(FormProps{Action: "/x", ID: "owner"}, nil,
+			render.HTML(`<div data-hui-when="mode" data-hui-when-value="custom" id="owned"><input name="seat" id="seat2"></div>`))) +
+		`<select name="mode" id="assoc" form="owner"><option value="auto" selected>Auto</option><option value="custom">Custom</option></select>`
+	b := startBehaviorServer(t, page)
+	ctx := behaviorPage(t, b)
+	if !pollTrue(ctx, moduleLoadedExpr) {
+		t.Fatal("the module never loaded")
+	}
+	// The decoy says custom and stands first; the form's own control,
+	// attached by form=, says auto. The region follows the form's.
+	if !pollTrue(ctx, `document.getElementById('owned').hidden`) {
+		t.Fatal("the region followed the loose decoy instead of the control the form owns through form=")
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => { const s = document.getElementById('assoc'); s.value = 'custom'; s.dispatchEvent(new Event('change', {bubbles: true})); })()`, nil)); err != nil {
+		t.Fatalf("changing the associated select: %v", err)
+	}
+	if !pollTrue(ctx, `!document.getElementById('owned').hidden`) {
+		t.Fatal("the region never followed the form-associated control")
+	}
+}

@@ -99,7 +99,7 @@ type Binds map[Part]Bind
 // anywhere reporting the race — so it is refused at render, where the
 // mistake is a panic with a reason.
 var runtimeOwnedBindAttrs = map[string]bool{
-	"aria-pressed": true, "aria-busy": true, "aria-invalid": true,
+	"aria-pressed": true, "aria-busy": true, "aria-live": true, "aria-invalid": true,
 	"aria-expanded": true, "aria-current": true,
 	"hidden": true, "disabled": true, "data-state": true,
 }

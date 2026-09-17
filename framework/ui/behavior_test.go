@@ -15,7 +15,46 @@ import (
 // adapters' early-return guard READS loadedModules before any
 // listener, so a bare identifier match is satisfied by the guard and
 // holds nothing.
-var loadedFlagAssign = regexp.MustCompile(`loadedModules\s*=`)
+// It matches the per-module WRITE (`loadedModules[NAME] = true`,
+// `(… loadedModules … {}).name = true`, minified `!0` included), not
+// the table initialisation `loadedModules = loadedModules || {}`,
+// which a module may put at the top while its own flag stays at the
+// end; the fixture test below proves the difference.
+var loadedFlagAssign = regexp.MustCompile(`loadedModules[^;]*?(\[[^\]]*\]|\.[A-Za-z_$][\w$]*)\s*=\s*(true|!0)`)
+
+// flagBeforeInstall reports whether src writes its loaded flag before
+// its first addEventListener; "" when it does, otherwise the reason.
+func flagBeforeInstall(src string) string {
+	am := loadedFlagAssign.FindStringIndex(src)
+	if am == nil {
+		return "never sets its loaded flag"
+	}
+	if inst := strings.Index(src, "addEventListener"); inst != -1 && inst < am[0] {
+		return "installs a listener before setting its loaded flag"
+	}
+	return ""
+}
+
+// The gate's own fixtures: an init of the table at the top with the
+// flag at the end must fail, the flag first must pass, and a
+// minified `!0` counts as true.
+func TestFlagBeforeInstallReadsTheWriteNotTheInit(t *testing.T) {
+	cases := []struct {
+		name, src string
+		ok        bool
+	}{
+		{"init at top, flag at end", `NS.loadedModules = NS.loadedModules || {}; document.addEventListener('click', f); NS.loadedModules[NAME] = true;`, false},
+		{"flag first", `NS.loadedModules = NS.loadedModules || {}; NS.loadedModules[NAME] = true; document.addEventListener('click', f);`, true},
+		{"one-liner adapter form", `(NS.loadedModules = NS.loadedModules || {})[NAME] = true; document.addEventListener('click', f);`, true},
+		{"kernel dotted form, minified", `(window.__gofastr.loadedModules||={}).reveal=!0;document.addEventListener("click",f)`, true},
+		{"no flag at all", `document.addEventListener('click', f);`, false},
+	}
+	for _, c := range cases {
+		if got := flagBeforeInstall(c.src) == ""; got != c.ok {
+			t.Errorf("%s: pass=%v, want %v", c.name, got, c.ok)
+		}
+	}
+}
 
 // The two action adapters are registered behaviours on the kernel's
 // action primitive: the registration must carry Requires("action") —
@@ -59,13 +98,8 @@ func TestActionAdaptersSetLoadedFlagBeforeInstalling(t *testing.T) {
 			t.Fatalf("%s is not registered: the component's module is not on the page", name)
 		}
 		src := minify.Minify(e.Source)
-		am := loadedFlagAssign.FindStringIndex(src)
-		if am == nil {
-			t.Errorf("%s never sets its loaded flag", name)
-			continue
-		}
-		if inst := strings.Index(src, "addEventListener"); inst != -1 && inst < am[0] {
-			t.Errorf("%s installs a listener before setting loadedModules[%s]: a retry re-executes the file and would install it twice", name, name)
+		if why := flagBeforeInstall(src); why != "" {
+			t.Errorf("%s %s: a retry re-executes the file and would install it twice", name, why)
 		}
 	}
 }

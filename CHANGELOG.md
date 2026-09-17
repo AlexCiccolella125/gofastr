@@ -244,7 +244,7 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   html Bind is now allowed only on a part the spec lists as fillable
   (the same set a Slot may fill), and an `attr` Bind may not name an
   attribute the runtime rewrites as state moves (`aria-pressed`,
-  `aria-busy`, `aria-invalid`, `aria-expanded`, `aria-current`,
+  `aria-busy`, `aria-live`, `aria-invalid`, `aria-expanded`, `aria-current`,
   `hidden`, `disabled`, `data-state`, and every `data-hui-*`). Both
   refuse at render with the reason; harness gates hold the fillable
   list to the spec's from both sides.

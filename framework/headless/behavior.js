@@ -131,15 +131,21 @@
   // deterministic.
   function watchedControls(region, name) {
     const sel = '[name="' + CSS.escape(name) + '"]';
+    const all = document.querySelectorAll(sel);
     const form = region.closest('form');
     if (form) {
-      const own = form.querySelectorAll(sel);
+      // The form's controls are the ones it owns, not the ones inside
+      // it: a control outside the element with form="id" belongs to
+      // it, and one inside with form= pointing elsewhere does not.
+      const own = [];
+      for (let i = 0; i < all.length; i++) {
+        if (all[i].form === form) own.push(all[i]);
+      }
       if (own.length) return own;
     }
-    const all = document.querySelectorAll(sel);
     const loose = [];
     for (let i = 0; i < all.length; i++) {
-      if (!all[i].closest('form')) loose.push(all[i]);
+      if (!all[i].form) loose.push(all[i]);
     }
     return loose.length ? loose : all;
   }
