@@ -32,7 +32,11 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   field stripped before the handler); `Put`/`Delete`/`Clear` write
   records back through the `X-Gofastr-Local` response header, and
   `ClearOnNextLoad` covers a full-navigation logout. Local-first state,
-  not offline sync. Proof: `examples/site` at `/forms/draft-notes`.
+  not offline sync. Proof: `examples/site` at `/forms/draft-notes`, and
+  `examples/team-builder`, the smallest app that shows why: a team the
+  browser keeps with no account and no database, read by Go only on
+  "Check team", the verdict written back, and a browser test that
+  relaunches Chrome on one profile to show the team is still there.
   `gofastr docs local-state`.
 - **`data-fui-rpc-with="<module>"`** (`rpc.js`): the trigger names the
   modules the runtime loads before dispatching, and the request hooks
