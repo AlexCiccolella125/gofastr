@@ -977,3 +977,49 @@ func TestE2E_TheBrowserCountsKeyBytesLikeGoDoes(t *testing.T) {
 		t.Fatalf("put at the cap = %v — the bound is 256 bytes, not fewer", res)
 	}
 }
+
+// Two puts racing each other cannot push a collection past its cap.
+//
+// Cap enforcement is read-then-write across two IndexedDB transactions:
+// count what is stored, then add one. Fired together, both reads saw
+// the same total, both decided they fit and both landed — and a page
+// that writes on every keystroke fires them together all the time. The
+// declared cap is then simply not a cap.
+func TestE2E_RacingPutsCannotPassTheCollectionCap(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+
+	// drafts caps at 1024 bytes across the collection; three records of
+	// ~400 bytes cannot all fit. They are issued in one turn, so nothing
+	// but the store's own ordering separates them.
+	var results []map[string]any
+	evalJSON(t, ctx, `Promise.all([
+        `+draftsJS+`.put({ id: 'r1', title: 'x'.repeat(380) }),
+        `+draftsJS+`.put({ id: 'r2', title: 'x'.repeat(380) }),
+        `+draftsJS+`.put({ id: 'r3', title: 'x'.repeat(380) }),
+    ])`, &results)
+
+	accepted := 0
+	for _, r := range results {
+		if ok, _ := r["ok"].(bool); ok {
+			accepted++
+		}
+	}
+	var stored []map[string]any
+	evalJSON(t, ctx, draftsJS+`.list()`, &stored)
+	if len(stored) != accepted {
+		t.Fatalf("%d puts said ok and %d records are stored", accepted, len(stored))
+	}
+	if len(stored) > 2 {
+		t.Fatalf("%d records of ~400 bytes are stored in a collection capped at 1024 — the cap is read-then-write and the reads raced", len(stored))
+	}
+	var errs []map[string]any
+	evalJSON(t, ctx, `Promise.resolve(window.__errors)`, &errs)
+	for _, d := range errs {
+		if d["reason"] == "full" {
+			return
+		}
+	}
+	t.Fatalf("nothing was refused with reason \"full\": %v", errs)
+}

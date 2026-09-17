@@ -54,12 +54,6 @@
   (NS.loadedModules = NS.loadedModules || {})[NAME] = true;
 
   const MARKER = '[data-local-store]';
-  // Mirror the Go defaults in framework/local/collection.go; used only
-  // when a manifest entry is missing a cap, which the Go side never
-  // emits.
-  const DEFAULT_MAX_RECORD = 65536;
-  const DEFAULT_MAX_RECORDS = 1000;
-  const DEFAULT_MAX_BYTES = 1048576;
   const RESERVED = /^(__proto__|constructor|prototype)$/;
 
   // app -> store API. A Map: the app id arrives from a DOM attribute on
@@ -259,9 +253,30 @@
 
     const collectionAPI = (coll) => {
       const spec = specOf(coll);
-      const maxRecord = spec.maxRecord > 0 ? spec.maxRecord : DEFAULT_MAX_RECORD;
-      const maxRecords = spec.maxRecords > 0 ? spec.maxRecords : DEFAULT_MAX_RECORDS;
-      const maxBytes = spec.maxBytes > 0 ? spec.maxBytes : DEFAULT_MAX_BYTES;
+      // The caps come from the declaration, always: Define resolves
+      // every default and the manifest always carries the three
+      // numbers. Mirroring the Go defaults here as a fallback meant a
+      // manifest that lost a cap silently got a GENEROUS one; an entry
+      // without them is refused instead, which is the direction a cap
+      // should fail in.
+      const maxRecord = spec.maxRecord;
+      const maxRecords = spec.maxRecords;
+      const maxBytes = spec.maxBytes;
+
+      // Cap enforcement is read-then-write across two transactions:
+      // count what is stored, then add one. Two puts racing each other
+      // both read the same total, both decide they fit and both land,
+      // and the collection ends past the cap it declared — which is the
+      // one thing the cap exists to prevent, and it is the common case
+      // in a page that writes on every keystroke. This collection's
+      // puts queue behind each other; reads stay parallel, and two
+      // collections never wait on one another.
+      let chain = Promise.resolve();
+      const serial = (fn) => {
+        const mine = chain.then(fn, fn);
+        chain = mine.then(() => {}, () => {});
+        return mine;
+      };
 
       const api = {
         name: coll,
@@ -289,7 +304,7 @@
           if (text === null) return Promise.resolve(fail(app, coll, key, 'encode'));
           const size = bytesOf(text);
           if (size > maxRecord) return Promise.resolve(fail(app, coll, key, 'size', size, maxRecord));
-          return gate(coll).then((no) => no || P.entries(prefixOf(coll)).then((er) => {
+          return gate(coll).then((no) => no || serial(() => P.entries(prefixOf(coll)).then((er) => {
             if (!er.ok) return fail(app, coll, key, er.reason || 'unavailable');
             const entries = er.entries;
             let total = size;
@@ -308,7 +323,7 @@
               notify(coll, key, 'local');
               return { ok: true, reason: '' };
             });
-          }));
+          })));
         },
         delete(key) {
           if (!validKey(key)) return Promise.resolve(fail(app, coll, String(key), 'key'));
