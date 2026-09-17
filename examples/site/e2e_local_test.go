@@ -8,6 +8,8 @@ import (
 
 	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+
+	"github.com/DonaldMurillo/gofastr/framework/local"
 )
 
 // The framework/local demo at /forms/draft-notes, end to end in a real
@@ -157,4 +159,20 @@ func e2ePollTrue(ctx context.Context, js string) bool {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return false
+}
+
+// The draft-notes handler acts on an upload and on nothing else. Reading
+// local.Source as a bare boolean (src.Found()) accepts a mirror cookie —
+// a value any script on the origin writes and any client forges — and
+// the team-builder example already requires SourceUpload. Two examples
+// teaching two habits is how the weaker one gets copied.
+func TestLocalNotesActsOnlyOnAnUpload(t *testing.T) {
+	if !actOnDraft(local.SourceUpload) {
+		t.Fatal("an uploaded draft must be acted on")
+	}
+	for _, src := range []local.Source{local.SourceMirror, local.SourceNone} {
+		if actOnDraft(src) {
+			t.Fatalf("a %q record must not be acted on: it is a client hint, not a declared upload", src)
+		}
+	}
 }

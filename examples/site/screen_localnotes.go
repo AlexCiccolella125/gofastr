@@ -173,18 +173,28 @@ func (s *LocalNotesScreen) RenderCtx(ctx context.Context) render.HTML {
 	)
 }
 
+// actOnDraft is the habit every handler in this tree keeps: a record is
+// acted on only when it came through Upload.Wrap, on a request whose
+// trigger declared it. src.Found() would also accept a mirror cookie —
+// a value any script on the origin writes and any client forges — which
+// is fine for deciding what to paint (the view preference above says so
+// on the page) and never for acting on. examples/team-builder requires
+// the same thing; two examples teaching two habits is how the weaker one
+// gets copied.
+func actOnDraft(src local.Source) bool { return src == local.SourceUpload }
+
 // localNotesUpload is the wrapped handler: the upload bridge has
 // already read drafts:current off the body, refused anything
 // undeclared, and put the record on the context.
 func localNotesUpload(w http.ResponseWriter, r *http.Request) {
-	draft, found, err := local.Get(r.Context(), siteDrafts, "current")
+	draft, src, err := local.Get(r.Context(), siteDrafts, "current")
 	if err != nil {
 		http.Error(w, "the draft does not decode: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if !found.Found() {
+	if !actOnDraft(src) {
 		fmt.Fprint(w, "No draft arrived: write something first.")
 		return
 	}
