@@ -11,7 +11,12 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
 - **The `local` browser store** (`core-ui/runtime/src/local.js`): the
   runtime's five hard-coded Web-storage keys, generalised into one
   primitive with one owner. `window.__gofastr.local` is `available()`,
-  `get`, `set`, `remove`, `keys` and `subscribe`. The engine is
+  `get`, `set`, `remove`, `keys`, `entries`, `subscribe` and `watch`;
+  `keys` and `entries` take an optional prefix and read one IndexedDB
+  key range (an entry's `size` is the stored UTF-8 length of its JSON
+  text), and `watch(prefix, fn)` hears another tab's write of any key
+  under a prefix — the three calls a layer that groups records under a
+  common prefix needs, with no opinion about what a group means. The engine is
   **IndexedDB** — a saved value is not a preference: asynchronous, not
   capped at the few megabytes `localStorage` shares across an origin,
   and a large read does not block the main thread; `localStorage` is

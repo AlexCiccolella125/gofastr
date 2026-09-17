@@ -774,8 +774,10 @@ settling rather than throwing:
 | `get(key)` | the stored value, or `undefined` when it is absent, unreadable, or no engine is available |
 | `set(key, value)` | `{ok, reason}`; `reason` is `""`, `encode` (the value is not JSON), `size` (over the fallback's tiny-value cap), `quota` or `unavailable` |
 | `remove(key)` | `{ok, reason}` |
-| `keys()` | the sorted application keys this origin holds, namespace stripped |
+| `keys(prefix?)` | the sorted application keys this origin holds, namespace stripped — or only those under `prefix`, read as one IndexedDB key range rather than a scan (the component encoding is per character, so the encoded prefix is a prefix of every encoded key beneath it) |
+| `entries(prefix?)` | `[{key, value, size}]` under `prefix` (or the whole namespace), sorted by key, keys and values from one transaction; `size` is the stored UTF-8 length of the entry's JSON text |
 | `subscribe(key, fn)` | an unsubscribe function; `fn(value, key)` runs when ANOTHER tab of this origin changes the key (BroadcastChannel, plus the `storage` event for the fallback engine). A tab never hears its own writes: both transports skip the writing context |
+| `watch(prefix, fn)` | an unwatch function; `fn(key)` runs when another tab changes any key under `prefix`. The key travels, never the value: the watcher re-reads. One watcher covers a whole group of records |
 
 **The contract is best-effort, and that is the design.** Private mode, a
 blocked origin, a full quota, a cleared store and a browser that

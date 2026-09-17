@@ -78,8 +78,8 @@ type fragmentDef struct {
 // no attribute and has no marker, and is reached through
 // registry.Requires("local") — core-ui/store's signal-persist
 // behaviour declares it — or __gofastr.loadModule('local').
-// window.__gofastr.local (get, set, remove, keys, subscribe,
-// available) is its public API.
+// window.__gofastr.local (get, set, remove, keys, entries, subscribe,
+// watch, available) is its public API.
 // boot-embed depends on kernel. RPC requests inside an embed route through
 // boot's delegation bridge and load src/rpc.js at interaction time. It also
 // relies on boot's mutation observer to hydrate injected content, but boot is

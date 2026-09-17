@@ -500,15 +500,20 @@ members whose elements left the document are pruned on
 The kernel's `local` module is the other one — the browser's own store,
 as one primitive. `window.__gofastr.local` is
 `available()` → `{idb, ls}`, `get(key)`, `set(key, value)` →
-`{ok, reason}`, `remove(key)`, `keys()` and
-`subscribe(key, fn)` → unsubscribe. The engine is **IndexedDB**;
+`{ok, reason}`, `remove(key)`, `keys(prefix?)`, `entries(prefix?)` →
+`[{key, value, size}]`, `subscribe(key, fn)` → unsubscribe and
+`watch(prefix, fn)` → unwatch. The engine is **IndexedDB**;
 `localStorage` is the fallback, used only when IndexedDB will not open
 and only for values up to 8 KiB. Every entry, in either engine, lives
 under the literal `gofastr.state.` plus the component-encoded key, so
 an application key can never name another feature's storage.
 `subscribe` fires when ANOTHER tab of this origin changes the key
-(BroadcastChannel, plus the `storage` event for the fallback); a tab
-never hears its own writes. Every call is asynchronous and settles
+(BroadcastChannel, plus the `storage` event for the fallback), and
+`watch` when another tab changes any key under a prefix; a tab never
+hears its own writes. `keys` and `entries` given a prefix read one
+IndexedDB key range, not the whole store, so a layer that groups its
+records under a common prefix lists one group without reading the
+rest. Every call is asynchronous and settles
 rather than throwing: the contract is **best-effort** — private mode, a
 blocked origin, a full quota and a cleared store are all normal, and
 `set` says which one refused it. Never keep something there whose loss

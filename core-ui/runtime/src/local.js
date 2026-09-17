@@ -32,7 +32,16 @@
 // needs it declares registry.Requires('local') and the loader has it
 // registered before the dependent evaluates, and an application can
 // reach it with __gofastr.loadModule('local'). window.__gofastr.local
-// is the public API — get, set, remove, keys, subscribe, available.
+// is the public API — get, set, remove, keys, entries, subscribe,
+// watch, available.
+//
+// keys and entries take an optional PREFIX and enumerate only the
+// application keys under it, as one IndexedDB key range rather than a
+// scan of the whole store: a layer above that groups its records under
+// a common prefix (a collection) can list one collection without
+// reading every other. The component encoding is per character, so the
+// encoded prefix is a prefix of every encoded key beneath it, and the
+// range is [PREFIX + enc(prefix), PREFIX + enc(prefix) + '\uffff'].
 //
 // Opinionated storage — schemas, migrations, an upload channel, a
 // sync lane — is a layer ABOVE this one and does not belong here.
@@ -53,6 +62,10 @@
   // often attribute-borne, and a bracket write keyed by one is how
   // __proto__ re-parents a store.
   const subs = new Map();
+  // Prefix watchers: [{ prefix, fn }]. A watcher hears every key under
+  // its prefix that another tab changed, key only; it re-reads what it
+  // needs, the same rule subscribe keeps.
+  const watchers = [];
 
   let dbPromise = null;
 
@@ -77,7 +90,10 @@
 
   // idbRun runs one transaction and settles to { ok, value, reason }.
   // Never rejects: the caller's settlement is always one of the two
-  // outcomes, the same rule src/action.js's request keeps.
+  // outcomes, the same rule src/action.js's request keeps. fn returns
+  // the request whose result is the value, or an array of requests
+  // whose results are collected in order (entries reads keys and
+  // values in one transaction so the two cannot drift apart).
   const idbRun = (mode, fn) => openDB().then((db) => {
     if (!db) return { ok: false, reason: 'unavailable' };
     return new Promise((resolve) => {
@@ -87,9 +103,13 @@
         tx = db.transaction(DB_STORE, mode);
         req = fn(tx.objectStore(DB_STORE));
       } catch (_) { resolve({ ok: false, reason: 'unavailable' }); return; }
-      tx.oncomplete = () => resolve({ ok: true, value: req ? req.result : undefined });
+      tx.oncomplete = () => resolve({
+        ok: true,
+        value: Array.isArray(req) ? req.map((r) => r.result) : (req ? req.result : undefined),
+      });
       const fail = () => {
-        const name = (tx.error && tx.error.name) || (req && req.error && req.error.name) || '';
+        const first = Array.isArray(req) ? req[0] : req;
+        const name = (tx.error && tx.error.name) || (first && first.error && first.error.name) || '';
         resolve({ ok: false, reason: name === 'QuotaExceededError' ? 'quota' : 'unavailable' });
       };
       tx.onabort = fail;
@@ -120,6 +140,30 @@
     if (typeof text !== 'string') return undefined;
     try { return JSON.parse(text); } catch (_) { return undefined; }
   };
+  // bytesOf is the stored size of one entry: the UTF-8 length of its
+  // JSON text, the unit a layer above budgets in. (LS_MAX_BYTES above
+  // compares code units, which is the fallback engine's own unit.)
+  const bytesOf = (text) => {
+    try { return new TextEncoder().encode(text).length; } catch (_) { return text.length; }
+  };
+
+  // storedPrefix is the stored form of an application-key prefix; a
+  // missing prefix names the whole namespace. rangeFor is the key range
+  // that holds exactly the stored keys under it: every stored key is
+  // ASCII (the namespace literal plus a component encoding), so
+  // '\uffff' bounds the range from above.
+  const storedPrefix = (prefix) => PREFIX + (typeof prefix === 'string' ? encodeURIComponent(prefix) : '');
+  const rangeFor = (prefix) => {
+    const lo = storedPrefix(prefix);
+    try { return window.IDBKeyRange.bound(lo, lo + '\uffff'); } catch (_) { return null; }
+  };
+  // strip turns a stored key back into the application key, or null
+  // for a key outside the namespace (or the prefix) and for a malformed
+  // escape, which must not take an enumeration down.
+  const strip = (stored, prefix) => {
+    if (typeof stored !== 'string' || stored.indexOf(storedPrefix(prefix)) !== 0) return null;
+    try { return decodeURIComponent(stored.slice(PREFIX.length)); } catch (_) { return null; }
+  };
 
   let channel = null;
   try { channel = new BroadcastChannel(DB_NAME); } catch (_) { channel = null; }
@@ -134,6 +178,10 @@
   };
 
   const notify = (key) => {
+    for (const w of watchers) {
+      if (key.indexOf(w.prefix) !== 0) continue;
+      try { w.fn(key); } catch (_) { /* a throwing watcher is its own problem */ }
+    }
     const fns = subs.get(key);
     if (!fns || fns.size === 0) return;
     // eslint-disable-next-line no-use-before-define
@@ -236,20 +284,15 @@
     },
 
     // keys resolves the application keys this origin holds, namespace
-    // stripped and decoded. Sorted, so a caller can diff two reads.
-    keys() {
-      const strip = (stored) => {
-        if (typeof stored !== 'string' || stored.indexOf(PREFIX) !== 0) return null;
-        // See the storage listener: a malformed escape must not take
-        // the enumeration down.
-        try { return decodeURIComponent(stored.slice(PREFIX.length)); } catch (_) { return null; }
-      };
+    // stripped and decoded, or only those under prefix when one is
+    // given. Sorted, so a caller can diff two reads.
+    keys(prefix) {
       return openDB().then((db) => {
         if (db) {
-          return idbRun('readonly', (s) => s.getAllKeys()).then((r) => {
+          return idbRun('readonly', (s) => s.getAllKeys(rangeFor(prefix))).then((r) => {
             const out = [];
             for (const k of (r.ok && r.value) || []) {
-              const app = strip(k);
+              const app = strip(k, prefix);
               if (app !== null) out.push(app);
             }
             return out.sort();
@@ -258,11 +301,51 @@
         const out = [];
         try {
           for (let i = 0; i < window.localStorage.length; i++) {
-            const app = strip(window.localStorage.key(i));
+            const app = strip(window.localStorage.key(i), prefix);
             if (app !== null) out.push(app);
           }
         } catch (_) { return []; }
         return out.sort();
+      });
+    },
+
+    // entries resolves [{ key, value, size }] for every entry under
+    // prefix (or the whole namespace), sorted by key; size is the
+    // stored UTF-8 length of the entry's JSON text. One transaction, so
+    // keys and values are one snapshot. An unreadable entry is skipped.
+    entries(prefix) {
+      const collect = (pairs) => {
+        const out = [];
+        for (const [k, text] of pairs) {
+          const app = strip(k, prefix);
+          if (app === null || typeof text !== 'string') continue;
+          const value = decode(text);
+          if (value === undefined) continue;
+          out.push({ key: app, value: value, size: bytesOf(text) });
+        }
+        return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+      };
+      return openDB().then((db) => {
+        if (db) {
+          const range = rangeFor(prefix);
+          return idbRun('readonly', (s) => [s.getAllKeys(range), s.getAll(range)]).then((r) => {
+            if (!r.ok || !r.value) return [];
+            const ks = r.value[0] || [];
+            const vs = r.value[1] || [];
+            const pairs = [];
+            for (let i = 0; i < ks.length && i < vs.length; i++) pairs.push([ks[i], vs[i]]);
+            return collect(pairs);
+          });
+        }
+        const pairs = [];
+        try {
+          for (let i = 0; i < window.localStorage.length; i++) {
+            const k = window.localStorage.key(i);
+            if (strip(k, prefix) === null) continue;
+            pairs.push([k, window.localStorage.getItem(k)]);
+          }
+        } catch (_) { return []; }
+        return collect(pairs);
       });
     },
 
@@ -283,6 +366,22 @@
         if (!cur) return;
         cur.delete(fn);
         if (cur.size === 0) subs.delete(key);
+      };
+    },
+
+    // watch calls fn(key) when ANOTHER tab of this origin changes any
+    // key under prefix. The key travels, never the value: a watcher
+    // re-reads, so a layer that groups records under a prefix can
+    // mirror a sibling tab's write into one collection without a
+    // subscription per record. Returns the unwatch function; a tab
+    // never hears its own writes, as with subscribe.
+    watch(prefix, fn) {
+      if (typeof prefix !== 'string' || typeof fn !== 'function') return () => {};
+      const w = { prefix: prefix, fn: fn };
+      watchers.push(w);
+      return () => {
+        const i = watchers.indexOf(w);
+        if (i >= 0) watchers.splice(i, 1);
       };
     },
   };

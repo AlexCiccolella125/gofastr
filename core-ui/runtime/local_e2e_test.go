@@ -320,3 +320,126 @@ func TestLocalSubscribeCrossesTabs(t *testing.T) {
 		}
 	}
 }
+
+// keys and entries take a prefix and enumerate only what lies under it,
+// through the engine's key range rather than a scan: a layer that
+// groups records under a common prefix can list one group without
+// reading its neighbours, and an entry's size is the stored UTF-8
+// length of its JSON text.
+func TestLocalPrefixEnumeration(t *testing.T) {
+	srv := startLocalServer(t, "")
+	ctx := chromedptest.Context(t, chromedptest.Timeout(90*time.Second))
+	openLocal(t, ctx, srv.URL+"/")
+
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`Promise.all([
+        window.__gofastr.local.set('local.site.drafts:b', { title: 'second' }),
+        window.__gofastr.local.set('local.site.drafts:a', { title: 'first' }),
+        window.__gofastr.local.set('local.site.draftsx:z', { title: 'neighbour' }),
+        window.__gofastr.local.set('local.site.prefs:theme', 'dark'),
+        window.__gofastr.local.set('unrelated', 1),
+    ])`, nil, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+
+	var keys []string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.keys('local.site.drafts:')`, &keys, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 2 || keys[0] != "local.site.drafts:a" || keys[1] != "local.site.drafts:b" {
+		t.Fatalf("keys(prefix) = %v, want exactly the two drafts, sorted — a sibling prefix (draftsx) or another group leaked in", keys)
+	}
+	var all []string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.keys()`, &all, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 5 {
+		t.Fatalf("keys() = %v, want all five — the no-prefix form must still name the whole namespace", all)
+	}
+
+	var entries []map[string]any
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.entries('local.site.drafts:')`, &entries, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries(prefix) = %v, want two", entries)
+	}
+	first, _ := entries[0]["value"].(map[string]any)
+	if entries[0]["key"] != "local.site.drafts:a" || first["title"] != "first" {
+		t.Fatalf("entries(prefix)[0] = %v, want the a record with its value", entries[0])
+	}
+	// {"title":"first"} is 17 bytes of JSON.
+	if size, _ := entries[0]["size"].(float64); int(size) != 17 {
+		t.Fatalf("entries(prefix)[0].size = %v, want 17 (the UTF-8 length of the stored JSON text)", entries[0]["size"])
+	}
+}
+
+// The fallback engine enumerates by prefix too, so a layer above sees
+// one contract whichever engine answered.
+func TestLocalPrefixEnumerationOnTheFallback(t *testing.T) {
+	srv := startLocalServer(t, noIDB)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(90*time.Second))
+	openLocal(t, ctx, srv.URL+"/")
+
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`Promise.all([
+        window.__gofastr.local.set('g:1', 'é'),
+        window.__gofastr.local.set('g:2', 'b'),
+        window.__gofastr.local.set('h:1', 'c'),
+    ])`, nil, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+	var entries []map[string]any
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr.local.entries('g:')`, &entries, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 || entries[0]["key"] != "g:1" || entries[1]["key"] != "g:2" {
+		t.Fatalf("fallback entries('g:') = %v, want g:1 and g:2", entries)
+	}
+	// "é" is 4 bytes of JSON text: two quotes and a two-byte rune. The
+	// size is bytes, not code units.
+	if size, _ := entries[0]["size"].(float64); int(size) != 4 {
+		t.Fatalf("fallback entries('g:')[0].size = %v, want 4", entries[0]["size"])
+	}
+}
+
+// watch hears another tab's write of any key under a prefix, and never
+// this tab's own: one watcher covers a whole group of records.
+func TestLocalWatchCrossesTabsByPrefix(t *testing.T) {
+	srv := startLocalServer(t, "")
+	tabA := chromedptest.Context(t, chromedptest.Timeout(90*time.Second))
+	openLocal(t, tabA, srv.URL+"/")
+	if err := chromedp.Run(tabA, chromedp.Evaluate(`(() => {
+        window.__heard = [];
+        window.__gofastr.local.watch('grp:', (k) => window.__heard.push(k));
+        window.__gofastr.local.set('grp:mine', 1);
+    })()`, nil)); err != nil {
+		t.Fatal(err)
+	}
+
+	tabB, cancelB := chromedp.NewContext(tabA)
+	t.Cleanup(cancelB)
+	openLocal(t, tabB, srv.URL+"/")
+	if err := chromedp.Run(tabB, chromedp.Evaluate(`Promise.all([
+        window.__gofastr.local.set('other:x', 1),
+        window.__gofastr.local.set('grp:theirs', 2),
+    ])`, nil, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+
+	if !localPollTrue(tabA, `Promise.resolve(window.__heard.indexOf('grp:theirs') >= 0)`) {
+		var heard []string
+		_ = chromedp.Run(tabA, chromedp.Evaluate(`window.__heard`, &heard))
+		t.Fatalf("tab A heard %v — the sibling tab's write under the prefix never arrived", heard)
+	}
+	var heard []string
+	if err := chromedp.Run(tabA, chromedp.Evaluate(`window.__heard`, &heard)); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range heard {
+		if k == "grp:mine" {
+			t.Fatal("tab A heard its own write back")
+		}
+		if k == "other:x" {
+			t.Fatal("a watcher heard a key outside its prefix")
+		}
+	}
+}
