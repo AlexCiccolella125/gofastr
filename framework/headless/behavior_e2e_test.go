@@ -1199,3 +1199,72 @@ func TestE2E_LateMarkupIsBound(t *testing.T) {
 		t.Fatal("the late reveal button did nothing: the inserted markup was never bound")
 	}
 }
+
+// A swap inside a region can be what restores the region's gating
+// value: an island re-renders the radios the region watches, with the
+// showing value selected, together with a nested region whose own
+// condition holds. The arrival pass must sync the enclosing region
+// BEFORE the regions inside the swap, or the inner one reads the
+// enclosing region's stale hidden state and stays buried, with its
+// controls disabled, until the user touches some other control.
+func TestE2E_ASwapThatRestoresTheGatingValueUnburiesTheInnerRegion(t *testing.T) {
+	inner := `<div data-hui-when="tier" data-hui-when-value="pro" id="inner">` +
+		`<input type="checkbox" name="tier" value="pro" id="tier" checked>` +
+		`<input name="seat" id="seat"></div>`
+	radios := func(mode string) string {
+		checked := map[string]string{"auto": "", "custom": ""}
+		checked[mode] = " checked"
+		return `<div id="swap"><input type="radio" name="mode" value="auto" id="m-auto"` + checked["auto"] + `>` +
+			`<input type="radio" name="mode" value="custom" id="m-custom"` + checked["custom"] + `>` + inner + `</div>`
+	}
+	outer := `<div data-hui-when="mode" data-hui-when-value="custom" id="outer">` + radios("auto") + `</div>`
+	b := startBehaviorServer(t, string(Form(FormProps{Action: "/x"}, nil, render.HTML(outer))))
+	ctx := behaviorPage(t, b)
+	if !pollTrue(ctx, `document.getElementById('outer').hidden && document.getElementById('inner').hidden`) {
+		t.Fatal("the regions were never buried for the hiding value")
+	}
+	// The swap: the radios come back with custom selected, and the inner
+	// region with them. No input or change event fires, as none does
+	// for an island swap; only the arrival pass sees it.
+	js := `document.getElementById('swap').outerHTML = ` + "`" + radios("custom") + "`"
+	if err := chromedp.Run(ctx, chromedp.Evaluate(js, nil)); err != nil {
+		t.Fatalf("swapping the radios: %v", err)
+	}
+	if !pollTrue(ctx, `!document.getElementById('outer').hidden`) {
+		t.Fatal("the enclosing region stayed hidden after the swap restored its gating value")
+	}
+	if !pollTrue(ctx, `!document.getElementById('inner').hidden && !document.getElementById('seat').disabled`) {
+		t.Fatal("the inner region stayed buried: the arrival pass read the enclosing region's stale hidden state")
+	}
+}
+
+// A region outside every form prefers a control no form owns over a
+// same-named control inside a form: the loose one is the page-level
+// switch a region outside the forms belongs to, and the form's control
+// of that name is that form's business.
+func TestE2E_WhenOutsideTheFormsPrefersTheLooseControl(t *testing.T) {
+	// The form's select comes FIRST in document order, so a lookup
+	// that merely takes the first match follows it; only the
+	// preference for controls no form owns reaches the radios below.
+	page := `<form action="/x"><select name="plan" id="form-plan"><option value="basic">Basic</option>` +
+		`<option value="pro" selected>Pro</option></select></form>` +
+		`<input type="radio" name="plan" value="basic" id="loose-basic" checked>` +
+		`<input type="radio" name="plan" value="pro" id="loose-pro">` +
+		`<div data-hui-when="plan" data-hui-when-value="pro" id="pro-only"><input name="seats" id="seats"></div>`
+	b := startBehaviorServer(t, page)
+	ctx := behaviorPage(t, b)
+	if !pollTrue(ctx, moduleLoadedExpr) {
+		t.Fatal("the module never loaded")
+	}
+	// The form's select says pro; the loose radios say basic. The
+	// region follows the radios.
+	if !pollTrue(ctx, `document.getElementById('pro-only').hidden`) {
+		t.Fatal("the region followed the form's select instead of the loose radios")
+	}
+	if err := chromedp.Run(ctx, chromedp.Click(`#loose-pro`, chromedp.ByID)); err != nil {
+		t.Fatalf("clicking the loose radio: %v", err)
+	}
+	if !pollTrue(ctx, `!document.getElementById('pro-only').hidden`) {
+		t.Fatal("the region never followed the loose radio")
+	}
+}

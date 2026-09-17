@@ -136,8 +136,12 @@ renders the disabled-link posture; a form action, a dismiss href and
 a pager pattern that are rejected are refused at render; and a
 summary's field link the policy refuses falls back to plain text.
 
-The endpoint keeps the href's query, so the page and the island answer
-the same question. `data-fui-push-state` is rendered only for a GET
+The endpoint keeps the href's query, merged pair by pair onto its own,
+so the page and the island answer the same question. State keys (page,
+sort, filter) belong in the href and nowhere else: when the endpoint
+carries a key the href also carries, both values survive, the endpoint's
+first, and a handler that reads `Query().Get` sees the endpoint's stale
+one. `data-fui-push-state` is rendered only for a GET
 with a href to write; a mutation's URL is the server's to set through
 `X-Gofastr-Push-State`.
 

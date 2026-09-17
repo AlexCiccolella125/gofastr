@@ -490,14 +490,22 @@
     armFormErrors(scope);
     armActions(scope);
     armDrops(scope);
-    const regions = within(scope, '[data-hui-when]');
-    // A control inserted alone inside a hidden region arrives with no
-    // region of its own in the subtree: sync the nearest enclosing
-    // region as well, so the arrival pass disables the newcomer like
-    // the siblings it joined.
+    let regions = within(scope, '[data-hui-when]');
+    // A subtree inserted inside a region arrives with no region of its
+    // own above it: sync every enclosing region as well, so a control
+    // inserted alone inside a hidden region is disabled like the
+    // siblings it joined. The enclosing regions go FIRST, outermost
+    // first, because the first pass reads an ancestor's hidden state
+    // as it goes: an inserted swap that restores the gating value of
+    // the region around it must un-hide that region before the regions
+    // inside the swap look up, or they read the stale hidden and stay
+    // buried until the next input.
     if (scope !== document && scope.closest) {
-      const enclosing = scope.closest('[data-hui-when]');
-      if (enclosing && regions.indexOf(enclosing) === -1) regions.push(enclosing);
+      const enclosing = [];
+      for (let r = scope.closest('[data-hui-when]'); r; r = r.parentElement && r.parentElement.closest('[data-hui-when]')) {
+        if (regions.indexOf(r) === -1) enclosing.unshift(r);
+      }
+      regions = enclosing.concat(regions);
     }
     if (regions.length) syncWhenRegions(regions);
     armSystem(scope);

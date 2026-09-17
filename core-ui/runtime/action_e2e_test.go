@@ -25,6 +25,8 @@ type actionSrv struct {
 	ok   atomic.Int32
 	fail atomic.Int32
 	slow atomic.Int32
+	// slowfail counts /slowfail: a failure that settles after /ok.
+	slowfail atomic.Int32
 }
 
 // actionPage is the arm script every test body appends its buttons
@@ -80,6 +82,13 @@ func startActionSrv(t *testing.T, body string) *actionSrv {
 		s.slow.Add(1)
 		time.Sleep(700 * time.Millisecond)
 		w.WriteHeader(http.StatusNoContent)
+	})
+	// /slowfail settles 422 after the same wait as /slow: a refusal that
+	// lands after a sibling's fast commit.
+	mux.HandleFunc("/slowfail", func(w http.ResponseWriter, r *http.Request) {
+		s.slowfail.Add(1)
+		time.Sleep(700 * time.Millisecond)
+		w.WriteHeader(http.StatusUnprocessableEntity)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -498,5 +507,56 @@ func TestActionUntoggleFailureStaysCommittedQuietly(t *testing.T) {
 	}
 	if n := s.fail.Load(); n != 1 {
 		t.Fatalf("fail endpoint hit %d times, want 1", n)
+	}
+}
+
+// A refused untoggle returns its member to committed, and a sibling may
+// have committed inside the same round trip: the sibling's settlement
+// revoke skipped this member while it was pending. Returning to
+// committed must displace like any other commit, or the group ends with
+// two committed members, the state the settlement revoke exists to
+// make impossible.
+func TestActionRefusedUntoggleStillConvergesTheGroup(t *testing.T) {
+	s := startActionSrv(t, `<button type="button" id="a" data-state="committed" aria-pressed="true">
+  <span id="ai" hidden>Starter</span><span id="ad">Starter ✓</span>
+</button>
+<button type="button" id="b" data-state="idle" aria-pressed="false">
+  <span id="bi">Pro</span><span id="bd" hidden>Pro ✓</span>
+</button>`)
+	ctx := actionPage(t, s)
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`window.__arm('a', { endpoint: '/ok', untoggle: '/slowfail', group: 'plan', pressed: true, idle: document.getElementById('ai'), done: document.getElementById('ad') });
+            window.__arm('b', { endpoint: '/ok', group: 'plan', pressed: true, idle: document.getElementById('bi'), done: document.getElementById('bd') });`, nil),
+		// a's untoggle is in flight (pending) when b is clicked, so b's
+		// click-time and settlement revokes both skip a; then a's
+		// untoggle is refused and a returns to committed.
+		chromedp.Click(`#a`, chromedp.ByID),
+		chromedp.Click(`#b`, chromedp.ByID),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if !pollTrue(ctx, `document.getElementById('b').getAttribute('data-state') === 'committed'`) {
+		t.Fatal("b never committed while a's untoggle was in flight")
+	}
+	if !pollTrue(ctx, `document.getElementById('a').getAttribute('data-state') === 'committed'`) {
+		t.Fatal("a never returned to committed after its refused untoggle")
+	}
+	var probe struct {
+		A       string `json:"a"`
+		B       string `json:"b"`
+		Pressed int    `json:"pressed"`
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+  const a = document.getElementById('a'), b = document.getElementById('b');
+  return { a: a.getAttribute('data-state'), b: b.getAttribute('data-state'),
+           pressed: (a.getAttribute('aria-pressed') === 'true') + (b.getAttribute('aria-pressed') === 'true') };
+})()`, &probe)); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if probe.A != "committed" || probe.B != "idle" || probe.Pressed != 1 {
+		t.Fatalf("group did not converge after a refused untoggle: a=%s b=%s pressed=%d, want committed/idle/1", probe.A, probe.B, probe.Pressed)
+	}
+	if n := s.slowfail.Load(); n != 1 {
+		t.Fatalf("slowfail hit %d times, want 1", n)
 	}
 }

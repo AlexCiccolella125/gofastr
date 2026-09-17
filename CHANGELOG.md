@@ -144,8 +144,12 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   action primitive (`core-ui/runtime/src/action.js`) now re-runs the
   revoke when a commit settles: the last completer wins, the group
   converges on exactly one committed button, and a failure of the
-  later click still restores the sibling it displaced. Covered by
-  `TestActionGroupConcurrentClicksConvergeOnOne`.
+  later click still restores the sibling it displaced. A refused
+  untoggle that returns its member to committed displaces the same
+  way, so a sibling that committed inside the same round trip does not
+  leave two committed. Covered by
+  `TestActionGroupConcurrentClicksConvergeOnOne` and
+  `TestActionRefusedUntoggleStillConvergesTheGroup`.
 - **Action group registry no longer retains navigated-away buttons.**
   Group members were pruned only when a sibling committed; a group
   navigated away from wholesale was held by the registry forever. The
@@ -202,9 +206,11 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   hidden region had disabled: effective visibility is now computed
   (own condition AND no hidden ancestor region), `hidden` is set on
   every region in the scope first, and exactly the controls inside
-  any hidden region are disabled. The arrival scan also syncs the
-  nearest enclosing region of an inserted subtree, so a control
-  inserted alone inside a hidden region is disabled like its siblings.
+  any hidden region are disabled. The arrival scan also syncs every
+  enclosing region of an inserted subtree, outermost first, so a
+  control inserted alone inside a hidden region is disabled like its
+  siblings and a swap that restores an enclosing region's gating value
+  un-hides the regions inside the swap in the same pass.
   Browser coverage in `behavior_e2e_test.go`.
 - **`framework/headless`: parts no longer drop attrs and binds on
   non-root parts.** `paginationLink` (Pagination's anchors) and the

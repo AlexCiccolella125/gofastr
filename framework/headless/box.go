@@ -328,7 +328,11 @@ func (s Parts) Box(skin Skin, fillable ...Part) Box {
 // and the form's method for a mutation.
 //
 // The endpoint keeps the href's query, merged pair by pair onto its
-// own — because the page and the island answer the same question: a
+// own. State keys (the page, the sort, the filter) belong in the href
+// and nowhere else: when the endpoint carries a key the href also
+// carries, both values survive, the endpoint's first, and a handler
+// that reads Query().Get sees the endpoint's stale one. The merge is
+// pair by pair because the page and the island answer the same question: a
 // link to "/apps?page=3&sort=name" fetches the third page sorted by
 // name as a document, and the island fetches exactly that as a
 // region. Two URLs for one click is how the two drift apart and the

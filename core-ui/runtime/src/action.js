@@ -163,7 +163,15 @@
         // stays where it was (committed), because the revert was
         // refused and there is nothing to roll back to.
         const settled = spec.untoggle ? request(spec.untoggle, spec.method) : Promise.resolve(true);
-        settled.then((ok) => { setState(el, spec, ok ? 'idle' : 'committed'); });
+        settled.then((ok) => {
+          setState(el, spec, ok ? 'idle' : 'committed');
+          // A refused untoggle returns this member to committed, and a
+          // sibling may have committed inside the same round trip
+          // (its settlement revoke skipped this one while it was
+          // pending). Returning to committed displaces like any other
+          // commit, so the group still converges on one member.
+          if (!ok && spec.group) revokeGroupSiblings(spec.group, el);
+        });
         return;
       }
       // idle or error: commit.
