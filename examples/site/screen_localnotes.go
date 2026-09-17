@@ -92,14 +92,16 @@ func (s *LocalNotesScreen) Render() render.HTML { return s.RenderCtx(context.Bac
 func (s *LocalNotesScreen) RenderCtx(ctx context.Context) render.HTML {
 	// The mirrored preference: present on the request as a cookie, so
 	// this render already knows it. No flash of the wrong state.
-	view, viewFound, _ := local.Get(ctx, siteNotesPrefs, "view")
+	// A mirror read is a CLIENT HINT: the browser wrote the cookie, so
+	// this is evidence about what to paint and nothing more.
+	view, viewSrc, _ := local.Get(ctx, siteNotesPrefs, "view")
 	viewLabel := "Comfortable view"
 	if view.Compact {
 		viewLabel = "Compact view"
 	}
 	viewSource := "server default: no preference stored yet"
-	if viewFound {
-		viewSource = "rendered by the server from the mirrored cookie"
+	if viewSrc == local.SourceMirror {
+		viewSource = "rendered by the server from the mirrored cookie — a client hint, validated like any input"
 	}
 
 	draftForm := ui.Form(ui.FormConfig{
@@ -182,7 +184,7 @@ func localNotesUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if !found {
+	if !found.Found() {
 		fmt.Fprint(w, "No draft arrived: write something first.")
 		return
 	}

@@ -24,15 +24,46 @@ import (
 // a client hint: validated against the declaration (collection, key,
 // size, JSON shape into T), never trusted. A value that fails to
 // decode into T is an error, not a zero value marching on.
+//
+// The two sources are NOT the same evidence, so every read says which
+// one answered. An uploaded record arrived on a request whose trigger
+// declared it and whose handler is wrapped by the Upload that declared
+// it; a mirror cookie is a value any script on the origin can write and
+// any client can forge, sitting in the request whether the handler
+// asked for it or not. A handler that treats them alike has an
+// unauthenticated write channel it did not mean to open, which is why
+// Source is a return value and not a doc note.
 
 // The cookie namespace, one segment per record, component-encoded by
 // the browser: gofastr.local.<app>.<collection>.<key>.
 const cookiePrefix = "gofastr.local."
 
-// Record is one key/value pair of a collection.
+// Source says where a record the request carried came from.
+type Source string
+
+const (
+	// SourceNone is "the request carried nothing for this key".
+	SourceNone Source = ""
+	// SourceUpload is a record an Upload.Wrap read off the request body,
+	// declared by the trigger and accepted by the wrapper's own
+	// validation.
+	SourceUpload Source = "upload"
+	// SourceMirror is a mirror cookie: a CLIENT HINT. Any script on the
+	// origin can write it, any client can forge it, and it rides every
+	// request whether the handler wanted it or not. Treat it the way you
+	// would treat a query parameter — never as proof of anything.
+	SourceMirror Source = "mirror"
+)
+
+// Found reports whether the request carried the record at all.
+func (s Source) Found() bool { return s != SourceNone }
+
+// Record is one key/value pair of a collection, with where it came
+// from.
 type Record[T any] struct {
-	Key   string
-	Value T
+	Key    string
+	Value  T
+	Source Source
 }
 
 // Records is the raw view FromContext returns: every record the
@@ -40,6 +71,7 @@ type Record[T any] struct {
 type Records struct {
 	app  string
 	recs map[string]map[string]json.RawMessage
+	srcs map[string]map[string]Source
 }
 
 // FromContext returns every record the request carried for s: the
@@ -47,25 +79,29 @@ type Records struct {
 // List; this is the escape hatch for a handler that inspects what
 // arrived.
 func FromContext(ctx context.Context, s *Store) *Records {
-	out := &Records{app: s.app, recs: map[string]map[string]json.RawMessage{}}
+	out := &Records{app: s.app, recs: map[string]map[string]json.RawMessage{}, srcs: map[string]map[string]Source{}}
+	put := func(coll, key string, raw json.RawMessage, src Source) {
+		if out.recs[coll] == nil {
+			out.recs[coll] = map[string]json.RawMessage{}
+			out.srcs[coll] = map[string]Source{}
+		}
+		out.recs[coll][key] = raw
+		out.srcs[coll][key] = src
+	}
 	if r := app.RequestFromContext(ctx); r != nil {
 		for _, c := range r.Cookies() {
 			coll, key, raw, ok := s.decodeCookie(c)
 			if !ok {
 				continue
 			}
-			if out.recs[coll] == nil {
-				out.recs[coll] = map[string]json.RawMessage{}
-			}
-			out.recs[coll][key] = raw
+			put(coll, key, raw, SourceMirror)
 		}
 	}
+	// The upload wins for a key both sources carried: it is the one the
+	// trigger declared and the wrapper validated.
 	for coll, byKey := range recordsFrom(ctx, s.app) {
-		if out.recs[coll] == nil {
-			out.recs[coll] = map[string]json.RawMessage{}
-		}
 		for k, v := range byKey {
-			out.recs[coll][k] = v
+			put(coll, k, v, SourceUpload)
 		}
 	}
 	return out
@@ -78,10 +114,13 @@ func (r *Records) Collections() []string { return sortedKeys(r.recs) }
 // Keys returns the keys that arrived for collection, sorted.
 func (r *Records) Keys(collection string) []string { return sortedKeys(r.recs[collection]) }
 
-// Raw returns the JSON of one record and whether it arrived.
-func (r *Records) Raw(collection, key string) (json.RawMessage, bool) {
+// Raw returns the JSON of one record and where it came from.
+func (r *Records) Raw(collection, key string) (json.RawMessage, Source) {
 	v, ok := r.recs[collection][key]
-	return v, ok
+	if !ok {
+		return nil, SourceNone
+	}
+	return v, r.srcs[collection][key]
 }
 
 // decodeCookie recognises a mirror cookie of this store: the name is
@@ -115,51 +154,57 @@ func (s *Store) decodeCookie(c *http.Cookie) (coll, key string, raw json.RawMess
 }
 
 // Get returns record key of c as the request carried it: from the
-// upload first, then from the mirror cookie. found is false when the
-// request carried nothing for the key; err reports a record that does
-// not decode into T.
-func Get[T any](ctx context.Context, c *Collection[T], key string) (value T, found bool, err error) {
-	raw, ok := rawFor(ctx, c.def, key)
-	if !ok {
-		return value, false, nil
+// upload first, then from the mirror cookie. The Source says which, and
+// is SourceNone when the request carried nothing for the key (src.Found()
+// reads as the old boolean). err reports a record that does not decode
+// into T.
+//
+// SourceMirror is a client hint. Do not authorise on it.
+func Get[T any](ctx context.Context, c *Collection[T], key string) (value T, src Source, err error) {
+	raw, src := rawFor(ctx, c.def, key)
+	if !src.Found() {
+		return value, SourceNone, nil
 	}
 	if err := json.Unmarshal(raw, &value); err != nil {
-		return value, true, fmt.Errorf("local: record %q/%q does not decode into %T: %w", c.def.name, key, value, err)
+		return value, src, fmt.Errorf("local: record %q/%q does not decode into %T: %w", c.def.name, key, value, err)
 	}
-	return value, true, nil
+	return value, src, nil
 }
 
-// List returns every record of c the request carried, sorted by key.
-// A record that does not decode into T fails the whole list.
+// List returns every record of c the request carried, sorted by key,
+// each carrying its Source. A record that does not decode into T fails
+// the whole list. A list can mix the two sources, and a caller that
+// authorises on any of it must read Source per record.
 func List[T any](ctx context.Context, c *Collection[T]) ([]Record[T], error) {
-	all := FromContext(ctx, c.def.store).recs[c.def.name]
+	from := FromContext(ctx, c.def.store)
+	all := from.recs[c.def.name]
 	out := make([]Record[T], 0, len(all))
 	for _, k := range sortedKeys(all) {
 		var v T
 		if err := json.Unmarshal(all[k], &v); err != nil {
 			return nil, fmt.Errorf("local: record %q/%q does not decode into %T: %w", c.def.name, k, v, err)
 		}
-		out = append(out, Record[T]{Key: k, Value: v})
+		out = append(out, Record[T]{Key: k, Value: v, Source: from.srcs[c.def.name][k]})
 	}
 	return out, nil
 }
 
-func rawFor(ctx context.Context, def *collectionDef, key string) (json.RawMessage, bool) {
+func rawFor(ctx context.Context, def *collectionDef, key string) (json.RawMessage, Source) {
 	if v, ok := recordsFrom(ctx, def.store.app)[def.name][key]; ok {
-		return v, true
+		return v, SourceUpload
 	}
 	if !def.mirror {
-		return nil, false
+		return nil, SourceNone
 	}
 	r := app.RequestFromContext(ctx)
 	if r == nil {
-		return nil, false
+		return nil, SourceNone
 	}
 	for _, c := range r.Cookies() {
 		coll, k, raw, ok := def.store.decodeCookie(c)
 		if ok && coll == def.name && k == key {
-			return raw, true
+			return raw, SourceMirror
 		}
 	}
-	return nil, false
+	return nil, SourceNone
 }

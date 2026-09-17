@@ -189,15 +189,35 @@ var Prefs = local.Define[View](Site, "prefs", local.CollectionConfig{Version: 1,
 var ctx = context.Background()
 -->
 ```go
-view, found, err := local.Get(ctx, Prefs, "view")
-_, _, _ = view, found, err
+view, src, err := local.Get(ctx, Prefs, "view")
+_, _, _ = view, src, err
 ```
 
-The cookie is a client hint the browser wrote: it is validated (declared
-and mirrored collection, valid key, size cap, JSON shape into `T`) and
-never trusted. It cannot be signed by the server, because the server never
-saw the value; treat it as user input. It travels on every request, which
-is why the caps are cookie-sized.
+`src` is the **provenance**, and reading it is not optional for anything
+that matters. `local.SourceMirror` means the value came from a cookie;
+`local.SourceUpload` means it came through `Upload.Wrap`, on a request
+whose trigger declared it; `local.SourceNone` means the request carried
+nothing (`src.Found()` is the plain "did anything arrive"). `List`
+carries a `Source` per record, and a list can mix the two.
+
+**A mirror read is a client hint.** The browser wrote that cookie, so any
+script on the origin can write it, any client can forge it with `curl`,
+and it rides every request whether the handler asked for it or not. It is
+validated (declared and mirrored collection, valid key, size cap, JSON
+shape into `T`) and never trusted, and it cannot be signed, because the
+server never saw the value before the browser stored it. Treat it the way
+you treat a query parameter: fine for deciding what to paint, never proof
+of anything. A handler that authorises on a record must require
+`local.SourceUpload`, and even that is a record the browser supplied —
+the upload proves the request declared it, not that it is true.
+
+It travels on every request, which is why the caps are cookie-sized and
+why a store's mirrored collections share one budget
+(`local.MirrorStoreMaxBytes`, 4 KiB): every byte here is a byte on every
+request, and a Cookie header past the 8–16 KiB most proxies allow is a
+431 the user can only clear by hand. `Define` panics over the budget, and
+the browser refuses the cookie (not the record) with
+`gofastr:local-error{reason:"mirror"}` if the encoded reality passes it.
 
 ### Upload: what accompanies a request
 

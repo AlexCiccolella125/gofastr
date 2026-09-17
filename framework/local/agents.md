@@ -40,7 +40,10 @@ title.Bind(ctx, "p", nil)
 up := local.Send(Drafts.Key("current"))
 form := render.Tag("form", up.Merge(map[string]string{"data-fui-rpc": "/drafts/upload"}), …)
 router.Post("/drafts/upload", up.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    d, found, err := local.Get(r.Context(), Drafts, "current")
+    // src is local.SourceUpload, SourceMirror or SourceNone. A mirror
+    // read is a CLIENT HINT — any script on the origin writes that
+    // cookie and any client forges it — so never authorise on one.
+    d, src, err := local.Get(r.Context(), Drafts, "current")
     p, _, _ := local.Get(r.Context(), Prefs, "theme") // mirrored: also at first paint
     local.Put(w, Drafts, "current", d)                 // download: write back
 }))
@@ -52,6 +55,8 @@ Browser side (after `__gofastr.loadModule('local-store')`):
 `__gofastr.localStore('site').collection('drafts')` → `get`, `put`,
 `delete`, `list({where, orderBy, desc, limit, offset})`, `count`,
 `subscribe`, `clear`, `available`. Every call settles `{ok, reason}`;
-refusals raise `gofastr:local-error`.
+refusals raise `gofastr:local-error`. A collection whose migration did
+not complete refuses every call with reason `migration` rather than
+serving records on a schema this build cannot read.
 
 Docs: `gofastr docs local-state`.

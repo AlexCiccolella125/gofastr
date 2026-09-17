@@ -97,7 +97,7 @@ type e2eSeen struct {
 	Body    string
 	Drafts  []Record[e2eDraft]
 	Current e2eDraft
-	Found   bool
+	Found   Source
 	Theme   string
 	Err     error
 }
@@ -145,13 +145,13 @@ window.__migrations = []; window.addEventListener('gofastr:local-migrated', (e) 
 		s.Body = string(b)
 		s.Drafts, s.Err = List(r.Context(), e2eDrafts)
 		s.Current, s.Found, _ = Get(r.Context(), e2eDrafts, "current")
-		if p, ok, _ := Get(r.Context(), e2ePref, "theme"); ok {
+		if p, src, _ := Get(r.Context(), e2ePref, "theme"); src.Found() {
 			s.Theme = p.Theme
 		}
 		e.mu.Lock()
 		e.seen = append(e.seen, s)
 		e.mu.Unlock()
-		if s.Found {
+		if s.Found.Found() {
 			// Download: the server pushes a record back and a second one.
 			_ = Put(w, e2eDrafts, "current", e2eDraft{ID: "current", Title: s.Current.Title + " (server)"})
 			_ = Put(w, e2eDrafts, "from-server", e2eDraft{ID: "from-server", Title: "pushed"})
@@ -480,7 +480,7 @@ func TestE2E_UploadDeliversOnlyTheDeclaredAndDownloadWritesBack(t *testing.T) {
 	if seen.Body != `{"note":"hi"}` {
 		t.Fatalf("the handler read body %q: the reserved field must be stripped and the form field kept", seen.Body)
 	}
-	if !seen.Found || seen.Current.Title != "mine" {
+	if seen.Found != SourceUpload || seen.Current.Title != "mine" {
 		t.Fatalf("Get(current) = %+v found=%v", seen.Current, seen.Found)
 	}
 	if seen.Theme != "dark" {

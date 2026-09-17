@@ -232,14 +232,18 @@ func (s *TeamScreen) RenderCtx(ctx context.Context) render.HTML {
 // checkTeam runs inside the upload bridge: teams:current, if the
 // browser sent it, is already on the context.
 func checkTeam(w http.ResponseWriter, r *http.Request) {
-	t, found, err := local.Get(r.Context(), teams, "current")
+	// src says which channel the team arrived on. This handler only
+	// accepts the upload: teams is not a mirrored collection, so a
+	// cookie could never answer here, and asserting it keeps that true
+	// if the declaration ever changes.
+	t, src, err := local.Get(r.Context(), teams, "current")
 	if err != nil {
 		http.Error(w, "the team does not decode", http.StatusBadRequest)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if !found {
+	if src != local.SourceUpload {
 		fmt.Fprint(w, "No team arrived: add a member first.")
 		return
 	}

@@ -237,7 +237,7 @@ type echo struct {
 	form    url.Values
 	drafts  []Record[draft]
 	current draft
-	found   bool
+	found   Source
 	err     error
 	req     *http.Request
 }
@@ -276,7 +276,7 @@ func TestWrapLiftsTheReservedFieldOutOfAJSONBody(t *testing.T) {
 	if e.req == nil {
 		t.Fatal("Wrap must install app.WithRequest so cookie reads work in the handler")
 	}
-	if !e.found || e.current.Title != "T" || e.current.Text != "body" {
+	if !e.found.Found() || e.current.Title != "T" || e.current.Text != "body" {
 		t.Fatalf("Get(current) = %+v found=%v", e.current, e.found)
 	}
 	if e.err != nil || len(e.drafts) != 2 || e.drafts[0].Key != "b" || e.drafts[1].Key != "current" {
@@ -296,7 +296,7 @@ func TestWrapPassesABodyWithoutTheFieldUntouched(t *testing.T) {
 	req := httptest.NewRequest("POST", "/up", strings.NewReader(`{"b":1,"a":2}`))
 	req.Header.Set("Content-Type", "application/json")
 	h.ServeHTTP(rec, req)
-	if rec.Code != 204 || e.body != `{"b":1,"a":2}` || e.found || len(e.drafts) != 0 {
+	if rec.Code != 204 || e.body != `{"b":1,"a":2}` || e.found.Found() || len(e.drafts) != 0 {
 		t.Fatalf("status %d body %q found %v drafts %v — a body with no reserved field must reach the handler byte for byte", rec.Code, e.body, e.found, e.drafts)
 	}
 	// An empty body, and a non-JSON content type, pass through too.
@@ -373,7 +373,7 @@ func TestWrapLiftsTheFieldOutOfFormBodies(t *testing.T) {
 	req := httptest.NewRequest("POST", "/up", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	h.ServeHTTP(rec, req)
-	if rec.Code != 204 || !e.found || e.current.Title != "F" {
+	if rec.Code != 204 || !e.found.Found() || e.current.Title != "F" {
 		t.Fatalf("urlencoded: %d found=%v %+v", rec.Code, e.found, e.current)
 	}
 	if e.form.Get("note") != "hi" || e.form.Has("__local") {
@@ -390,7 +390,7 @@ func TestWrapLiftsTheFieldOutOfFormBodies(t *testing.T) {
 	req = httptest.NewRequest("POST", "/up", strings.NewReader(mb.String()))
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	h2.ServeHTTP(rec, req)
-	if rec.Code != 204 || !e2.found || e2.current.Title != "M" || e2.form.Has("__local") || e2.form.Get("note") != "hi" {
+	if rec.Code != 204 || !e2.found.Found() || e2.current.Title != "M" || e2.form.Has("__local") || e2.form.Get("note") != "hi" {
 		t.Fatalf("multipart: %d found=%v %+v form=%v", rec.Code, e2.found, e2.current, e2.form)
 	}
 }
@@ -411,10 +411,10 @@ func TestGetReadsAMirrorCookieAndIgnoresTheRest(t *testing.T) {
 	ctx := app.WithRequest(context.Background(), req)
 
 	v, found, err := Get(ctx, p, "theme")
-	if err != nil || !found || v.Theme != "dark" {
+	if err != nil || found != SourceMirror || v.Theme != "dark" {
 		t.Fatalf("Get(theme) = %+v %v %v", v, found, err)
 	}
-	if _, found, _ := Get(ctx, d, "current"); found {
+	if _, found, _ := Get(ctx, d, "current"); found.Found() {
 		t.Fatal("an unmirrored collection must never be read from a cookie")
 	}
 	all := FromContext(ctx, s)
@@ -424,11 +424,11 @@ func TestGetReadsAMirrorCookieAndIgnoresTheRest(t *testing.T) {
 	// A record that does not decode into T is an error, not a zero value.
 	req2 := httptest.NewRequest("GET", "/", nil)
 	req2.AddCookie(&http.Cookie{Name: "gofastr.local.site.prefs.theme", Value: url.PathEscape(`[1,2]`)})
-	if _, found, err := Get(app.WithRequest(context.Background(), req2), p, "theme"); !found || err == nil {
+	if _, found, err := Get(app.WithRequest(context.Background(), req2), p, "theme"); !found.Found() || err == nil {
 		t.Fatalf("a mis-shaped record must surface as an error: found=%v err=%v", found, err)
 	}
 	// No request on the context: nothing, no panic.
-	if _, found, _ := Get(context.Background(), p, "theme"); found {
+	if _, found, _ := Get(context.Background(), p, "theme"); found.Found() {
 		t.Fatal("no request, no record")
 	}
 	// An upload wins over the cookie for the same key.
@@ -526,5 +526,58 @@ func TestASCIIJSON(t *testing.T) {
 	got := asciiJSON([]byte(`{"a":"é🙂"}`))
 	if got != `{"a":"\u00e9\ud83d\ude42"}` {
 		t.Fatalf("asciiJSON = %s", got)
+	}
+}
+
+// A mirror cookie and an uploaded record are not the same evidence, and
+// a read says which one answered.
+//
+// An uploaded record arrived on a request whose trigger declared it and
+// whose handler is wrapped by the Upload that declared it. A mirror
+// cookie is a value any script on the origin can write and any client
+// can forge with curl, riding every request whether the handler asked
+// for it or not. Get handed both back as found=true, with nothing tying
+// the answer to Upload.Wrap, so a handler that authorised on a record
+// had an unauthenticated write channel it never meant to open.
+func TestAReadSaysWhetherItCameFromTheUploadOrTheMirror(t *testing.T) {
+	s := fresh(t, "prov")
+	p := Define[prefs](s, "prefs", CollectionConfig{Version: 1, Mirror: true})
+
+	// A cookie anyone can plant.
+	req := httptest.NewRequest("POST", "/x", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  cookiePrefix + url.PathEscape("prov.prefs.theme"),
+		Value: url.PathEscape(`{"theme":"forged"}`),
+	})
+	ctx := app.WithRequest(context.Background(), req)
+	v, src, err := Get(ctx, p, "theme")
+	if err != nil || src != SourceMirror || v.Theme != "forged" {
+		t.Fatalf("Get over a cookie = %+v src=%q err=%v, want SourceMirror", v, src, err)
+	}
+	if !src.Found() {
+		t.Fatal("a mirror read is still a read")
+	}
+	recs, err := List(ctx, p)
+	if err != nil || len(recs) != 1 || recs[0].Source != SourceMirror {
+		t.Fatalf("List = %+v %v — every record carries its own source", recs, err)
+	}
+
+	// The same key through the upload wins, and says so.
+	up := withRecords(ctx, "prov", map[string]map[string]json.RawMessage{
+		"prefs": {"theme": json.RawMessage(`{"theme":"declared"}`)},
+	})
+	v, src, err = Get(up, p, "theme")
+	if err != nil || src != SourceUpload || v.Theme != "declared" {
+		t.Fatalf("Get over an upload = %+v src=%q err=%v, want SourceUpload", v, src, err)
+	}
+	recs, _ = List(up, p)
+	if len(recs) != 1 || recs[0].Source != SourceUpload {
+		t.Fatalf("List = %+v — the upload wins for a key both sources carried", recs)
+	}
+
+	// And nothing at all is SourceNone, not a zero value that reads as
+	// an answer.
+	if _, src, _ := Get(app.WithRequest(context.Background(), httptest.NewRequest("POST", "/x", nil)), p, "theme"); src != SourceNone || src.Found() {
+		t.Fatalf("an absent record = %q, want SourceNone", src)
 	}
 }
