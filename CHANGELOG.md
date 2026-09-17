@@ -8,6 +8,36 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
 ## [Unreleased]
 
 ### Added
+- **`framework/local`**: local-first state for a GoFastr app, declared
+  in Go, persisted in the browser, with a documented contract. A
+  `local.Store` is declared once per app with named collections
+  (`local.Define[T]`: a Go record type with a JSON round-trip, a key
+  field, a size cap per record and per collection, a schema version
+  with `Rename`/`Default`/`Remove`/`Func` migrations the browser runs
+  once). The browser API is generated from the declaration and served
+  as the runtime module `local-store`, registered through the behaviour
+  seam with `Requires("local")` on top of the kernel's browser-store
+  primitive (IndexedDB; no dependency): `get`, `put`, `delete`, `list`
+  with filters and ordering, `count`, `subscribe` (this tab's writes and
+  other tabs'), `clear`, `available`; every call settles, and a refusal
+  raises `gofastr:local-error` with its reason. Four explicit bridges to
+  Go screens and nothing in the background: `SeedSignal` fills a
+  `core-ui/store` slice from a record after hydration and writes it
+  back; a `Mirror` collection keeps tiny records in cookies so a render
+  reads them at first paint; `Send` declares the collections or keys
+  that ride an RPC request as the reserved field `__local` and
+  `Upload.Wrap` reads them (undeclared refused, caps enforced, the
+  field stripped before the handler); `Put`/`Delete`/`Clear` write
+  records back through the `X-Gofastr-Local` response header, and
+  `ClearOnNextLoad` covers a full-navigation logout. Local-first state,
+  not offline sync. Proof: `examples/site` at `/forms/draft-notes`.
+  `gofastr docs local-state`.
+- **`data-fui-rpc-with="<module>"`** (`rpc.js`): the trigger names the
+  modules the runtime loads before dispatching, and the request hooks
+  on `__gofastr._rpcHooks.request` decorate the request the fetch is
+  built from; the response hooks run on a 2xx after the runtime's own
+  headers. The one seam `framework/local`'s bridges ride on. Browser
+  coverage in `core-ui/runtime/rpc_hooks_e2e_test.go`.
 - **The `local` browser store** (`core-ui/runtime/src/local.js`): the
   runtime's five hard-coded Web-storage keys, generalised into one
   primitive with one owner. `window.__gofastr.local` is `available()`,

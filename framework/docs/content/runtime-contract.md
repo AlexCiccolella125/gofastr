@@ -527,6 +527,15 @@ offline-first (see the capability map's non-goals). `core-ui/store`'s
 `Slice.Persist()` is the one consumer core-ui ships
 (`data-fui-signal-persist` in the table above).
 
+`framework/local` registers its `local-store` module the same way
+(`Requires("local")`, marker `[data-local-store]`): the opinionated
+layer above the primitive — declared collections with caps and
+migrations, `data-local-seed` (a signal filled from a record),
+`data-local-send` (records that ride an RPC request as the reserved
+field `__local`, through the `data-fui-rpc-with` seam above) and the
+`X-Gofastr-Local` response header (records a handler writes back). The
+`data-local-*` prefix is that package's; see [Local state](local-state.md).
+
 The framework's own `headless` module is registered this way by
 `framework/headless/behavior.go`, binding that package's `data-hui-*`
 hooks with the markers `[data-hui-reveal]`, `[data-hui-color]`,

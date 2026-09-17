@@ -162,6 +162,13 @@ It does **not** make GoFastr offline-first (an explicit
 queue of pending mutations and no sync. It is a browser remembering a
 projection.
 
+When one slice is not enough — named collections, a schema version with
+migrations, a key field, a filtered list, a value the server reads at
+render or action time or pushes back — the next step is
+[`framework/local`](local-state.md), which builds on the same primitive
+and adds the explicit bridges. Its `SeedSignal` is the collection-backed
+cousin of `Persist`: a slice cannot be both.
+
 ## Retrofitted components
 
 `ui.Counter`, `ui.Tabs`, and `ui.SignalToggle` accept a typed `Slice` (their
@@ -191,6 +198,7 @@ ui.Counter(ui.CounterConfig{Slice: store.New("cart").Int("count", 0)})
 - [UI capability map](ui-capability-map.md) shows when a local signal, typed store, server recomputation, or durable database state is the right boundary.
 - [Interactive patterns](interactive-patterns.md) covers RPC producers that publish authoritative values and fragments.
 - [Runtime contract](runtime-contract.md) defines seeding and SPA-navigation rules, and documents the `local` browser-store primitive `Persist` is built on.
+- [Local state](local-state.md) is the declared, collection-shaped layer above the same primitive, with the bridges to Go screens.
 
 ## Common mistakes
 

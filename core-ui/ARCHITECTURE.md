@@ -796,7 +796,13 @@ refuses to open a database are all normal. Never keep something here
 whose loss is a bug: the server is still where truth lives. This is
 not offline-first (`ui-capability-map.md` non-goals): there is no
 conflict resolution, no queue of pending mutations, no sync. Opinions
-of that shape belong in a layer ABOVE core-ui, never in the primitive.
+of that shape belong in a layer ABOVE core-ui, never in the primitive:
+`framework/local` is that layer (declared collections, caps,
+migrations, the seed/upload/download bridges), registered through the
+behaviour seam as the `local-store` module with `Requires("local")`,
+owning its own `data-local-*` markers and reaching this store only
+through the API above. Its one ask of core-ui is the `data-fui-rpc-with`
+request/response hook seam in `rpc.js`.
 
 ### Sequenced WebSocket client (`__gofastr.connectWebSocket`)
 
