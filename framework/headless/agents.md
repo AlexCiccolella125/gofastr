@@ -69,10 +69,11 @@ English strings, `spec_golden_strings.txt` at probe strings).
   caller's `NAME` cannot land beside the component's `name`; a key
   given twice is refused.
 - **An English string in a component.** Strings live on `Strings`, one
-  typed field each, so a missing translation is a compile error rather
-  than a stray word on a French page; `strings_test.go` refuses English
-  outside it. A partial `Strings` is safe: every empty field falls back
-  to its English default.
+  typed field each, so a translation is a value the compiler checks
+  the shape of; a field left empty falls back to its English default
+  at runtime — the miss is a stray English word on a French page, not
+  a compile error — and `strings_test.go` refuses English written
+  outside `Strings`.
 - **A golden update without reading it.** `GOFASTR_UPDATE_GOLDEN=1 go test`
   regenerates; every changed line is a change to what assistive
   technology is told.

@@ -55,7 +55,10 @@ type CardProps struct {
 
 // Card renders a card around its body.
 func Card(p CardProps, s Skin, body ...render.HTML) render.HTML {
-	b := p.Parts.Box(s)
+	// The one fillable part, the same list the spec declares: a text
+	// Bind may replace what a Slot may (box.go), and nothing else in
+	// a card may have its content rewritten.
+	b := p.Parts.Box(s, PartCardHeader)
 	kids := make([]render.HTML, 0, 3)
 	if p.Title != "" || p.Desc != "" || b.Filled(PartCardHeader) {
 		head := make([]render.HTML, 0, 2)
@@ -64,10 +67,10 @@ func Card(p CardProps, s Skin, body ...render.HTML) render.HTML {
 			if len(tag) != 2 || tag[0] != 'h' || tag[1] < '1' || tag[1] > '6' {
 				panic("headless: Card TitleTag must be h1 to h6, not " + strconv.Quote(tag))
 			}
-			head = append(head, El(tag, s, PartTitle, nil, render.Text(p.Title)))
+			head = append(head, b.El(tag, PartTitle, nil, render.Text(p.Title)))
 		}
 		if p.Desc != "" {
-			head = append(head, El("p", s, PartDesc, nil, render.Text(p.Desc)))
+			head = append(head, b.El("p", PartDesc, nil, render.Text(p.Desc)))
 		}
 		kids = append(kids, b.El("div", PartCardHeader, nil, b.Fill(PartCardHeader, group(head...))))
 	}

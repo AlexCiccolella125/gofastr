@@ -267,8 +267,8 @@ a message about the system, shown by the server's own render: role=status so it 
 <div data-hui-system="" data-hui-system-id="sys-deploy" role="status"><p><span>Information: </span>Deploy in progress</p><p>blog is moving to image 41; the app stays reachable the whole time.</p><div><button type="button">View the deploy</button></div><button aria-label="Dismiss: Deploy in progress" data-hui-system-dismiss="" type="button">×</button></div>
 
 === SystemBanner / offline ===
-the built-in connection message, and the one system banner worth interrupting for: assertive, marked as the runtime's, and shipped hidden because the runtime — not the page — shows it
-<div aria-live="assertive" data-hui-system="" data-hui-system-id="sys-offline" data-hui-system-offline="" hidden="" role="alert"><p><span>Warning: </span>Connection lost</p><p>Changes are paused until the connection comes back.</p><button aria-label="Dismiss: Connection lost" data-hui-system-dismiss="" type="button">×</button></div>
+the built-in connection message, and the one system banner worth interrupting for: assertive, marked as the runtime's, shipped hidden because the runtime — not the page — shows it, and carrying no dismiss because its ending is the reconnect
+<div aria-live="assertive" data-hui-system="" data-hui-system-id="sys-offline" data-hui-system-offline="" hidden="" role="alert"><p><span>Warning: </span>Connection lost</p><p>Changes are paused until the connection comes back.</p></div>
 
 === SystemBanner / new version ===
 a dismissable message the page did not show: it ships hidden for an island swap or the runtime to reveal, and the id is what keeps it from being shown twice
@@ -341,4 +341,8 @@ it interrupts and can take focus, and every error is a link to the field it is a
 === ValidationSummary / nothing wrong ===
 no errors renders nothing at all, so a page can ask for the summary unconditionally and not get an empty red box on first load
 <p>Nothing to report.</p>
+
+=== ValidationSummary / two summaries on one page ===
+two forms that failed on one page label two summaries, and the required ids are what keep the titles from sharing one name — the reference gate reads both labels and both resolve to their own heading
+<div aria-labelledby="errors-left-title" id="errors-left" role="alert" tabindex="-1"><h2 id="errors-left-title">There is a problem</h2><ul><li><a href="#left-name">Enter a name.</a></li></ul></div><div aria-labelledby="errors-right-title" id="errors-right" role="alert" tabindex="-1"><h2 id="errors-right-title">There is a problem</h2><ul><li><a href="#right-name">Enter a name.</a></li></ul></div>
 

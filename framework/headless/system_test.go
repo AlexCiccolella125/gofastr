@@ -35,7 +35,8 @@ func TestSystemBannerIsQuietUnlessOffline(t *testing.T) {
 	got := SystemBanner(SystemBannerProps{ID: "sys", Title: "Deploy in progress", Shown: true}, nil)
 	has(t, got, `role="status"`, "a system message interrupts by default")
 	hasNot(t, got, "aria-live", "the policy is stated twice and the message may be announced twice")
-	off := SystemBanner(SystemBannerProps{ID: "sys", Title: "Connection lost", Offline: true, Tone: "warning"}, nil)
+	no := false
+	off := SystemBanner(SystemBannerProps{ID: "sys", Title: "Connection lost", Offline: true, Tone: "warning", Dismiss: &no}, nil)
 	has(t, off, `role="alert"`, "losing the connection is not announced as urgent")
 	has(t, off, `aria-live="assertive"`, "the offline banner does not say how urgent it is")
 	has(t, off, `data-hui-system-offline=""`, "the runtime cannot find the banner it owns")
@@ -45,10 +46,30 @@ func TestSystemBannerIsQuietUnlessOffline(t *testing.T) {
 // reports the connection lost and hidden on reconnect, so it always
 // ships hidden and the page cannot show it.
 func TestSystemBannerOfflineRefusesShown(t *testing.T) {
-	off := SystemBanner(SystemBannerProps{ID: "sys", Title: "Connection lost", Offline: true, Tone: "warning"}, nil)
+	no := false
+	off := SystemBanner(SystemBannerProps{ID: "sys", Title: "Connection lost", Offline: true, Tone: "warning", Dismiss: &no}, nil)
 	has(t, off, `hidden=""`, "the runtime owns showing the offline banner, so it must ship hidden")
 	mustRefuse(t, "an offline banner shipping shown", func() {
-		SystemBanner(SystemBannerProps{ID: "sys", Title: "Connection lost", Offline: true, Shown: true}, nil)
+		SystemBanner(SystemBannerProps{ID: "sys", Title: "Connection lost", Offline: true, Shown: true, Dismiss: &no}, nil)
+	})
+}
+
+// The offline banner carries no dismiss, because its ending is the
+// reconnect: a dismissal remembered for the session would hide the
+// next outage too, and the module skips the dismissed set for it
+// precisely because there is nothing to dismiss. Both the default
+// (nil) and an explicit yes are refused; only a stated no renders.
+func TestSystemBannerOfflineCarriesNoDismiss(t *testing.T) {
+	no := false
+	off := SystemBanner(SystemBannerProps{
+		ID: "sys", Title: "Connection lost", Offline: true, Tone: "warning", Dismiss: &no}, nil)
+	hasNot(t, off, "data-hui-system-dismiss", "the offline banner carries a dismiss whose memory would hide the next outage")
+	mustRefuse(t, "an offline banner with the default dismiss", func() {
+		SystemBanner(SystemBannerProps{ID: "sys", Title: "Connection lost", Offline: true, Tone: "warning"}, nil)
+	})
+	yes := true
+	mustRefuse(t, "an offline banner with an explicit dismiss", func() {
+		SystemBanner(SystemBannerProps{ID: "sys", Title: "Connection lost", Offline: true, Tone: "warning", Dismiss: &yes}, nil)
 	})
 }
 

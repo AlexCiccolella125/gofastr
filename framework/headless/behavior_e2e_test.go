@@ -26,6 +26,7 @@ import (
 	"github.com/chromedp/chromedp"
 
 	"github.com/DonaldMurillo/gofastr/core-ui/runtime"
+	"github.com/DonaldMurillo/gofastr/core/render"
 	"github.com/DonaldMurillo/gofastr/internal/browserpath"
 )
 
@@ -79,7 +80,7 @@ type behaviorServer struct {
 	hits atomic.Int32
 }
 
-func startBehaviorServer(t *testing.T, body string) *behaviorServer {
+func startBehaviorServer(t *testing.T, body string, extra ...func(mux *http.ServeMux)) *behaviorServer {
 	t.Helper()
 	js, err := runtime.RuntimeJS()
 	if err != nil {
@@ -126,6 +127,9 @@ func startBehaviorServer(t *testing.T, body string) *behaviorServer {
 		}
 		http.NotFound(w, r)
 	})
+	for _, add := range extra {
+		add(mux)
+	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprintf(w, `<!doctype html><html><head><title>headless</title>`+
@@ -421,7 +425,7 @@ func TestE2E_WhenHidesDisablesAndRestores(t *testing.T) {
 // element does not steal focus back after the reader tabbed away.
 func TestE2E_FormErrorsFocusTheSummaryOnce(t *testing.T) {
 	summary := ValidationSummary(ValidationSummaryProps{
-		Errors: []FieldError{{For: "f-name", Message: "Name is required."}},
+		ID: "f-errors", Errors: []FieldError{{For: "f-name", Message: "Name is required."}},
 	}, nil)
 	form := Form(FormProps{Action: "/x", Errors: summary}, nil,
 		Input(InputProps{Name: "name", ID: "f-name"}, nil))
@@ -430,11 +434,10 @@ func TestE2E_FormErrorsFocusTheSummaryOnce(t *testing.T) {
 	// so a later scan does not hand it the focus from wherever the
 	// reader has moved to.
 	second := Form(FormProps{Action: "/y", ID: "second", Errors: ValidationSummary(ValidationSummaryProps{
-		Errors: []FieldError{{For: "g-name", Message: "Name is required."}},
+		ID: "g-errors", Errors: []FieldError{{For: "g-name", Message: "Name is required."}},
 	}, nil)}, nil, Input(InputProps{Name: "name", ID: "g-name"}, nil))
 	b := startBehaviorServer(t, `<div id="host">`+string(form)+`</div>`+string(second))
 	ctx := behaviorPage(t, b)
-
 	const focused = `document.activeElement === document.querySelector('[role="alert"][tabindex="-1"]')`
 	if !pollTrue(ctx, focused) {
 		t.Fatal("the summary never received focus after load")
@@ -741,8 +744,9 @@ func TestE2E_SystemDismissIsRemembered(t *testing.T) {
 // hidden before any retry is scheduled, shown once one is, hidden
 // again on reconnect.
 func TestE2E_OfflineBannerFollowsTheConnection(t *testing.T) {
+	no := false
 	b := startBehaviorServer(t, string(SystemBanner(SystemBannerProps{
-		ID: "sys-off", Tone: "warning", Offline: true, Title: "Connection lost",
+		ID: "sys-off", Tone: "warning", Offline: true, Dismiss: &no, Title: "Connection lost",
 	}, nil)))
 	ctx := behaviorPage(t, b)
 	if !pollTrue(ctx, moduleLoadedExpr) {
@@ -766,6 +770,398 @@ func TestE2E_OfflineBannerFollowsTheConnection(t *testing.T) {
 	}
 	if len(hidden) != 3 || !hidden[0] || hidden[1] || !hidden[2] {
 		t.Fatalf("the offline banner's states were %v, want hidden, shown, hidden", hidden)
+	}
+}
+
+// A region outside every form watches a name two forms carry. It
+// must follow the FIRST control in document order deterministically —
+// and, more to the point, it must resync at all: the old listener
+// scoped the sync to the changed control's form, so a region no form
+// owns never resynced after boot and sat frozen on its initial
+// branch, its controls wrongly disabled and their values dropped
+// from whichever form the reader did submit.
+func TestE2E_WhenOutsideTheFormsFollowsTheFirstControl(t *testing.T) {
+	plan := func(id, sel string) render.HTML {
+		return Select(SelectProps{Name: "plan", ID: id, Options: []Option{
+			{Value: "auto", Label: "Auto"}, {Value: "pro", Label: "Pro"},
+		}, Selected: sel}, nil)
+	}
+	region := ConditionalField(ConditionalFieldProps{When: "plan", Value: "pro"}, nil,
+		Input(InputProps{Name: "detail", ID: "outside-detail"}, nil))
+	b := startBehaviorServer(t,
+		`<form id="fa" action="/a">`+string(plan("plan-a", "auto"))+`</form>`+
+			`<form id="fb" action="/b">`+string(plan("plan-b", "auto"))+`</form>`+
+			string(region))
+	ctx := behaviorPage(t, b)
+	if !pollTrue(ctx, `document.querySelector('[data-hui-when]').hidden`) {
+		t.Fatal("the region was never hidden for the unwatched value")
+	}
+
+	set := func(id, val string) {
+		t.Helper()
+		if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+			const sel = document.getElementById('`+id+`');
+			sel.value = '`+val+`';
+			sel.dispatchEvent(new Event('change', {bubbles: true}));
+		})()`, nil)); err != nil {
+			t.Fatalf("changing %s: %v", id, err)
+		}
+	}
+	set("plan-b", "pro")
+	if !pollTrue(ctx, `document.querySelector('[data-hui-when]').hidden`) {
+		t.Fatal("the second form's control moved a region that follows the first")
+	}
+	set("plan-a", "pro")
+	if !pollTrue(ctx, `!document.querySelector('[data-hui-when]').hidden`) {
+		t.Fatal("changing the first control in document order never showed the region — it is frozen out of every form's sync")
+	}
+	var disabled bool
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`document.getElementById('outside-detail').disabled`, &disabled)); err != nil {
+		t.Fatalf("reading the control: %v", err)
+	}
+	if disabled {
+		t.Fatal("a shown region left its control disabled, so its value would drop from the submit")
+	}
+}
+
+// A region inside a form may watch a control no form owns: its own
+// form is looked in first, and when it holds no control of that name
+// the document is, preferring the form-less one. The old scope read
+// the form alone, so the region was hidden whatever the switch said.
+func TestE2E_WhenWatchesAControlOutsideItsForm(t *testing.T) {
+	mode := Select(SelectProps{Name: "mode", ID: "free-mode", Options: []Option{
+		{Value: "basic", Label: "Basic"}, {Value: "custom", Label: "Custom"},
+	}, Selected: "basic"}, nil)
+	region := ConditionalField(ConditionalFieldProps{When: "mode", Value: "custom"}, nil,
+		Input(InputProps{Name: "detail", ID: "in-form-detail"}, nil))
+	b := startBehaviorServer(t, string(mode)+
+		`<form action="/x">`+string(region)+`</form>`)
+	ctx := behaviorPage(t, b)
+	if !pollTrue(ctx, `document.querySelector('[data-hui-when]').hidden`) {
+		t.Fatal("the region was never hidden for the unwatched value")
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		const sel = document.getElementById('free-mode');
+		sel.value = 'custom';
+		sel.dispatchEvent(new Event('change', {bubbles: true}));
+	})()`, nil)); err != nil {
+		t.Fatalf("changing the form-less switch: %v", err)
+	}
+	if !pollTrue(ctx, `!document.querySelector('[data-hui-when]').hidden`) {
+		t.Fatal("a region inside a form never followed the form-less control it watches")
+	}
+}
+
+// Regions nest, and a region inside a hidden region is out whatever
+// its own condition says. The old sync gave every region the one
+// re-enable mark, so an inner region whose condition held re-enabled
+// the controls the outer region's hiding had disabled — reaching
+// past the outer condition both on screen and into the submit.
+func TestE2E_NestedWhenRegionsBuryTheInnerOne(t *testing.T) {
+	mode := Select(SelectProps{Name: "mode", ID: "mode", Options: []Option{
+		{Value: "auto", Label: "Auto"}, {Value: "custom", Label: "Custom"},
+	}, Selected: "auto"}, nil)
+	inner := ConditionalField(ConditionalFieldProps{When: "level", Value: "extra"}, nil,
+		Select(SelectProps{Name: "level", ID: "level", Options: []Option{
+			{Value: "basic", Label: "Basic"}, {Value: "extra", Label: "Extra"},
+		}, Selected: "extra"}, nil),
+		Input(InputProps{Name: "detail", ID: "nested-detail"}, nil))
+	outer := ConditionalField(ConditionalFieldProps{When: "mode", Value: "custom"}, nil,
+		Input(InputProps{Name: "outer", ID: "outer-note"}, nil),
+		inner)
+	b := startBehaviorServer(t, string(Form(FormProps{Action: "/x"}, nil, mode, outer)))
+	ctx := behaviorPage(t, b)
+
+	var state struct {
+		Outer  bool `json:"outer"`
+		Inner  bool `json:"inner"`
+		Detail bool `json:"detail"`
+	}
+	probe := func() {
+		t.Helper()
+		if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+			const regions = document.querySelectorAll('[data-hui-when]');
+			return {
+				outer: regions[0].hidden,
+				inner: regions[1].hidden,
+				detail: document.getElementById('nested-detail').disabled,
+			};
+		})()`, &state)); err != nil {
+			t.Fatalf("reading the nest: %v", err)
+		}
+	}
+	if !pollTrue(ctx, `document.querySelectorAll('[data-hui-when]').length === 2 && document.querySelectorAll('[data-hui-when]')[0].hidden`) {
+		t.Fatal("the outer region was never hidden for the unwatched value")
+	}
+	probe()
+	if !state.Outer || !state.Inner || !state.Detail {
+		t.Fatalf("boot: outer.hidden=%v inner.hidden=%v detail.disabled=%v, want all hidden/disabled while the outer condition fails and the inner one holds", state.Outer, state.Inner, state.Detail)
+	}
+
+	set := func(id, val string) {
+		t.Helper()
+		if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+			const sel = document.getElementById('`+id+`');
+			sel.value = '`+val+`';
+			sel.dispatchEvent(new Event('change', {bubbles: true}));
+		})()`, nil)); err != nil {
+			t.Fatalf("changing %s: %v", id, err)
+		}
+	}
+	set("mode", "custom")
+	if !pollTrue(ctx, `!document.querySelectorAll('[data-hui-when]')[0].hidden && !document.querySelectorAll('[data-hui-when]')[1].hidden`) {
+		t.Fatal("showing the outer region did not let the inner one obey its own held condition")
+	}
+	probe()
+	if state.Detail {
+		t.Fatal("the inner region's control stayed disabled once both conditions held")
+	}
+
+	// The inner one hides on its own condition while the outer shows.
+	set("level", "basic")
+	if !pollTrue(ctx, `document.querySelectorAll('[data-hui-when]')[1].hidden`) {
+		t.Fatal("the inner region never hid on its own failed condition")
+	}
+	probe()
+	if !state.Inner || !state.Detail {
+		t.Fatalf("inner hidden=%v detail.disabled=%v, want the inner region hidden and its control disabled", state.Inner, state.Detail)
+	}
+	if state.Outer {
+		t.Fatal("the inner condition reached up and hid the outer region")
+	}
+}
+
+// A control inserted alone inside a hidden region — no region of its
+// own in the inserted subtree — is disabled by the arrival pass, the
+// way the siblings it joined already were.
+func TestE2E_AControlInsertedIntoAHiddenRegionIsDisabled(t *testing.T) {
+	sel := Select(SelectProps{Name: "mode", ID: "mode2", Options: []Option{
+		{Value: "auto", Label: "Auto"}, {Value: "custom", Label: "Custom"},
+	}, Selected: "auto"}, nil)
+	region := ConditionalField(ConditionalFieldProps{When: "mode", Value: "custom", ID: "hideout"}, nil)
+	b := startBehaviorServer(t, string(Form(FormProps{Action: "/x"}, nil, sel, region)))
+	ctx := behaviorPage(t, b)
+	if !pollTrue(ctx, `document.getElementById('hideout').hidden`) {
+		t.Fatal("the region was never hidden for the unwatched value")
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`document.getElementById('hideout')
+		.insertAdjacentHTML('beforeend', '<input name="late" id="late-in-hidden">')`, nil)); err != nil {
+		t.Fatalf("inserting into the hidden region: %v", err)
+	}
+	const disabled = `document.getElementById('late-in-hidden').disabled`
+	if !pollTrue(ctx, disabled) {
+		t.Fatal("a control inserted into a hidden region stayed enabled: its value would submit from a region the condition had closed")
+	}
+}
+
+// The dismissed set never applies to the offline banner: it is the
+// runtime's, shown when the connection is lost and hidden on
+// reconnect, and a dismissal remembered for the session would hide
+// the next outage. The store is seeded before the module evaluates
+// (a reload), the connection is already lost when the banner is
+// re-rendered by an island swap, and the banner must still show.
+func TestE2E_OfflineBannerIgnoresTheDismissedSet(t *testing.T) {
+	no := false
+	banner := SystemBanner(SystemBannerProps{
+		ID: "sys-off2", Tone: "warning", Offline: true, Dismiss: &no, Title: "Connection lost",
+	}, nil)
+	b := startBehaviorServer(t, `<div id="host">`+string(banner)+`</div>`)
+	ctx := behaviorPage(t, b)
+	if !pollTrue(ctx, moduleLoadedExpr) {
+		t.Fatal("the module never loaded")
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		sessionStorage.setItem('gofastr.headless.system.dismissed', '["sys-off2"]');
+		window.__gofastr.sseStatus = {connected: false, lastEventAt: 1, retryCount: 2};
+		location.reload();
+	})()`, nil)); err != nil {
+		t.Fatalf("seeding the dismissed set and reloading: %v", err)
+	}
+	if !pollTrue(ctx, moduleLoadedExpr) {
+		t.Fatal("the module never loaded after the reload")
+	}
+	// The reload made a fresh document, so the mirror sse.js owns is
+	// set again here, exactly as sse.js would have it mid-outage. The
+	// connection is lost with a retry scheduled: the event shows the
+	// banner, and an island swap that renders it again — even shown,
+	// which a hostile render could ship — must not let the stale
+	// dismissal hide it.
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		window.__gofastr.sseStatus = {connected: false, lastEventAt: 1, retryCount: 2};
+		document.dispatchEvent(new CustomEvent('gofastr:sse-status',
+			{detail: window.__gofastr.sseStatus}));
+	})()`, nil)); err != nil {
+		t.Fatalf("driving the connection: %v", err)
+	}
+	if !pollTrue(ctx, `!document.querySelector('[data-hui-system-offline]').hidden`) {
+		t.Fatal("the offline banner never showed for a lost connection")
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		const host = document.getElementById('host');
+		host.innerHTML = host.innerHTML.replace(' hidden=""', '');
+	})()`, nil)); err != nil {
+		t.Fatalf("re-rendering the banner shown: %v", err)
+	}
+	if !pollTrue(ctx, `!document.querySelector('[data-hui-system-offline]').hidden`) {
+		t.Fatal("a dismissed id in the session store hid the runtime's own banner")
+	}
+}
+
+// A banner that arrives after the connection was already lost reads
+// the state sse.js mirrors onto window.__gofastr.sseStatus instead of
+// waiting for the next event: an island swap during an outage must
+// show the banner at once, not at the next blip.
+func TestE2E_OfflineBannerReadsTheConnectionItMissed(t *testing.T) {
+	no := false
+	banner := SystemBanner(SystemBannerProps{
+		ID: "sys-off3", Tone: "warning", Offline: true, Dismiss: &no, Title: "Connection lost",
+	}, nil)
+	b := startBehaviorServer(t, `<div id="host">`+string(banner)+`</div>`)
+	ctx := behaviorPage(t, b)
+	if !pollTrue(ctx, moduleLoadedExpr) {
+		t.Fatal("the module never loaded")
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		window.__gofastr.sseStatus = {connected: false, lastEventAt: 1, retryCount: 1};
+		const host = document.getElementById('host');
+		host.innerHTML = host.innerHTML;
+	})()`, nil)); err != nil {
+		t.Fatalf("losing the link and re-rendering the banner: %v", err)
+	}
+	if !pollTrue(ctx, `!document.querySelector('[data-hui-system-offline]').hidden`) {
+		t.Fatal("a banner that arrived during an outage waited for the next event instead of reading the mirrored state")
+	}
+	// The mirrored state is re-read on every arrival: a swap while
+	// reconnected keeps it hidden.
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		window.__gofastr.sseStatus.connected = true;
+		const host = document.getElementById('host');
+		host.innerHTML = host.innerHTML;
+	})()`, nil)); err != nil {
+		t.Fatalf("reconnecting and re-rendering: %v", err)
+	}
+	if !pollTrue(ctx, `document.querySelector('[data-hui-system-offline]').hidden`) {
+		t.Fatal("a banner that arrived while reconnected showed anyway")
+	}
+}
+
+// The once-mark is spent only when a summary was found: a form whose
+// Errors is not a summary keeps its mark, so the summary that arrives
+// on a later render of the same form element still takes focus. The
+// old code marked the form on the first pass and the failed submit
+// stayed unannounced forever.
+func TestE2E_FormErrorsFocusWhenTheSummaryArrivesLater(t *testing.T) {
+	form := Form(FormProps{Action: "/x", Errors: render.HTML(`<p id="plain">Check the fields.</p>`)}, nil,
+		Input(InputProps{Name: "name", ID: "later-name"}, nil))
+	b := startBehaviorServer(t, `<div id="host">`+string(form)+`</div>`)
+	ctx := behaviorPage(t, b)
+	if !pollTrue(ctx, moduleLoadedExpr) {
+		t.Fatal("the module never loaded")
+	}
+	const focused = `document.activeElement === document.querySelector('#host [role="alert"][tabindex="-1"]')`
+	var moved bool
+	if err := chromedp.Run(ctx, chromedp.Evaluate(focused, &moved)); err != nil {
+		t.Fatalf("reading focus: %v", err)
+	}
+	if moved {
+		t.Fatal("a form with no summary moved focus to something")
+	}
+	summary := ValidationSummary(ValidationSummaryProps{
+		ID: "later-errors", Errors: []FieldError{{For: "later-name", Message: "Name is required."}},
+	}, nil)
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`document.getElementById('plain')
+		.outerHTML = `+"`"+string(summary)+"`", nil)); err != nil {
+		t.Fatalf("swapping the plain message for a summary: %v", err)
+	}
+	// The kernel's post-navigation pass hands the whole document to
+	// the scanner; the swap itself may carry no form element at all.
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__gofastr._moduleScanners.headless(document)`, nil)); err != nil {
+		t.Fatalf("rescanning: %v", err)
+	}
+	if !pollTrue(ctx, focused) {
+		t.Fatal("the summary that arrived after a plain Errors node never received focus — the once-mark was spent on nothing")
+	}
+}
+
+// The drop zone resolves its input on every event, so a swap that
+// replaced the input while the zone survived still lands the drop on
+// the control the form submits. The old capture-at-arm-time left the
+// listeners writing to a detached element.
+func TestE2E_DropFollowsAReplacedInput(t *testing.T) {
+	b := startBehaviorServer(t, string(FileUpload(FileUploadProps{
+		Name: "backup2", ID: "backup2", Multiple: true,
+		Label: "Drag archives here, or ", CTA: "choose files",
+	}, nil)))
+	ctx := behaviorPage(t, b)
+	if !pollTrue(ctx, moduleLoadedExpr) {
+		t.Fatal("the module never loaded")
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		const old = document.getElementById('backup2');
+		const fresh = old.cloneNode(false);
+		old.replaceWith(fresh);
+	})()`, nil)); err != nil {
+		t.Fatalf("replacing the input: %v", err)
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		const dt = new DataTransfer();
+		dt.items.add(new File(['x'], 'after-swap.md', {type: 'text/markdown'}));
+		document.querySelector('[data-hui-drop]')
+			.dispatchEvent(new DragEvent('drop', {bubbles: true, dataTransfer: dt}));
+	})()`, nil)); err != nil {
+		t.Fatalf("dropping after the swap: %v", err)
+	}
+	var state struct {
+		Count int    `json:"count"`
+		First string `json:"first"`
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		const root = document.querySelector('[data-hui-drop]');
+		return {
+			count: document.getElementById('backup2').files.length,
+			first: root.querySelector('[data-hui-drop-list] li').textContent,
+		};
+	})()`, &state)); err != nil {
+		t.Fatalf("reading the drop zone: %v", err)
+	}
+	if state.Count != 1 || state.First != "after-swap.md" {
+		t.Fatalf("after the swap the input holds %d files and the list says %q, want one after-swap.md on the control the form submits", state.Count, state.First)
+	}
+}
+
+// The island form's error convention, end to end: a failed validation
+// is answered 200 with the region's HTML — the errors ARE the answer
+// — the runtime swaps the region, and the arrival pass focuses the
+// summary. A non-2xx would land in the signal as {ok:false, status,
+// text} and render nothing, which is why the convention is 200.
+func TestE2E_IslandFormFailureFocusesTheSummary(t *testing.T) {
+	failed := Form(FormProps{
+		Action: "/x", Island: Island{Endpoint: "/__hui/form", Signal: "acct"},
+		Errors: ValidationSummary(ValidationSummaryProps{
+			ID: "acct-errors", Errors: []FieldError{{For: "acct-name", Message: "Name is required."}},
+		}, nil),
+	}, nil, Input(InputProps{Name: "name", ID: "acct-name"}, nil),
+		Button(ButtonProps{Label: "Save", Type: "submit", Variant: "primary"}, nil))
+	b := startBehaviorServer(t,
+		`<div id="isle" data-fui-signal="acct" data-fui-signal-mode="html">`+string(failed)+`</div>`,
+		func(mux *http.ServeMux) {
+			mux.HandleFunc("/__hui/form", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/html")
+				fmt.Fprint(w, string(failed))
+			})
+		})
+	ctx := behaviorPage(t, b)
+	if !pollTrue(ctx, moduleLoadedExpr) {
+		t.Fatal("the module never loaded")
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.Click(`#isle button[type="submit"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("clicking submit: %v", err)
+	}
+	const focused = `document.activeElement === document.querySelector('#isle [role="alert"][tabindex="-1"]')`
+	if !pollTrue(ctx, focused) {
+		t.Fatal("the summary in the island's answer never received focus — a failed validation answered 200 must announce itself")
 	}
 }
 

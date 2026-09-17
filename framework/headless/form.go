@@ -41,9 +41,15 @@ type FormProps struct {
 	NoValidate bool
 
 	// Island is where the form's answer is rendered again: when set,
-	// the form carries the RPC contract beside its action, a failed
-	// validation returns the island with its errors, and the arrival
-	// pass focuses the summary. Nil is right for a page that IS the
+	// the form carries the RPC contract beside its action and the
+	// arrival pass focuses the summary. The HTTP convention the
+	// runtime's RPC lands in the signal: a validation failure is
+	// answered 200 with the region's HTML — the errors ARE the
+	// answer, the island swaps them in, and the summary takes focus.
+	// A non-2xx is a transport or server error, which the runtime
+	// delivers as {ok:false, status, text} in the signal, never as
+	// markup: an island form that answers 422 to a failed validation
+	// renders nothing at all. Nil is right for a page that IS the
 	// form — sign-in, the auth flow the architecture keeps native —
 	// where the plain POST to the page is the whole design.
 	Island Island

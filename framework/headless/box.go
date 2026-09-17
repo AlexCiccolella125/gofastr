@@ -44,6 +44,7 @@ package headless
 // skin's own class is how a component arrives unstyled.
 
 import (
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -87,6 +88,22 @@ type Bind struct {
 // Binds maps parts to the signal each follows.
 type Binds map[Part]Bind
 
+// runtimeOwnedBindAttrs are the attribute names a signal may not
+// write on a part, on top of the framework's own allow-list: the
+// runtime rewrites them as state moves (the action lifecycle's
+// aria-pressed and aria-busy, a control's aria-invalid,
+// aria-expanded and aria-current, the platform states hidden and
+// disabled), and every data-hui-* hook is this package's contract
+// with its module. A bound value would fight whichever of them owns
+// the part — winning some writes and losing others, with nothing
+// anywhere reporting the race — so it is refused at render, where the
+// mistake is a panic with a reason.
+var runtimeOwnedBindAttrs = map[string]bool{
+	"aria-pressed": true, "aria-busy": true, "aria-invalid": true,
+	"aria-expanded": true, "aria-current": true,
+	"hidden": true, "disabled": true, "data-state": true,
+}
+
 // attrs renders the binding triple, refusing what the runtime would
 // refuse — at render, where it is a panic with a reason, rather than
 // in the browser, where it is a part that never updates.
@@ -105,6 +122,10 @@ func (b Bind) attrs() html.Attrs {
 	case "attr":
 		if b.Attr == "" {
 			panic("headless: Bind mode attr needs the Attr to write")
+		}
+		folded := strings.ToLower(b.Attr)
+		if runtimeOwnedBindAttrs[folded] || strings.HasPrefix(folded, "data-hui-") {
+			panic("headless: a signal may not write " + b.Attr + " — the runtime owns it (a lifecycle state, a platform state, or a data-hui-* hook), and a bound value would fight it")
 		}
 		if !interactive.SignalAttrAllowed(b.Attr) {
 			panic("headless: a signal may not write " + b.Attr + " — an attribute outside the framework's allow-list executes regardless of the value bound to it")
@@ -137,6 +158,30 @@ type Box struct {
 	Slots Slots
 	Over  PartAttrs
 	Binds Binds
+
+	// fillable is the set of parts whose content a caller may replace:
+	// a Slot fills one, and a text or html Bind rewrites one. It is
+	// set from the same list the component's spec declares as
+	// Fillable, and the harness holds the two lists to the same answer
+	// from both sides — a text Bind on any other part refuses, and one
+	// on each of these arrives. Nil, a component offering no slots,
+	// text-binds nothing at all.
+	fillable map[Part]bool
+}
+
+// FillableOn names the parts whose content a caller may replace — the
+// same parts the spec lists as Fillable — so a text or html Bind can
+// be refused on every other part at render, where the mistake is a
+// panic with a reason. A Bind that rewrites content is a Slot with a
+// timer: allowed where Slots are, and nowhere else.
+func (b Box) FillableOn(parts ...Part) Box {
+	if b.fillable == nil {
+		b.fillable = make(map[Part]bool, len(parts))
+	}
+	for _, p := range parts {
+		b.fillable[p] = true
+	}
+	return b
 }
 
 // Boxed is the constructor a component calls with whatever its props
@@ -180,7 +225,19 @@ func (b Box) El(tag string, p Part, own html.Attrs, children ...render.HTML) ren
 	// The binding last: its three keys are the runtime's, and no
 	// component owns them, so there is nothing for it to beat.
 	if bind, ok := b.Binds[p]; ok {
-		for k, v := range bind.attrs() {
+		triple := bind.attrs()
+		// A text or html Bind replaces the part's content, so it is
+		// allowed exactly where a Slot is. Anywhere else it would gut
+		// whatever the part guarantees — a Password's input and reveal
+		// button, an action's two labels — and the component would
+		// render as its own skeleton with nothing failing.
+		if mode := orDefault(bind.Mode, "text"); mode == "text" || mode == "html" {
+			if !b.fillable[p] {
+				panic("headless: a " + mode + " Bind rewrites the content of " + string(p) +
+					", which is not a fillable part — a Slot may not fill it either; bind an attribute, or a part the spec lists as fillable")
+			}
+		}
+		for k, v := range triple {
 			merged[k] = v
 		}
 	}
@@ -245,15 +302,21 @@ type Parts struct {
 	// lists as fillable do anything; the rest are ignored rather than
 	// silently half-applied.
 	Slots Slots
-	// Binds keep named parts in step with client signals.
+	// Binds keep named parts in step with client signals: an
+	// attribute anywhere the allow-lists allow, and text or html only
+	// on a fillable part, where a Bind may replace what a Slot may.
 	Binds Binds
 }
 
-// Box builds the render box that applies a caller's Parts.
-func (s Parts) Box(skin Skin) Box {
+// Box builds the render box that applies a caller's Parts. The
+// fillable names are the parts whose content a caller may replace —
+// the spec's Fillable list — and a text or html Bind on any other
+// part is refused at render: it would replace content the component
+// guarantees, which is the same reason a Slot is offered only there.
+func (s Parts) Box(skin Skin, fillable ...Part) Box {
 	b := Boxed(skin, s.Slots, s.Attrs)
 	b.Binds = s.Binds
-	return b
+	return b.FillableOn(fillable...)
 }
 
 // attrs renders an Island's RPC contract for one trigger. The Island
@@ -264,12 +327,12 @@ func (s Parts) Box(skin Skin) Box {
 // ("" for a form whose action is the page); method is GET for a read
 // and the form's method for a mutation.
 //
-// The endpoint keeps the href's query — everything from "?" on —
-// because the page and the island answer the same question: a link to
-// "/apps?page=3&sort=name" fetches the third page sorted by name as a
-// document, and the island fetches exactly that as a region. Two URLs
-// for one click is how the two drift apart and the island starts
-// showing a different page than the address bar says.
+// The endpoint keeps the href's query, merged pair by pair onto its
+// own — because the page and the island answer the same question: a
+// link to "/apps?page=3&sort=name" fetches the third page sorted by
+// name as a document, and the island fetches exactly that as a
+// region. Two URLs for one click is how the two drift apart and the
+// island starts showing a different page than the address bar says.
 //
 // data-fui-push-state is rendered only for a GET with a href to write:
 // a read knows the canonical URL ahead of time, while a mutation's URL
@@ -282,16 +345,8 @@ func (i Island) attrs(href, method string) html.Attrs {
 	if m == "" {
 		panic("headless: an Island trigger needs a method — GET for a read, the form's method for a mutation")
 	}
-	rpc := i.Endpoint
-	if q := queryOf(href); q != "" {
-		if strings.Contains(rpc, "?") {
-			rpc += "&" + q[1:] // q carries its own "?"; joining needs only the pairs
-		} else {
-			rpc += q
-		}
-	}
 	out := html.Attrs{
-		"data-fui-rpc":        rpc,
+		"data-fui-rpc":        mergeQuery(i.Endpoint, href),
 		"data-fui-rpc-method": m,
 		"data-fui-rpc-signal": i.Signal,
 	}
@@ -301,8 +356,32 @@ func (i Island) attrs(href, method string) html.Attrs {
 	return out
 }
 
-// group concatenates children into one fragment, so a default that is
-// several elements can be handed to Fill as a single value.
+// mergeQuery joins the href's query onto the endpoint's, parsed and
+// re-encoded rather than concatenated: the href's pairs are added
+// after the endpoint's own, a key present in both keeps both values in
+// order, and a fragment is dropped — the fragment names a place
+// inside the document the href renders, never a place inside the
+// region the island fetches. Concatenation would let a query whose
+// pairs arrive percent-encoded differently smuggle a second "?" past
+// the join; parsing makes the merge structural.
+func mergeQuery(endpoint, href string) string {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return endpoint
+	}
+	u.Fragment = ""
+	u.RawFragment = ""
+	h, err := url.Parse(href)
+	if err != nil {
+		return u.String()
+	}
+	q := u.Query()
+	for k, vs := range h.Query() {
+		q[k] = append(q[k], vs...)
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
 func group(kids ...render.HTML) render.HTML {
 	var b strings.Builder
 	for _, k := range kids {

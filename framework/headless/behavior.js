@@ -22,6 +22,17 @@
   // evaluates this file a second time must bind nothing twice.
   if (NS.loadedModules && Object.prototype.hasOwnProperty.call(NS.loadedModules, NAME)) return;
 
+  // The loaded flag is set before anything installs, the contract
+  // every registered module keeps: a script that failed halfway has
+  // its cached promise dropped, so a retry re-executes this file and
+  // would install every listener of the first pass a second time.
+  // Everything below the flag is once()-guarded, delegated from the
+  // document, or owned by a WeakMap, so running past this point twice
+  // binds nothing twice — but only the flag first keeps a half-failed
+  // file from being retried into a double install.
+  NS.loadedModules = NS.loadedModules || {};
+  NS.loadedModules[NAME] = true;
+
   const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
   const DISMISSED_KEY = 'gofastr.headless.system.dismissed';
 
@@ -107,12 +118,37 @@
 
   // ─── when (ConditionalField) ────────────────────────────────────
 
+  // watchedControls finds the controls a region's condition reads.
+  // The region's own form comes first: two forms on one page can each
+  // carry a "plan" control, and a region inside one form must follow
+  // that form's plan, not whichever control the document happens to
+  // offer first. A region with no form of its own — or one whose form
+  // holds no control of that name — reads the document, preferring
+  // controls no form owns: a form-less control is a page-level switch
+  // a region outside the forms can belong to, where the first form's
+  // control of the same name is that form's business. Among several
+  // candidates the first in document order wins, so the rule is
+  // deterministic.
+  function watchedControls(region, name) {
+    const sel = '[name="' + CSS.escape(name) + '"]';
+    const form = region.closest('form');
+    if (form) {
+      const own = form.querySelectorAll(sel);
+      if (own.length) return own;
+    }
+    const all = document.querySelectorAll(sel);
+    const loose = [];
+    for (let i = 0; i < all.length; i++) {
+      if (!all[i].closest('form')) loose.push(all[i]);
+    }
+    return loose.length ? loose : all;
+  }
+
   // whenValue reads the watched field's value the way the form would
   // submit it: the checked radio's value, a checkbox's value when
   // checked and the empty string when not, and any other control's
   // value.
-  function whenValue(scope, name) {
-    const fields = scope.querySelectorAll('[name="' + CSS.escape(name) + '"]');
+  function whenValue(fields) {
     for (let i = 0; i < fields.length; i++) {
       const el = fields[i];
       if (el.type === 'radio') {
@@ -125,22 +161,49 @@
     return '';
   }
 
-  function syncWhen(region) {
-    const scope = region.closest('form') || document;
-    const shown = whenValue(scope, region.dataset.huiWhen) === region.dataset.huiWhenValue;
-    region.hidden = !shown;
-    const controls = region.querySelectorAll('input, select, textarea, button');
-    for (let i = 0; i < controls.length; i++) {
-      const c = controls[i];
-      // The mark is what tells a control we disabled from one the page
-      // disabled itself, so showing the region re-enables exactly the
-      // controls that hiding it disabled.
-      if (!shown && !c.disabled) {
-        c.disabled = true;
-        c.dataset.huiWhenOff = '';
-      } else if (shown && c.dataset.huiWhenOff !== undefined) {
-        c.disabled = false;
-        delete c.dataset.huiWhenOff;
+  // insideHiddenWhen reports whether el sits inside a [data-hui-when]
+  // region that is hidden. Regions nest, and each hides on its own
+  // condition; a region inside a hidden region is out whatever its
+  // own condition says, because showing it would reach controls the
+  // outer region's condition meant to keep out of the page and out of
+  // the submit.
+  function insideHiddenWhen(el) {
+    for (let anc = el.parentElement; anc; anc = anc.parentElement) {
+      if (anc.matches && anc.matches('[data-hui-when]') && anc.hidden) return true;
+    }
+    return false;
+  }
+
+  // syncWhenRegions is the whole when behaviour in two passes. The
+  // first sets every region's effective visibility — its own
+  // condition AND no hidden ancestor region — in document order, so
+  // an outer region's fresh state is already on it when its
+  // descendants look up. The second disables exactly the controls
+  // inside any hidden region and re-enables only the controls hiding
+  // disabled, told apart by the runtime-owned data-hui-when-off mark:
+  // a control the page disabled itself is never touched. One mark
+  // serves the whole nest because the second pass asks where the
+  // control sits NOW, not which region disabled it — an inner region
+  // showing inside a hidden outer one re-enables nothing.
+  function syncWhenRegions(regions) {
+    for (let i = 0; i < regions.length; i++) {
+      const region = regions[i];
+      const own = whenValue(watchedControls(region, region.dataset.huiWhen)) === region.dataset.huiWhenValue;
+      region.hidden = !(own && !insideHiddenWhen(region));
+    }
+    for (let i = 0; i < regions.length; i++) {
+      const controls = regions[i].querySelectorAll('input, select, textarea, button');
+      for (let j = 0; j < controls.length; j++) {
+        const c = controls[j];
+        if (insideHiddenWhen(c)) {
+          if (!c.disabled) {
+            c.disabled = true;
+            c.dataset.huiWhenOff = '';
+          }
+        } else if (c.dataset.huiWhenOff !== undefined) {
+          c.disabled = false;
+          delete c.dataset.huiWhenOff;
+        }
       }
     }
   }
@@ -161,9 +224,16 @@
     let announced = false;
     for (let i = 0; i < forms.length; i++) {
       const form = forms[i];
-      if (!once(form, 'errors')) continue;
       const summary = form.querySelector('[role="alert"][tabindex="-1"]');
-      if (summary && !announced) {
+      // The once-mark is spent only when there is a summary to focus.
+      // A form whose Errors is not a summary yet — a plain message
+      // while the server still renders one — must keep its mark, or
+      // the summary that arrives on a later render of the same form
+      // would find the mark spent and the failed submit would stay
+      // unannounced.
+      if (!summary) continue;
+      if (!once(form, 'errors')) continue;
+      if (!announced) {
         summary.focus();
         announced = true;
       }
@@ -179,9 +249,10 @@
   // components render. pressed is read off the aria-pressed the
   // component ships, which is present exactly when the button is a
   // ToggleAction (OptimisticAction commits once and claims no pressed
-  // state, and a caller cannot inject the attribute: safeActionExtras
-  // refuses it), so the rule needs no second attribute to say what
-  // the markup already says.
+  // state, and a caller cannot inject the attribute: ExtraAttrs are
+  // refused by safeActionExtras and Parts.Attrs on the root by the
+  // render, one shared owned list), so the rule needs no second
+  // attribute to say what the markup already says.
 
   function armActions(root) {
     const btns = within(root, '[data-hui-action]');
@@ -258,8 +329,7 @@
   }
 
   function armDrop(root) {
-    const input = document.getElementById(root.dataset.huiDropInput);
-    if (!input || !once(root, 'drop')) return;
+    if (!once(root, 'drop')) return;
     function stop(e) { e.preventDefault(); e.stopPropagation(); }
     root.addEventListener('dragenter', function (e) { stop(e); root.dataset.huiDropOver = ''; });
     root.addEventListener('dragover', function (e) { stop(e); root.dataset.huiDropOver = ''; });
@@ -267,9 +337,15 @@
     root.addEventListener('drop', function (e) {
       stop(e);
       delete root.dataset.huiDropOver;
+      // The input is resolved on every event from the hook on the
+      // root, never captured at arm time: a swap that replaced the
+      // input while the zone survived would leave a captured one
+      // pointing at a detached element, and the drop would set files
+      // on an input nothing submits.
+      const input = document.getElementById(root.dataset.huiDropInput);
+      if (!input || input.disabled || !e.dataTransfer) return;
       // A disabled input keeps its files: the drop is refused rather
       // than silently queued for a control that cannot submit.
-      if (input.disabled || !e.dataTransfer) return;
       // The picker lets one file through an input without multiple;
       // a drop keeps the same rule rather than smuggling several past
       // it. The first file is the one taken, as the picker would take
@@ -317,8 +393,28 @@
     const banners = within(root, '[data-hui-system]');
     for (let i = 0; i < banners.length; i++) {
       const el = banners[i];
+      if (el.hasAttribute('data-hui-system-offline')) {
+        // The runtime owns this one. The dismissed set never applies:
+        // the banner has no dismiss memory of its own, because losing
+        // the connection again must show it again. And a banner that
+        // arrived after the connection was already lost waits for no
+        // event — the state sse.js mirrors is read here, on arm.
+        el.hidden = !sseLost(NS.sseStatus);
+        continue;
+      }
       if (!el.hidden && systemDismissed.has(el.dataset.huiSystemId)) el.hidden = true;
     }
+  }
+
+  // sseLost reads the connection state sse.js mirrors onto
+  // window.__gofastr.sseStatus — one object mutated in place, and the
+  // same shape on every gofastr:sse-status detail: lost once a retry
+  // is actually scheduled, because a blip during the first connect is
+  // not an outage. The field names read here are pinned to the ones
+  // sse.js assigns by a source gate in behavior_test.go, so a rename
+  // there fails in this package's tests, not in production.
+  function sseLost(st) {
+    return !!st && st.connected === false && st.retryCount > 0;
   }
 
   // ─── delegated listeners ────────────────────────────────────────
@@ -350,8 +446,10 @@
     const t = e.target;
     if (!t || !t.closest) return;
     if (t.matches('[data-hui-affix-swatch], [data-hui-color] [data-hui-affix-input]')) syncColour(t);
-    const regions = (t.form || document).querySelectorAll('[data-hui-when]');
-    for (let i = 0; i < regions.length; i++) syncWhen(regions[i]);
+    // The document, not the control's form: a region may watch a
+    // control outside its own form, and one outside every form may
+    // watch a control inside one, so no smaller scope holds.
+    syncWhenRegions(document.querySelectorAll('[data-hui-when]'));
   });
 
   document.addEventListener('change', function (e) {
@@ -359,8 +457,7 @@
     if (!t || !t.closest) return;
     const root = t.closest('[data-hui-drop]');
     if (root && t.type === 'file') showFiles(root);
-    const regions = (t.form || document).querySelectorAll('[data-hui-when]');
-    for (let i = 0; i < regions.length; i++) syncWhen(regions[i]);
+    syncWhenRegions(document.querySelectorAll('[data-hui-when]'));
   });
 
   document.addEventListener('action:rolled-back', function (e) {
@@ -375,8 +472,7 @@
   // dismiss memory of its own: losing the connection again must show
   // it again.
   document.addEventListener('gofastr:sse-status', function (e) {
-    const status = (e && e.detail) || {};
-    const lost = status.connected === false && status.retryCount > 0;
+    const lost = sseLost(e && e.detail);
     const banners = document.querySelectorAll('[data-hui-system-offline]');
     for (let i = 0; i < banners.length; i++) banners[i].hidden = !lost;
   });
@@ -395,13 +491,19 @@
     armActions(scope);
     armDrops(scope);
     const regions = within(scope, '[data-hui-when]');
-    for (let i = 0; i < regions.length; i++) syncWhen(regions[i]);
+    // A control inserted alone inside a hidden region arrives with no
+    // region of its own in the subtree: sync the nearest enclosing
+    // region as well, so the arrival pass disables the newcomer like
+    // the siblings it joined.
+    if (scope !== document && scope.closest) {
+      const enclosing = scope.closest('[data-hui-when]');
+      if (enclosing && regions.indexOf(enclosing) === -1) regions.push(enclosing);
+    }
+    if (regions.length) syncWhenRegions(regions);
     armSystem(scope);
   }
 
   scan(document);
-  NS.loadedModules = NS.loadedModules || {};
-  NS.loadedModules[NAME] = true;
   NS._moduleScanners = NS._moduleScanners || {};
   NS._moduleScanners[NAME] = scan;
 })();

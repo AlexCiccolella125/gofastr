@@ -27,17 +27,6 @@ import (
 // way (flag moved to the end of toggleaction.js, gate still green).
 var loadedFlagAssign = regexp.MustCompile(`loadedModules\s*=`)
 
-// sourceSkipPrefixes names the tree the gate does not hold yet, with
-// the reason on each entry. Every entry is a debt: when the file
-// moves onto the contract, the entry goes, and an empty list deletes
-// this variable.
-//
-//   - framework/headless/behavior.js sets its flag at the END today
-//     (after scan(document)); every install before it is once()-
-//     guarded, so a retry cannot double-install. The headless fixes
-//     in this same change move it onto the contract.
-var sourceSkipPrefixes = []string{"framework/headless/"}
-
 // A registered module sets its loadedModules flag before it installs
 // anything: the loader resolves on registration, and a script that
 // failed halfway with its flag unset has its cached promise dropped, so
@@ -52,23 +41,11 @@ func TestRegisteredBehaviorsSetLoadedFlagBeforeInstalling(t *testing.T) {
 	if len(files) == 0 {
 		t.Fatal("no registered behaviour sources found under the repo root: the walk is broken, not the tree empty")
 	}
-	held := 0
 	for _, f := range files {
 		// The walk returns paths relative to this package's directory
-		// (../../examples/...); strip the walk root so the skip
-		// prefixes compare against tree-shaped paths.
+		// (../../examples/...); strip the walk root so the report reads
+		// as a tree-shaped path.
 		rel := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(f)), "../../")
-		skip := false
-		for _, p := range sourceSkipPrefixes {
-			if strings.HasPrefix(rel, p) {
-				skip = true
-				break
-			}
-		}
-		if skip {
-			continue
-		}
-		held++
 		raw, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)
@@ -85,8 +62,5 @@ func TestRegisteredBehaviorsSetLoadedFlagBeforeInstalling(t *testing.T) {
 		if inst := strings.Index(src, "addEventListener"); inst != -1 && inst < am[0] {
 			t.Errorf("%s installs a listener before setting its loadedModules flag: a retry re-executes the file and would install it twice", rel)
 		}
-	}
-	if held == 0 {
-		t.Fatal("every registered source was skipped: the gate holds nothing")
 	}
 }

@@ -9,6 +9,8 @@ package headless
 // it, so they hold everywhere the package's tests run, browser or not.
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -276,5 +278,61 @@ func TestPageWithAMarkerPreloadsTheModule(t *testing.T) {
 	}
 	if has(string(Badge(BadgeProps{Label: "running"}, nil))) {
 		t.Errorf("a rendered Badge preloads %s: a page with no marker fetches a module it cannot use", BehaviorName)
+	}
+}
+
+// TestOfflineBannerReadsTheFieldsSseMirrors pins the field names the
+// module reads off window.__gofastr.sseStatus to the ones sse.js
+// assigns onto it. sse.js owns that object and this package owns the
+// banner that follows it; the two ship from packages that never see
+// each other's types, so a rename in sse.js would otherwise land as
+// an offline banner that never shows — in production only. The gate
+// reads both sources and fails here instead.
+func TestOfflineBannerReadsTheFieldsSseMirrors(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "core-ui", "runtime", "src", "sse.js"))
+	if err != nil {
+		t.Fatalf("reading sse.js: %v", err)
+	}
+	assigned := map[string]bool{}
+	// The one place the mirror is built: NS.sseStatus = { ... }. The
+	// fields are bare identifiers before a colon, which is the whole
+	// shape the banner depends on.
+	lit := regexp.MustCompile(`NS\.sseStatus\s*=\s*\{([^}]*)\}`).FindStringSubmatch(string(raw))
+	if lit == nil {
+		t.Fatal("sse.js no longer assigns window.__gofastr.sseStatus: the offline banner reads a mirror that is never built")
+	}
+	for _, m := range regexp.MustCompile(`(?:^|,)\s*([A-Za-z_$][\w$]*)\s*:`).FindAllStringSubmatch(lit[1], -1) {
+		assigned[m[1]] = true
+	}
+	if len(assigned) == 0 {
+		t.Fatal("the sseStatus mirror in sse.js carries no fields: the mirror changed shape and this gate must follow it")
+	}
+
+	// The module reads the mirror in exactly one place, sseLost, so
+	// that function's body is the whole surface a rename can break.
+	// It is found by name, not line number, so the gate survives
+	// edits around it and fails loudly when the read moves.
+	body := regexp.MustCompile(`function sseLost[^{]*\{([^}]*)\}`).FindStringSubmatch(behaviorJS)
+	if body == nil {
+		t.Fatal("behavior.js lost sseLost: the offline banner's read of the connection moved, and this gate must move with it")
+	}
+	reads := map[string]bool{}
+	for _, m := range regexp.MustCompile(`st\.([A-Za-z_$][\w$]*)`).FindAllStringSubmatch(body[1], -1) {
+		reads[m[1]] = true
+	}
+	if len(reads) == 0 {
+		t.Fatal("sseLost reads no fields off the status object: the offline banner decides nothing")
+	}
+	for name := range reads {
+		if !assigned[name] {
+			t.Errorf("the module reads sseStatus.%s, which sse.js never assigns: a rename there is a banner that never shows, and today it would be found only in production", name)
+		}
+	}
+	// The two fields the banner's lifetime actually turns on must be
+	// in the mirror, whatever else the read grows to touch.
+	for _, want := range []string{"connected", "retryCount"} {
+		if !assigned[want] {
+			t.Errorf("sse.js no longer assigns %s on sseStatus: the offline banner cannot read the connection", want)
+		}
 	}
 }

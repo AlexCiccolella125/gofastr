@@ -74,12 +74,3 @@ func requireIsland(component string, i Island) {
 	}
 	i.check()
 }
-
-// queryOf returns href's query, everything from "?" on, or "" when
-// there is none.
-func queryOf(href string) string {
-	if i := strings.Index(href, "?"); i >= 0 {
-		return href[i:]
-	}
-	return ""
-}
