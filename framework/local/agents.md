@@ -30,36 +30,72 @@ secret or a session token.
 
 ## Shape
 
+This block compiles: `go test ./framework/docs -run TestDocExamplesCompile`
+builds it along with the guides' snippets, so it cannot rot.
+
+<!-- gofastr:compile
+import "context"
+import "net/http"
+import "github.com/DonaldMurillo/gofastr/core-ui/app"
+import "github.com/DonaldMurillo/gofastr/core-ui/store"
+import "github.com/DonaldMurillo/gofastr/core/render"
+import "github.com/DonaldMurillo/gofastr/core/router"
+import "github.com/DonaldMurillo/gofastr/framework/local"
+import "github.com/DonaldMurillo/gofastr/framework/uihost"
+
+type Draft struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+type View struct {
+	Compact bool `json:"compact"`
+}
+
+var site = app.NewApp("site")
+var rt = router.New()
+var S = store.New("editor")
+-->
 ```go
 var Site = local.New("site")
 var Drafts = local.Define[Draft](Site, "drafts", local.CollectionConfig{
-    Version: 2, KeyField: "id", MaxRecordBytes: 32 << 10, MaxRecords: 200,
-    Migrations: []local.Migration{{Version: 2, Steps: []local.Step{local.Rename("body", "text")}}},
+	Version: 2, KeyField: "id", MaxRecordBytes: 32 << 10, MaxRecords: 200,
+	Migrations: []local.Migration{{Version: 2, Steps: []local.Step{local.Rename("body", "text")}}},
 })
-var Prefs = local.Define[Prefs](Site, "prefs", local.CollectionConfig{Version: 1, Mirror: true})
+var Prefs = local.Define[View](Site, "prefs", local.CollectionConfig{Version: 1, Mirror: true})
 
-// Serve the declaration on the extra-script rail (once, in main).
-// Serve mounts the route AND returns the URL: doing only one half is
-// a silent 404, an undefined window.__gofastr_local and a null store.
-host := uihost.New(site, uihost.WithExtraScripts(Site.Serve(router)))
+// Serve the declaration on the extra-script rail (once, in main). Serve
+// mounts the route AND returns the URL: doing one half is a silent 404,
+// an undefined window.__gofastr_local and a null store in the browser.
+var host = uihost.New(site, uihost.WithExtraScripts(Site.Serve(rt)))
 
-// Seed a signal from a record; the runtime patches it in after hydration.
-title := local.SeedSignal(Drafts, "current", store.JSON[Draft](S, "draft", Draft{}))
-title.Bind(ctx, "p", nil)
+// Seed a signal from a record; the runtime patches it in after
+// hydration. Name() is the signal a page script writes with setSignal.
+var title = local.SeedSignal(Drafts, "current", store.JSON[Draft](S, "draft", Draft{}))
 
 // Upload: the trigger declares what rides along; the handler reads it.
-up := local.Send(Drafts.Key("current"))
-form := render.Tag("form", up.Merge(map[string]string{"data-fui-rpc": "/drafts/upload"}), …)
-router.Post("/drafts/upload", up.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    // src is local.SourceUpload, SourceMirror or SourceNone. A mirror
-    // read is a CLIENT HINT — any script on the origin writes that
-    // cookie and any client forges it — so never authorise on one.
-    d, src, err := local.Get(r.Context(), Drafts, "current")
-    p, _, _ := local.Get(r.Context(), Prefs, "theme") // mirrored: also at first paint
-    local.Put(w, Drafts, "current", d)                 // download: write back
-}))
-local.Clear(w, Site)                 // logout over RPC
-local.ClearOnNextLoad(w, r, Site)    // logout by full navigation
+var up = local.Send(Drafts.Key("current"))
+
+func screen(ctx context.Context) render.HTML {
+	return title.Bind(ctx, "p", nil) // + up.Merge(...) on the RPC trigger
+}
+
+func routes() {
+	rt.Post("/drafts/upload", up.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// src is local.SourceUpload, SourceMirror or SourceNone. A mirror
+		// read is a CLIENT HINT — any script on the origin writes that
+		// cookie and any client forges it — so never authorise on one.
+		d, src, err := local.Get(r.Context(), Drafts, "current")
+		if err != nil || src != local.SourceUpload {
+			http.Error(w, "no draft arrived", http.StatusBadRequest)
+			return
+		}
+		p, _, _ := local.Get(r.Context(), Prefs, "view") // mirrored: also at first paint
+		_ = p
+		local.Put(w, Drafts, "current", d) // download: write back
+		local.Clear(w, Site)               // logout over RPC
+		local.ClearOnNextLoad(w, r, Site)  // logout by full navigation
+	}))
+}
 ```
 
 Browser side (after `__gofastr.loadModule('local-store')`):
