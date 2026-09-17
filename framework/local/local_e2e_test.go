@@ -7,12 +7,15 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/cdproto/storage"
 	"github.com/chromedp/chromedp"
 
 	uiruntime "github.com/DonaldMurillo/gofastr/core-ui/runtime"
@@ -99,7 +102,7 @@ type e2eSeen struct {
 	Err     error
 }
 
-func startE2E(t *testing.T) *e2eServer {
+func startE2E(t *testing.T, tls ...bool) *e2eServer {
 	t.Helper()
 	e2eDeclare(t)
 	js, err := uiruntime.RuntimeJS()
@@ -160,6 +163,16 @@ window.__migrations = []; window.addEventListener('gofastr:local-migrated', (e) 
 		ClearOnNextLoad(w, r, e2eSite)
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
+	// The manifest, no store marker: the page a full-navigation logout
+	// can land on. Nothing here opens a store on its own.
+	mux.HandleFunc("/nomarker", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<!doctype html><html><head><title>nomarker</title>`+
+			`<script type="application/json" id="gofastr-behaviors">%s</script></head><body>`+
+			`<main role="main"><span id="ready">ready</span></main>`+
+			`<script src="/__gofastr/runtime.js"></script><script src="%s"></script>`+
+			`<script src="/app.js"></script></body></html>`, block, e2eSite.ScriptURL())
+	})
 	mux.HandleFunc("/plain", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprintf(w, `<!doctype html><html><head><title>plain</title>`+
@@ -179,7 +192,11 @@ window.__migrations = []; window.addEventListener('gofastr:local-migrated', (e) 
 			`<script src="/__gofastr/runtime.js"></script><script src="%s"></script><script src="/app.js"></script></body></html>`,
 			block, seedEl, form, e2eSite.ScriptURL())
 	})
-	e.srv = httptest.NewServer(mux)
+	if len(tls) > 0 && tls[0] {
+		e.srv = httptest.NewTLSServer(mux)
+	} else {
+		e.srv = httptest.NewServer(mux)
+	}
 	t.Cleanup(e.srv.Close)
 	return e
 }
@@ -740,5 +757,122 @@ func TestE2E_TheMirrorCarriesTheMigratedRecord(t *testing.T) {
         (('; ' + document.cookie).split('; gofastr.local.' + encodeURIComponent('e2e.tagged.t1') + '=')[1] || '').split(';')[0]))`, &cookie)
 	if cookie != `{"theme":"dark"}` {
 		t.Fatalf("the mirror cookie holds %q, want the migrated record — the server would otherwise read the pre-migration shape", cookie)
+	}
+}
+
+// On https the mirror cookie is Secure. Without it a single plain-http
+// request to the origin — a typo, a stripped link, a captive portal —
+// carries every mirrored record in clear text, and the Go side has set
+// Secure from the request scheme since the first commit.
+func TestE2E_TheMirrorCookieIsSecureOnHTTPS(t *testing.T) {
+	e := startE2E(t, true)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second),
+		chromedptest.AllocatorOptions(chromedp.Flag("ignore-certificate-errors", true)))
+	openPage(t, ctx, e.srv.URL+"/")
+
+	var res map[string]any
+	evalJSON(t, ctx, prefsJS+`.put('theme', { theme: 'dark' })`, &res)
+	if ok, _ := res["ok"].(bool); !ok {
+		t.Fatalf("put = %v", res)
+	}
+	// document.cookie never reveals the attributes, so read the
+	// browser's own cookie store.
+	var cookies []*network.Cookie
+	if err := chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		var err error
+		cookies, err = storage.GetCookies().Do(ctx)
+		return err
+	})); err != nil {
+		t.Fatal(err)
+	}
+	want := "gofastr.local." + url.PathEscape("e2e.prefs.theme")
+	for _, c := range cookies {
+		if c.Name != want {
+			continue
+		}
+		if !c.Secure {
+			t.Fatalf("%s is not Secure — a mirrored record must not ride a plain-http request", c.Name)
+		}
+		return
+	}
+	t.Fatalf("the mirror cookie %q was never written: %v", want, cookies)
+}
+
+// Every mirrored collection rides the Cookie header on EVERY request.
+// The Go declaration bounds what a store may ask for; the browser
+// bounds what it actually holds, because component encoding is not
+// free. Past the budget the origin starts answering 431 and the app is
+// unreachable from that browser until the user clears cookies by hand,
+// so the mirror write is refused — loudly, and without losing the
+// record.
+func TestE2E_TheMirrorRefusesToOverfillTheCookieHeader(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+
+	// Spaces encode to %20, so each record costs the header about three
+	// times what it costs the store: four of them cannot fit 4 KiB.
+	var res map[string]any
+	var refusedAt = -1
+	for i := range 4 {
+		evalJSON(t, ctx, fmt.Sprintf(prefsJS+`.put('k%d', { theme: ' '.repeat(400) })`, i), &res)
+		if ok, _ := res["ok"].(bool); !ok {
+			t.Fatalf("put %d = %v — the record fits the collection's caps; only its cookie does not", i, res)
+		}
+		var have bool
+		evalJSON(t, ctx, fmt.Sprintf(
+			`Promise.resolve(('; ' + document.cookie).indexOf('; gofastr.local.' + encodeURIComponent('e2e.prefs.k%d') + '=') >= 0)`, i), &have)
+		if !have && refusedAt < 0 {
+			refusedAt = i
+		}
+	}
+	if refusedAt < 0 {
+		var all string
+		evalJSON(t, ctx, `Promise.resolve(document.cookie.length + '')`, &all)
+		t.Fatalf("every mirror cookie was written (%s bytes of Cookie header) — nothing bounds the header", all)
+	}
+	var errs []map[string]any
+	evalJSON(t, ctx, `Promise.resolve(window.__errors)`, &errs)
+	for _, d := range errs {
+		if d["reason"] == "mirror" {
+			// And the record itself survived: only the shortcut to first
+			// paint was refused.
+			var got e2ePrefs
+			evalJSON(t, ctx, fmt.Sprintf(prefsJS+`.get('k%d').then((v) => v || null)`, refusedAt), &got)
+			if len(got.Theme) != 400 {
+				t.Fatalf("the record is %q — a refused mirror must not lose the record", got.Theme)
+			}
+			return
+		}
+	}
+	t.Fatalf("gofastr:local-error never said \"mirror\": %v", errs)
+}
+
+// A logout by full navigation lands on whatever page the app redirects
+// to, and that page need not carry a store marker. The clear bit was
+// honoured only inside openStore, so such a page dropped it on the
+// floor — and the bit expired five minutes later, with the previous
+// user's records still in the browser.
+func TestE2E_ClearOnNextLoadIsHonouredWithoutAStoreMarker(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+	var res map[string]any
+	evalJSON(t, ctx, draftsJS+`.put({ id: 'a', title: 'the previous user' })`, &res)
+	if ok, _ := res["ok"].(bool); !ok {
+		t.Fatalf("put = %v", res)
+	}
+
+	// Log out, then land on a page that declares the store but renders
+	// no marker for it.
+	if err := chromedp.Run(ctx, chromedp.Navigate(e.srv.URL+"/logout")); err != nil {
+		t.Fatal(err)
+	}
+	openPage(t, ctx, e.srv.URL+"/nomarker")
+
+	if !pollTrue(ctx, `window.__gofastr.local.get('local.e2e.drafts:a').then((v) => v === undefined)`) {
+		var got e2eDraft
+		evalJSON(t, ctx, `window.__gofastr.local.get('local.e2e.drafts:a').then((v) => v || null)`, &got)
+		t.Fatalf("the record is still there (%v) — a logout must not depend on the next page carrying a marker", got)
 	}
 }

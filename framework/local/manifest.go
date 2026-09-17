@@ -34,7 +34,10 @@ func (s *Store) ScriptJS() []byte {
 	for n, d := range s.colls {
 		cols[n] = d.manifest()
 	}
-	body, err := json.Marshal(map[string]any{"collections": cols})
+	// mirrorMax travels with the declaration: the browser enforces the
+	// same aggregate budget on the cookies it actually holds, which are
+	// larger than the records they carry (component encoding).
+	body, err := json.Marshal(map[string]any{"collections": cols, "mirrorMax": MirrorStoreMaxBytes})
 	if err != nil {
 		panic("local: manifest does not encode: " + err.Error())
 	}

@@ -134,20 +134,27 @@ func writeU(sb *strings.Builder, r rune) {
 	sb.WriteString(h)
 }
 
-// ClearOnNextLoad plants the short-lived cookie
-// gofastr.local.clear.<app> that the local-store module honours once
-// on its next page load — clearing every record of s, then dropping
-// the cookie. The channel for a logout that is a full navigation. The
-// cookie must be readable by script, so it is not HttpOnly; it carries
-// a bit, not a value. Secure follows the request's scheme so a plain
-// http development origin still stores it.
+// ClearOnNextLoad plants the cookie gofastr.local.clear.<app> that the
+// local-store module honours on the next page that loads it — clearing
+// every record of s, then dropping the cookie, and only if the clear
+// succeeded. The channel for a logout that is a full navigation.
+//
+// The module honours the bit at load over every app the manifest
+// declares, not only the ones a marker on that page names. It still
+// needs the module to load at all, so the bit lives a day rather than
+// five minutes: a logout must survive the user landing on a marker-free
+// page (a login screen, a marketing page) and coming back later.
+//
+// The cookie must be readable by script, so it is not HttpOnly; it
+// carries a bit, not a value. Secure follows the request's scheme so a
+// plain http development origin still stores it.
 func ClearOnNextLoad(w http.ResponseWriter, r *http.Request, s *Store) {
 	//gofastr:allow(GOFASTR1404) a one-bit flag the browser's own script must read, so HttpOnly would defeat it; Secure follows the request scheme
 	http.SetCookie(w, &http.Cookie{
 		Name:     "gofastr.local.clear." + s.app,
 		Value:    "1",
 		Path:     "/",
-		MaxAge:   300,
+		MaxAge:   86400,
 		SameSite: http.SameSiteLaxMode,
 		Secure:   r != nil && (r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")),
 		HttpOnly: false,

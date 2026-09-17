@@ -86,13 +86,19 @@ func TestDefineValidatesTheDeclaration(t *testing.T) {
 	Define[draft](s, "drafts", CollectionConfig{Version: 1})
 	mustPanic(t, "already declared", func() { Define[draft](s, "drafts", CollectionConfig{Version: 1}) })
 
-	// Mirror clamps to the cookie-sized ceilings.
+	// Mirror clamps to the cookie-sized defaults and ceilings.
 	p := Define[prefs](s, "prefs", CollectionConfig{Version: 1, Mirror: true})
-	if p.MaxRecordBytes() != MirrorMaxRecordBytes || p.MaxRecords() != MirrorMaxRecords {
-		t.Fatalf("mirror caps = %d/%d, want %d/%d", p.MaxRecordBytes(), p.MaxRecords(), MirrorMaxRecordBytes, MirrorMaxRecords)
+	if p.MaxRecordBytes() != MirrorDefaultMaxRecordBytes || p.MaxRecords() != MirrorDefaultMaxRecords {
+		t.Fatalf("mirror caps = %d/%d, want %d/%d", p.MaxRecordBytes(), p.MaxRecords(), MirrorDefaultMaxRecordBytes, MirrorDefaultMaxRecords)
 	}
 	mustPanic(t, "exceeds the ceiling", func() {
 		Define[prefs](s, "prefs2", CollectionConfig{Version: 1, Mirror: true, MaxRecordBytes: 4096})
+	})
+	// Every mirrored collection rides the Cookie header on every
+	// request, so the store has one budget across all of them: a second
+	// mirrored collection that fits on its own can still be refused.
+	mustPanic(t, "over the 4096-byte budget", func() {
+		Define[prefs](s, "prefs3", CollectionConfig{Version: 1, Mirror: true, MaxRecordBytes: 1024, MaxRecords: 16})
 	})
 
 	// The manifest freezes the declaration.
@@ -143,7 +149,7 @@ func TestManifestCarriesTheDeclaration(t *testing.T) {
 		t.Fatalf("rename step = %v", d.Migrations[0].Steps[0])
 	}
 	p := m.Collections["prefs"]
-	if !p.Mirror || p.MaxRecord != MirrorMaxRecordBytes || len(p.Migrations) != 0 {
+	if !p.Mirror || p.MaxRecord != MirrorDefaultMaxRecordBytes || len(p.Migrations) != 0 {
 		t.Fatalf("prefs entry = %+v", p)
 	}
 	if !strings.HasPrefix(s.ScriptURL(), s.ScriptPath()+"?v=") || s.ScriptPath() != "/__gofastr/local/site.js" {
@@ -504,7 +510,7 @@ func TestClearOnNextLoadPlantsAScriptReadableBit(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ClearOnNextLoad(rec, httptest.NewRequest("POST", "/logout", nil), s)
 	cs := rec.Result().Cookies()
-	if len(cs) != 1 || cs[0].Name != "gofastr.local.clear.site" || cs[0].Value != "1" || cs[0].HttpOnly || cs[0].Secure || cs[0].SameSite != http.SameSiteLaxMode || cs[0].MaxAge != 300 {
+	if len(cs) != 1 || cs[0].Name != "gofastr.local.clear.site" || cs[0].Value != "1" || cs[0].HttpOnly || cs[0].Secure || cs[0].SameSite != http.SameSiteLaxMode || cs[0].MaxAge != 86400 {
 		t.Fatalf("cookie = %+v", cs)
 	}
 	rec = httptest.NewRecorder()

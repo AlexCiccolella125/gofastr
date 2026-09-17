@@ -22,8 +22,24 @@ const (
 	// component-encoded (which can triple its size), inside the ~4 KiB
 	// a browser allows one cookie and the few dozen it allows a domain.
 	// The caps are therefore small and not raisable.
-	MirrorMaxRecordBytes = 1 << 10
-	MirrorMaxRecords     = 16
+	MirrorDefaultMaxRecordBytes = 512
+	MirrorDefaultMaxRecords     = 4
+	MirrorMaxRecordBytes        = 1 << 10
+	MirrorMaxRecords            = 16
+
+	// MirrorStoreMaxBytes bounds what ALL of a store's mirrored
+	// collections may declare together: the sum of MaxRecords ×
+	// MaxRecordBytes over them. The per-collection ceilings bound one
+	// cookie; nothing bounded the Cookie HEADER, and that is the one
+	// the world has an opinion about — most proxies and servers refuse
+	// a request header block over 8–16 KiB, and the answer is a 431
+	// that makes the origin unreachable from that browser until the
+	// user clears their cookies by hand. Four mirrored collections at
+	// the old ceilings were 64 KiB of declaration. 4 KiB leaves room
+	// for the session cookie, the CSRF cookie and everything else the
+	// app puts on the origin, and the browser measures the same bound
+	// on what it actually holds (encoding is not free).
+	MirrorStoreMaxBytes = 4 << 10
 )
 
 // CollectionConfig declares one collection.
@@ -188,8 +204,8 @@ func Define[T any](s *Store, name string, cfg CollectionConfig) *Collection[T] {
 	def.maxRecords = capOrDefault("MaxRecords", name, cfg.MaxRecords, DefaultMaxRecords, MaxRecordsLimit)
 	def.maxBytes = capOrDefault("MaxBytes", name, cfg.MaxBytes, DefaultMaxBytes, MaxBytesLimit)
 	if cfg.Mirror {
-		def.maxRecord = capOrDefault("MaxRecordBytes", name, cfg.MaxRecordBytes, MirrorMaxRecordBytes, MirrorMaxRecordBytes)
-		def.maxRecords = capOrDefault("MaxRecords", name, cfg.MaxRecords, MirrorMaxRecords, MirrorMaxRecords)
+		def.maxRecord = capOrDefault("MaxRecordBytes", name, cfg.MaxRecordBytes, MirrorDefaultMaxRecordBytes, MirrorMaxRecordBytes)
+		def.maxRecords = capOrDefault("MaxRecords", name, cfg.MaxRecords, MirrorDefaultMaxRecords, MirrorMaxRecords)
 	}
 	if def.maxRecord > def.maxBytes {
 		panic(fmt.Sprintf("local: collection %q: MaxRecordBytes %d exceeds MaxBytes %d", name, def.maxRecord, def.maxBytes))
@@ -202,6 +218,17 @@ func Define[T any](s *Store, name string, cfg CollectionConfig) *Collection[T] {
 	}
 	if _, dup := s.colls[name]; dup {
 		panic(fmt.Sprintf("local: collection %q is already declared on store %q", name, s.app))
+	}
+	if def.mirror {
+		total := def.maxRecords * def.maxRecord
+		for _, d := range s.colls {
+			if d.mirror {
+				total += d.maxRecords * d.maxRecord
+			}
+		}
+		if total > MirrorStoreMaxBytes {
+			panic(fmt.Sprintf("local: store %q: the mirrored collections declare %d bytes together, over the %d-byte budget — every one of them rides the Cookie header on EVERY request, and a header block past 8-16 KiB is a 431 the browser cannot recover from; lower MaxRecords or MaxRecordBytes, or stop mirroring a collection the server does not need at first paint", s.app, total, MirrorStoreMaxBytes))
+		}
 	}
 	s.colls[name] = def
 	return &Collection[T]{def: def}

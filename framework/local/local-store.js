@@ -107,14 +107,65 @@
   // encoded JSON text: neither can carry the cookie grammar. Same
   // shape as banner.js's dismissal cookie, which is the one channel a
   // browser-held value had to the server before this module.
+  // On https the mirror cookie is Secure, like every cookie the Go
+  // side sets (response.go follows the request scheme). Without it a
+  // single plain-http request to the origin — a typo, a stripped link,
+  // a captive portal — carries every mirrored record in clear text.
+  // Spelled as two whole literal writes per operation rather than a
+  // concatenated suffix: the cookie lint reads a document.cookie
+  // assignment operand by operand and refuses any non-literal that is
+  // not component-encoded, which is the rule that keeps a value from
+  // planting its own cookie name and attributes.
+  const SECURE = (() => {
+    try { return window.location.protocol === 'https:'; } catch (_) { return false; }
+  })();
+
+  // mirrorBytes is what one mirror cookie costs the Cookie header: the
+  // name, the '=', the encoded value and the '; ' a browser puts
+  // between cookies. Encoding is not free, which is why the budget is
+  // measured here and not only in the Go declaration.
+  const mirrorBytes = (seg, enc) => 'gofastr.local.'.length + seg.length + 1 + enc.length + 2;
+  // mirrorUsed is what this store's OTHER mirror cookies already cost.
+  const mirrorUsed = (app, seg) => {
+    let all = '';
+    try { all = document.cookie; } catch (_) { return 0; }
+    let used = 0;
+    for (const part of all.split('; ')) {
+      const eq = part.indexOf('=');
+      if (eq < 0) continue;
+      const nm = part.slice(0, eq);
+      if (nm.indexOf('gofastr.local.' + app + '.') !== 0 || nm === 'gofastr.local.' + seg) continue;
+      used += part.length + 2;
+    }
+    return used;
+  };
+
   // mirror writes the record's cookie, or clears it when text is ''
   // (a zero max-age is the deletion). Two writes, every operand a
   // literal or component-encoded: the cookie lint reads them as such.
-  const mirror = (app, coll, key, text) => {
+  //
+  // A write is refused when the store's mirrored cookies would pass
+  // budget — the same bound Define enforces on the declaration, here
+  // on what the browser actually holds. Over it, the Cookie header
+  // stops being a hint and becomes a 431 the user cannot clear without
+  // opening browser settings; the record itself is kept, only its
+  // shortcut to first paint is not.
+  const mirror = (app, coll, key, text, budget) => {
+    const seg = encodeURIComponent(app + '.' + coll + '.' + key);
+    if (text) {
+      const enc = encodeURIComponent(text);
+      const cost = mirrorBytes(seg, enc);
+      if (budget > 0 && mirrorUsed(app, seg) + cost > budget) {
+        return fail(app, coll, key, 'mirror', cost, budget);
+      }
+    }
     try {
-      if (text) document.cookie = 'gofastr.local.' + encodeURIComponent(app + '.' + coll + '.' + key) + '=' + encodeURIComponent(text) + '; path=/; max-age=31536000; SameSite=Lax';
+      if (text && SECURE) document.cookie = 'gofastr.local.' + encodeURIComponent(app + '.' + coll + '.' + key) + '=' + encodeURIComponent(text) + '; path=/; max-age=31536000; SameSite=Lax; Secure';
+      else if (text) document.cookie = 'gofastr.local.' + encodeURIComponent(app + '.' + coll + '.' + key) + '=' + encodeURIComponent(text) + '; path=/; max-age=31536000; SameSite=Lax';
+      else if (SECURE) document.cookie = 'gofastr.local.' + encodeURIComponent(app + '.' + coll + '.' + key) + '=; path=/; max-age=0; SameSite=Lax; Secure';
       else document.cookie = 'gofastr.local.' + encodeURIComponent(app + '.' + coll + '.' + key) + '=; path=/; max-age=0; SameSite=Lax';
     } catch (_) { /* best-effort */ }
+    return { ok: true, reason: '' };
   };
   const cookieNamed = (name) => {
     try { return ('; ' + document.cookie).indexOf('; ' + name + '=') >= 0; } catch (_) { return false; }
@@ -163,6 +214,7 @@
     const manifest = manifestFor(app);
     if (!manifest) return null;
     const P = NS.local;
+    const budget = manifest.mirrorMax > 0 ? manifest.mirrorMax : 0;
     const prefixOf = (coll) => 'local.' + app + '.' + coll + ':';
     const metaKey = (coll) => 'local.' + app + '.' + coll;
     const recordKey = (coll, key) => prefixOf(coll) + key;
@@ -244,7 +296,7 @@
               // The MIGRATED record, not the one the entry carried:
               // mirroring e.value would put the pre-migration shape in
               // the cookie and hand the server the old schema.
-              if (spec.mirror) for (const d of done) mirror(app, coll, d.key, encode(d.rec) || 'null');
+              if (spec.mirror) for (const d of done) mirror(app, coll, d.key, encode(d.rec) || 'null', budget);
               return true;
             });
           });
@@ -320,7 +372,7 @@
             if (total > maxBytes) return fail(app, coll, key, 'full', total, maxBytes);
             return P.set(mine, value).then((r) => {
               if (!r.ok) return fail(app, coll, key, r.reason, size, maxRecord);
-              if (spec.mirror) mirror(app, coll, key, text);
+              if (spec.mirror) mirror(app, coll, key, text, budget);
               notify(coll, key, 'local');
               return { ok: true, reason: '' };
             });
@@ -330,7 +382,7 @@
           if (!validKey(key)) return Promise.resolve(fail(app, coll, String(key), 'key'));
           return gate(coll).then((no) => no || P.remove(recordKey(coll, key)).then((r) => {
             if (!r.ok) return fail(app, coll, key, r.reason);
-            if (spec.mirror) mirror(app, coll, key, '');
+            if (spec.mirror) mirror(app, coll, key, '', budget);
             notify(coll, key, 'local');
             return { ok: true, reason: '' };
           }));
@@ -397,7 +449,7 @@
               for (let i = 0; i < ks.length; i++) {
                 if (!rs[i] || !rs[i].ok) { bad = (rs[i] && rs[i].reason) || 'unavailable'; continue; }
                 const key = ks[i].slice(prefixOf(coll).length);
-                if (spec.mirror) mirror(app, coll, key, '');
+                if (spec.mirror) mirror(app, coll, key, '', budget);
                 notify(coll, key, 'local');
               }
               if (bad) return fail(app, coll, '', bad);
@@ -434,14 +486,6 @@
     };
     stores.set(app, store);
 
-    // Clear-on-next-load: a full-navigation logout cannot ride an RPC
-    // response header, so the Go side plants a short-lived bit in a
-    // cookie and this module honours it once, then drops the cookie.
-    if (cookieNamed('gofastr.local.clear.' + encodeURIComponent(app))) {
-      store.clear().then(() => {
-        try { document.cookie = 'gofastr.local.clear.' + encodeURIComponent(app) + '=; path=/; max-age=0; SameSite=Lax'; } catch (_) { /* best-effort */ }
-      });
-    }
     // A mirrored collection re-stamps its cookies on open, so a cookie
     // the browser dropped while the record survived comes back.
     for (const name of Object.keys(collections)) {
@@ -449,7 +493,7 @@
       if (spec && spec.mirror) {
         whenReady(name).then(() => P.entries(prefixOf(name))).then((er) => {
           if (!er.ok) return;
-          for (const e of er.entries) mirror(app, name, e.key.slice(prefixOf(name).length), encode(e.value) || 'null');
+          for (const e of er.entries) mirror(app, name, e.key.slice(prefixOf(name).length), encode(e.value) || 'null', budget);
         });
       }
     }
@@ -479,6 +523,34 @@
   // Shared with the bridge module.
   NS._localHelpers = { validKey: validKey, encode: encode, isObject: isObject, RESERVED: RESERVED };
 
+  // Clear-on-next-load: a full-navigation logout cannot ride an RPC
+  // response header, so the Go side plants a bit in a cookie and this
+  // module honours it once, then drops the cookie — but only once the
+  // clear actually succeeded, or a logout that could not reach the
+  // store would be forgotten.
+  //
+  // Honoured at MODULE LOAD over every app the manifest declares, not
+  // inside openStore: the page a logout redirects to need not carry
+  // that app's marker, and a page carrying app A's marker used to skip
+  // app B's pending clear entirely.
+  const honourClearBits = () => {
+    const all = window.__gofastr_local;
+    if (!all || typeof all !== 'object') return;
+    for (const app of Object.keys(all)) {
+      if (RESERVED.test(app) || !cookieNamed('gofastr.local.clear.' + encodeURIComponent(app))) continue;
+      const store = openStore(app);
+      if (!store) continue;
+      store.clear().then((r) => {
+        if (!r.ok) return;
+        try {
+          if (SECURE) document.cookie = 'gofastr.local.clear.' + encodeURIComponent(app) + '=; path=/; max-age=0; SameSite=Lax; Secure';
+          else document.cookie = 'gofastr.local.clear.' + encodeURIComponent(app) + '=; path=/; max-age=0; SameSite=Lax';
+        } catch (_) { /* best-effort */ }
+      });
+    }
+  };
+
+  honourClearBits();
   scan(document);
   NS._moduleScanners = NS._moduleScanners || {};
   NS._moduleScanners[NAME] = scan;
