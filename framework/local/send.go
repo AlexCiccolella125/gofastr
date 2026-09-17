@@ -33,22 +33,25 @@ import (
 const uploadField = "__local"
 
 // Upload body bounds. The default is DERIVED from what the Send named:
-// the sum of those collections' declared caps plus UploadBodySlack for
-// the rest of the body, clamped into
-// [DefaultUploadMaxBytes, UploadMaxBytesLimit].
-//
-// A fixed 256 KiB was four times smaller than a single collection's own
-// default MaxBytes (1 MiB), so a store filled to its declared cap
-// failed every upload with a bare 413 — a limit the declaration never
-// mentioned, hit by data the declaration said was fine. Raise it
-// explicitly with Upload.Max.
+// per item the most that item can actually put on the wire, summed,
+// plus UploadBodySlack for the rest of the body. There is no floor: a
+// flat one meant a collection capped at 512 bytes x 10 records — 5 KiB
+// of records — still declared a 1 MiB bound, so the browser's
+// fail-closed pre-flight could never fire and the server accepted a
+// megabyte for a 5 KiB collection. A bound the declaration cannot
+// reach is not a bound. Raise it explicitly with Upload.Max.
 const (
-	DefaultUploadMaxBytes = 256 << 10
-	UploadMaxBytesLimit   = 8 << 20
+	UploadMaxBytesLimit = 8 << 20
 	// UploadBodySlack is what the rest of the request may add: the form
-	// fields or JSON the trigger was already sending, plus the wire
-	// overhead of the records themselves ({"k":…,"v":…} per record).
-	UploadBodySlack = 64 << 10
+	// fields or JSON the trigger was already sending. A trigger that
+	// carries a large body of its own alongside its records raises the
+	// bound with Upload.Max.
+	UploadBodySlack = 2 << 10
+	// UploadRecordOverhead is the wire cost of ONE record around its
+	// value: {"k":"<key>","v":} and the comma. KeyMaxLen is 256, which
+	// no real key spends; 64 covers a key a human wrote plus the
+	// punctuation, and Upload.Max covers the app that wants more.
+	UploadRecordOverhead = 64
 )
 
 var (
@@ -86,23 +89,33 @@ func Send(items ...Sendable) *Upload {
 			panic(fmt.Sprintf("local: Send mixes stores %q and %q — one store per upload", u.store.app, si.def.store.app))
 		}
 		u.items = append(u.items, si)
-		if si.key == "" {
-			declared += si.def.maxBytes
-		} else {
-			declared += si.def.maxRecord
-		}
+		declared += si.bound()
 	}
 	u.max = clampUpload(declared + UploadBodySlack)
 	return u
 }
 
-// clampUpload holds a derived bound inside the range Max accepts, so
-// the default is never smaller than the old fixed one and never past
-// the ceiling.
-func clampUpload(n int) int {
-	if n < DefaultUploadMaxBytes {
-		return DefaultUploadMaxBytes
+// bound is the most one Send item can put on the wire. A whole
+// collection is bounded by the SMALLER of its two caps: ten records of
+// 512 bytes never reach the 1 MiB MaxBytes the declaration defaulted
+// to, and summing MaxBytes alone is how the derived bound came out 200
+// times the size the declaration allows.
+func (si sendItem) bound() int {
+	if si.key != "" {
+		return si.def.maxRecord + UploadRecordOverhead
 	}
+	n := si.def.maxRecords * si.def.maxRecord
+	if si.def.maxBytes < n {
+		n = si.def.maxBytes
+	}
+	return n + si.def.maxRecords*UploadRecordOverhead
+}
+
+// clampUpload holds a derived bound under the ceiling Max accepts.
+// There is no floor: one that could exceed the sum would hand the
+// browser a bound its records can never reach, which is the pre-flight
+// refusal not firing.
+func clampUpload(n int) int {
 	if n > UploadMaxBytesLimit {
 		return UploadMaxBytesLimit
 	}

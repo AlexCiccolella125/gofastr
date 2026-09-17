@@ -287,11 +287,16 @@ the context for `Get`, `List` and `FromContext` with
 `local.SourceUpload`, and an upload wins over a mirror cookie for the
 same key.
 
-`Max` defaults to what the `Send` named: the sum of those collections'
-declared caps plus slack, clamped into
-`[DefaultUploadMaxBytes, UploadMaxBytesLimit]`. A flat default smaller
-than a collection's own cap meant a store filled to the size its
-declaration allows failed every upload with a bare 413.
+`Max` defaults to what the `Send` named, and to no more than that: per
+item the most it can actually put on the wire — a whole collection is
+bounded by the SMALLER of `MaxBytes` and `MaxRecords x MaxRecordBytes`,
+one key by one record — plus `local.UploadRecordOverhead` per record and
+`local.UploadBodySlack` for the rest of the body, capped at
+`local.UploadMaxBytesLimit`. There is no floor. A collection declaring
+512 bytes x 10 records is a 5 KiB collection, and a bound of 1 MiB over
+it is a bound the browser's fail-closed pre-flight can never fire on and
+a megabyte the server accepts. A trigger that carries a large body of
+its own beside its records raises the bound with `Max`.
 
 Note that `Wrap` re-encodes a JSON body after lifting the field out, so
 the handler sees the same object with different bytes (map key order, no
