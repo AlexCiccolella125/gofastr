@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/DonaldMurillo/gofastr/core-ui/app"
+	"github.com/DonaldMurillo/gofastr/core/config"
 )
 
 // Reading browser-held records on the server. Two sources, both
@@ -153,6 +156,32 @@ func (s *Store) decodeCookie(c *http.Cookie) (coll, key string, raw json.RawMess
 	return coll, key, json.RawMessage(text), true
 }
 
+// Reading outside Upload.Wrap is the quiet failure this package has: Get
+// and List answer an empty result, the handler decides the browser sent
+// nothing, and the missing line is one the compiler cannot ask for. A
+// non-mirrored collection can ONLY arrive through the wrapper, so a read
+// of one on a request that was never wrapped is always the mistake and
+// never a browser with an empty store. Under GOFASTR_DEV — the flag the
+// dev loop sets, the one framework/dev gates livereload on — say so
+// once per collection; in production this costs one atomic read.
+var unwrappedWarned sync.Map // "<app>/<collection>" -> struct{}
+
+func warnUnwrapped(ctx context.Context, def *collectionDef, call string) {
+	if def.mirror || !config.EnvBool("GOFASTR_DEV") {
+		return
+	}
+	if wrappedFor(ctx, def.store.app) {
+		return
+	}
+	k := def.store.app + "/" + def.name
+	if _, dup := unwrappedWarned.LoadOrStore(k, struct{}{}); dup {
+		return
+	}
+	slog.Default().Warn("local: "+call+" outside Upload.Wrap answers nothing",
+		"app", def.store.app, "collection", def.name,
+		"fix", "wrap the handler: local.Send("+def.name+"…).HandlerFunc(h), or .Wrap(h)")
+}
+
 // Get returns record key of c as the request carried it: from the
 // upload first, then from the mirror cookie. The Source says which, and
 // is SourceNone when the request carried nothing for the key (src.Found()
@@ -163,6 +192,7 @@ func (s *Store) decodeCookie(c *http.Cookie) (coll, key string, raw json.RawMess
 func Get[T any](ctx context.Context, c *Collection[T], key string) (value T, src Source, err error) {
 	raw, src := rawFor(ctx, c.def, key)
 	if !src.Found() {
+		warnUnwrapped(ctx, c.def, "Get")
 		return value, SourceNone, nil
 	}
 	if err := json.Unmarshal(raw, &value); err != nil {
@@ -178,6 +208,9 @@ func Get[T any](ctx context.Context, c *Collection[T], key string) (value T, src
 func List[T any](ctx context.Context, c *Collection[T]) ([]Record[T], error) {
 	from := FromContext(ctx, c.def.store)
 	all := from.recs[c.def.name]
+	if len(all) == 0 {
+		warnUnwrapped(ctx, c.def, "List")
+	}
 	out := make([]Record[T], 0, len(all))
 	for _, k := range sortedKeys(all) {
 		var v T

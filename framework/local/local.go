@@ -160,4 +160,5 @@ func resetForTest() {
 	appsMu.Lock()
 	apps = map[string]*Store{}
 	appsMu.Unlock()
+	unwrappedWarned.Clear()
 }

@@ -497,7 +497,11 @@ and answers with a receipt it also writes back. Browser coverage:
 - **Reading local records in a handler that is not wrapped.** `Get` and
   `List` see the upload only inside `Upload.Wrap`, and the mirror cookie
   only when the request is on the context (the host does this for
-  screens; `Wrap` does it for handlers).
+  screens; `Wrap` does it for handlers). The read is empty rather than an
+  error, so under `GOFASTR_DEV` (what `gofastr dev` sets) the package logs
+  a warning naming the collection the first time an unwrapped handler
+  reads an unmirrored one — the only case that can never be a browser
+  with an empty store.
 - **Serving the declaration by halves.** The route and the extra script
   are both required; either alone 404s the manifest and leaves
   `localStore(app)` answering `null`. `Store.Serve` does both.

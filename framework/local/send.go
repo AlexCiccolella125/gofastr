@@ -215,6 +215,28 @@ func recordsFrom(ctx context.Context, app string) map[string]map[string]json.Raw
 	return all[app]
 }
 
+// wrappedKey marks a context that went through some store's Upload.Wrap,
+// on EVERY path through it — a GET, a body the field cannot ride on and
+// a body without the field all reach the handler with no records, and
+// "the wrapper ran and the browser sent nothing" has to be
+// distinguishable from "nobody wrapped this handler". Only the dev
+// warning in read.go reads it.
+type wrappedKey struct{}
+
+func markWrapped(ctx context.Context, app string) context.Context {
+	prev, _ := ctx.Value(wrappedKey{}).(map[string]bool)
+	next := map[string]bool{app: true}
+	for a := range prev {
+		next[a] = true
+	}
+	return context.WithValue(ctx, wrappedKey{}, next)
+}
+
+func wrappedFor(ctx context.Context, app string) bool {
+	m, _ := ctx.Value(wrappedKey{}).(map[string]bool)
+	return m[app]
+}
+
 // parse validates the reserved field's value against the declaration
 // and the caps. It returns app-scoped records, or an error that maps
 // to 400 (ErrUndeclared, ErrBadKey, malformed) or 413 (ErrTooLarge).
@@ -278,7 +300,7 @@ func (u *Upload) parse(raw []byte) (map[string]map[string]json.RawMessage, error
 // FromContext, and app.RequestFromContext works inside it.
 func (u *Upload) Wrap(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(app.WithRequest(r.Context(), r))
+		r = r.WithContext(markWrapped(app.WithRequest(r.Context(), r), u.store.app))
 		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Body == nil {
 			h.ServeHTTP(w, r)
 			return

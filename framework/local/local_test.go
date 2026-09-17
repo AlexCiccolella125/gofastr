@@ -1,10 +1,12 @@
 package local
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -775,5 +777,73 @@ func TestSeededSignalNamesTheSignalAPageScriptWrites(t *testing.T) {
 	html := string(seed.Bind(context.Background(), "p", nil))
 	if !strings.Contains(html, `data-fui-signal="`+seed.Name()+`"`) {
 		t.Fatalf("the binding does not carry Name() as data-fui-signal:\n%s", html)
+	}
+}
+
+// Reading a collection in a handler nobody wrapped answers an empty
+// result and says nothing: the handler decides the browser sent nothing,
+// and the missing Upload.Wrap is a line the compiler cannot ask for. The
+// dev loop says which collection and what to do.
+func TestAReadOutsideWrapWarnsInDev(t *testing.T) {
+	s := fresh(t, "site")
+	d := Define[draft](s, "drafts", CollectionConfig{Version: 1})
+	p := Define[prefs](s, "prefs", CollectionConfig{Version: 1, Mirror: true})
+
+	logs := &bytes.Buffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Setenv("GOFASTR_DEV", "1")
+
+	// Outside Wrap: the read is empty and the warning names the
+	// collection and the fix.
+	if _, src, _ := Get(context.Background(), d, "current"); src != SourceNone {
+		t.Fatalf("Get outside Wrap = %q", src)
+	}
+	got := logs.String()
+	for _, want := range []string{"outside Upload.Wrap", `app=site`, `collection=drafts`, "Upload.Wrap"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the warning is %q, missing %q", got, want)
+		}
+	}
+	// Once per collection, not once per read.
+	logs.Reset()
+	_, _ = List(context.Background(), d)
+	if logs.Len() != 0 {
+		t.Fatalf("the warning repeated: %s", logs.String())
+	}
+	// A mirrored collection legitimately arrives on a cookie, with no
+	// wrapper in sight: a screen render is not a mistake.
+	logs.Reset()
+	_, _, _ = Get(context.Background(), p, "view")
+	if logs.Len() != 0 {
+		t.Fatalf("a mirrored read warned: %s", logs.String())
+	}
+	// Inside Wrap the browser is entitled to send nothing.
+	logs.Reset()
+	unwrappedWarned.Clear()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/u", strings.NewReader(`{"note":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	Send(d).HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _, _ = Get(r.Context(), d, "current")
+	}).ServeHTTP(rec, req)
+	if logs.Len() != 0 {
+		t.Fatalf("a wrapped read warned: %s", logs.String())
+	}
+}
+
+// Off by default: production pays one environment read, not a log line.
+func TestAReadOutsideWrapIsSilentWithoutTheDevFlag(t *testing.T) {
+	s := fresh(t, "site")
+	d := Define[draft](s, "drafts", CollectionConfig{Version: 1})
+	logs := &bytes.Buffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Setenv("GOFASTR_DEV", "")
+	_, _, _ = Get(context.Background(), d, "current")
+	if logs.Len() != 0 {
+		t.Fatalf("warned outside the dev loop: %s", logs.String())
 	}
 }
