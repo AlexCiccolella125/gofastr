@@ -321,3 +321,80 @@ func TestPersistedSliceConvergesAcrossTwoTabs(t *testing.T) {
 		t.Fatalf("tab A shows %q — the sibling tab's write never arrived", got)
 	}
 }
+
+// Trust does not survive a round trip through the browser store.
+//
+// runtime.js marks a signal untrusted when its value came from an input
+// the page does not author (widgets.js seeds one from location.search)
+// and refuses to write an untrusted value through innerHTML. Both ends
+// of persistence used to launder that flag: the write-back stored an
+// untrusted value like any other, and the restore called setSignal with
+// no options, which CLEARS the flag — so the value the browser handed
+// back took the innerHTML branch on the next load. Two assertions, one
+// per end.
+func TestPersistedSliceDoesNotLaunderAnUntrustedValue(t *testing.T) {
+	sl := New("e2etrust").String("html", "server-default").PersistMax(4096)
+	html := string(sl.BindHTML(context.Background(), "span", map[string]string{"id": "view"}))
+	srv := startPersistServer(t, html)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(90*time.Second))
+	name := sl.Name()
+
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(srv.URL+"/"),
+		chromedp.WaitVisible(`#ready`, chromedp.ByID),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if !persistPollTrue(ctx, persistLoadedExpr) {
+		t.Fatal("the signal-persist module never loaded for a page carrying the marker")
+	}
+
+	// End one: an untrusted value is never written to the store.
+	const payload = `<img id="pwned" src="x" onerror="window.__pwned=1">`
+	if err := chromedp.Run(ctx, chromedp.Evaluate(
+		fmt.Sprintf(`window.__gofastr.setSignal(%q, %q, { untrusted: true })`, name, payload), nil)); err != nil {
+		t.Fatal(err)
+	}
+	// Give the listener the same window the passing case gets.
+	var stored string
+	for range 10 {
+		if err := chromedp.Run(ctx, chromedp.Evaluate(storedExpr(name), &stored, awaitPromise)); err != nil {
+			t.Fatal(err)
+		}
+		if stored != "" {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if stored != "" {
+		t.Fatalf("the browser store holds %q — an untrusted signal value must never be persisted", stored)
+	}
+
+	// End two: a value that IS in the store comes back untrusted, so an
+	// html-mode binding renders it as text. Seed it through the
+	// primitive, the way a previous session (or any script on the
+	// origin) would have left it.
+	if err := chromedp.Run(ctx, chromedp.Evaluate(
+		fmt.Sprintf(`window.__gofastr.local.set(%q, %q).then((r) => r.ok)`, name, payload), nil, awaitPromise)); err != nil {
+		t.Fatal(err)
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(srv.URL+"/"),
+		chromedp.WaitVisible(`#ready`, chromedp.ByID),
+	); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if !persistPollTrue(ctx, fmt.Sprintf(
+		`window.__gofastr.local.get(%q).then(() => document.getElementById('view').textContent === %q)`, name, payload)) {
+		var got string
+		_ = chromedp.Run(ctx, chromedp.Evaluate(`document.getElementById('view').innerHTML`, &got))
+		t.Fatalf("#view innerHTML = %q — the restored value must land as TEXT, not markup", got)
+	}
+	var pwned bool
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`!!window.__pwned || !!document.getElementById('pwned')`, &pwned)); err != nil {
+		t.Fatal(err)
+	}
+	if pwned {
+		t.Fatal("the restored value became live markup: persistence laundered the untrusted flag")
+	}
+}

@@ -43,7 +43,10 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   render cannot clobber the browser's value. A value over the slice's
   cap is not written and the page hears `gofastr:persist-overflow`
   instead, so an app can say "you have run out of room" rather than
-  lose the write silently. The restore is asynchronous, so first paint
+  lose the write silently. A signal the runtime marked **untrusted** is
+  never written (reason `untrusted`), and a value read back out of the
+  browser is restored untrusted: what the browser stored is not
+  server-authored HTML, so an `html`-mode binding renders it as text. The restore is asynchronous, so first paint
   always shows the server's seed, and nothing reaches the server — no
   cookie, no header, no post. This is not offline-first, which remains
   an explicit non-goal: no conflict resolution, no pending-mutation

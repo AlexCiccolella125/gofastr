@@ -35,6 +35,12 @@ import (
 //     signal is re-serialised on every change, so the cap is about
 //     what a projection should cost, not about what the engine could
 //     hold.
+//   - NEVER TRUSTED AS MARKUP. The runtime marks a signal untrusted
+//     when its value came from an input the page does not author (the
+//     deep-link seed in widgets.js). Such a value is not persisted, and
+//     a value restored from the browser is set untrusted, so BindHTML
+//     renders it as text: persistence must not launder a flag that
+//     lives only in memory into stored markup.
 //   - INVISIBLE TO THE SERVER. Nothing is posted, no cookie is set, no
 //     header is added. A Go render never sees the value. A screen that
 //     must know a browser-held value at FIRST PAINT wants the cookie

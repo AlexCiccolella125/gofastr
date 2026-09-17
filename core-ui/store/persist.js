@@ -16,7 +16,8 @@
 //   1. read the key out of the browser store and push it into the
 //      signal, replacing the value SSR painted;
 //   2. subscribe to the signal's listener list and write every later
-//      value back, refusing one over the slice's declared byte cap;
+//      value back, refusing one over the slice's declared byte cap and
+//      one the runtime marked untrusted;
 //   3. mirror another tab's write of the same key into this tab.
 //
 // Nothing here is sent to the server: a Go render never sees these
@@ -56,6 +57,18 @@
   const write = (name, value) => {
     const entry = slices.get(name);
     if (!entry || entry.echoing) return; // a cross-tab apply is not a new write
+    // A signal the runtime marked untrusted holds a value some other
+    // input supplied (widgets.js seeds one from location.search), and
+    // runtime.js only keeps it out of innerHTML for as long as the flag
+    // survives. Persisting it would launder it: the store outlives the
+    // flag, the restore looks like any other value, and the next page
+    // load writes attacker markup through an html-mode binding. A value
+    // the browser was given is never a value the browser keeps.
+    const sig = Object.prototype.hasOwnProperty.call(NS._signals, name) ? NS._signals[name] : null;
+    if (sig && sig.untrusted) {
+      notify(name, 'untrusted', 0, entry.max);
+      return;
+    }
     let text;
     // A value with a cycle in it (or a throwing toJSON) is not
     // storable; the signal keeps working with it in memory.
@@ -93,7 +106,11 @@
       try { text = JSON.stringify(value); } catch (_) { return; }
       entry.last = typeof text === 'string' ? text : null;
       entry.echoing = true;
-      try { NS.setSignal(name, value); } finally { entry.echoing = false; }
+      // { untrusted: true }: a value that came back out of the browser
+      // store is not server-authored HTML, whatever it was when it went
+      // in. runtime.js renders an untrusted value as text in html mode,
+      // so a stored string can never become markup after a reload.
+      try { NS.setSignal(name, value, { untrusted: true }); } finally { entry.echoing = false; }
     };
 
     // Seed from the browser. SSR painted the server's value; this is
