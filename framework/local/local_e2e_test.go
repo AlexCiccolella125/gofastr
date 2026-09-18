@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1051,5 +1052,213 @@ func TestE2E_AStoreWithNoManifestSaysWhichURLItWanted(t *testing.T) {
 	}
 	if !strings.Contains(out.Warned[0], "e2e") || !strings.Contains(out.Warned[0], e2eSite.ScriptPath()) {
 		t.Fatalf("the warning is %q — it must name the app and the manifest URL (%s)", out.Warned[0], e2eSite.ScriptPath())
+	}
+}
+
+// A tab left open across a deploy: another tab has migrated and stamped
+// the collection at a newer version. This tab's cached readiness is
+// dropped when the version entry changes, so its next write re-checks
+// the stored version, sees one above its own, and refuses instead of
+// landing an old-schema record nothing would ever migrate again.
+func TestE2E_ATabOpenAcrossADeployDoesNotWriteTheOldSchema(t *testing.T) {
+	e := startE2E(t)
+	tabA := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, tabA, e.srv.URL+"/")
+	var res map[string]any
+	evalJSON(t, tabA, draftsJS+`.put({id: 'before', title: 'this build'})`, &res)
+	if ok, _ := res["ok"].(bool); !ok {
+		t.Fatalf("a put before the deploy = %v", res)
+	}
+	// The newer build, in another tab, stamps the collection past what
+	// this build declares.
+	tabB, cancelB := chromedp.NewContext(tabA)
+	t.Cleanup(cancelB)
+	openPage(t, tabB, e.srv.URL+"/plain")
+	evalJSON(t, tabB, `window.__gofastr.loadModule('local').then(() => window.__gofastr.local.set('local.e2e.drafts', {v: 3}))`, nil)
+	// This tab's next write must refuse. The version write reaches it
+	// through the primitive's watch, so poll rather than assert once.
+	if !pollTrue(tabA, draftsJS+`.put({id: 'after', title: 'old schema'}).then(r => !r.ok)`) {
+		t.Fatal("a put after a newer tab stamped the collection landed anyway: the cached readiness was never re-checked")
+	}
+	if !pollTrue(tabA, `window.__gofastr.local.get('local.e2e.drafts:after').then(v => v === undefined)`) {
+		t.Fatal("the old-schema record is stored under the newer version")
+	}
+}
+
+// A put racing a clear commits after the enumeration that never saw it
+// unless both wait on the same chain. The logout path reports success
+// only when the records are gone, so the chain has to cover clear and
+// delete, not only put.
+func TestE2E_AClearIsNotOutrunByAPut(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+	for round := 0; round < 4; round++ {
+		var results []map[string]any
+		evalJSON(t, ctx, `Promise.all([
+            `+draftsJS+`.put({id: 'racer', title: 'survives?'}),
+            `+draftsJS+`.clear(),
+        ])`, &results)
+		if ok, _ := results[1]["ok"].(bool); !ok {
+			t.Fatalf("round %d: clear = %v", round, results[1])
+		}
+		var n float64
+		evalJSON(t, ctx, draftsJS+`.count()`, &n)
+		if n != 0 {
+			t.Fatalf("round %d: clear reported ok and %v record(s) survived it", round, n)
+		}
+	}
+	var results []map[string]any
+	evalJSON(t, ctx, `Promise.all([
+        `+draftsJS+`.put({id: 'racer', title: 'survives?'}),
+        `+draftsJS+`.delete('racer'),
+    ])`, &results)
+	if !pollTrue(ctx, draftsJS+`.get('racer').then(v => v === undefined)`) {
+		t.Fatal("delete reported ok and the record it raced survived")
+	}
+}
+
+// The bound on the trigger is bytes, the unit the server counts. A CJK
+// draft is three bytes per character, so counting UTF-16 units let a
+// body past the pre-flight that the server then answered with a bare
+// 413.
+func TestE2E_TheUploadPreFlightCountsBytesNotUnits(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+	// 120 CJK characters: 120 UTF-16 units, 360 UTF-8 bytes.
+	var res map[string]any
+	evalJSON(t, ctx, draftsJS+`.put({ id: 'current', title: '漢'.repeat(120) })`, &res)
+	if ok, _ := res["ok"].(bool); !ok {
+		t.Fatalf("put = %v", res)
+	}
+	// A bound the units fit under and the bytes do not.
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+        window.__refused = [];
+        window.addEventListener('gofastr:rpc-refused', (ev) => window.__refused.push(ev.detail));
+        document.getElementById('up').setAttribute('data-local-max', '260');
+    })()`, nil)); err != nil {
+		t.Fatal(err)
+	}
+	if err := chromedp.Run(ctx, chromedp.Click(`#send`, chromedp.ByID)); err != nil {
+		t.Fatal(err)
+	}
+	if !pollTrue(ctx, `Promise.resolve(window.__refused.length === 1)`) {
+		t.Fatal("a 360-byte payload passed a 260-byte bound: the pre-flight counted UTF-16 units")
+	}
+	var errs []map[string]any
+	evalJSON(t, ctx, `Promise.resolve(window.__errors.filter(d => d.reason === 'size'))`, &errs)
+	if len(errs) != 1 {
+		t.Fatalf("size refusals = %v", errs)
+	}
+	if size, _ := errs[0]["size"].(float64); size < 360 {
+		t.Fatalf("the size event reports %v, want the byte count (at least 360)", size)
+	}
+}
+
+// An enumeration that failed is not an empty collection. list and
+// count say so the way clear and put already do.
+func TestE2E_ListAndCountReportAFailedEnumeration(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+	evalJSON(t, ctx, draftsJS+`.put({id: 'a', title: 'one'})`, nil)
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+        window.__errors = [];
+        window.__gofastr.local.entries = () => Promise.resolve({ ok: false, reason: 'unavailable', entries: [] });
+        window.__gofastr.local.keys = () => Promise.resolve({ ok: false, reason: 'unavailable', keys: [] });
+    })()`, nil)); err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	evalJSON(t, ctx, draftsJS+`.list()`, &rows)
+	var n float64
+	evalJSON(t, ctx, draftsJS+`.count()`, &n)
+	if len(rows) != 0 || n != 0 {
+		t.Fatalf("list = %v, count = %v: a failed read still resolves empty", rows, n)
+	}
+	var errs []map[string]any
+	evalJSON(t, ctx, `Promise.resolve(window.__errors.filter(d => d.reason === 'unavailable'))`, &errs)
+	if len(errs) != 2 {
+		t.Fatalf("gofastr:local-error fired %d times for two failed enumerations, want 2: %v", len(errs), errs)
+	}
+}
+
+// The seed restore lands after hydration. If the user typed while the
+// read was in flight, the typed value is the newer one and has already
+// been written back; the read is stale and must not repaint over it.
+func TestE2E_TheSeedKeepsWhatTheUserTypedWhileTheReadWasInFlight(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+	evalJSON(t, ctx, draftsJS+`.put({id: 'current', title: 'stored yesterday'})`, nil)
+	// The seed restores on a scan, so ask for one the way a navigation
+	// would.
+	evalJSON(t, ctx, `Promise.resolve(window.__gofastr._moduleScanners['local-bridge'](document))`, nil)
+	if !pollTrue(ctx, `Promise.resolve(document.getElementById('seeded').textContent.indexOf('stored yesterday') >= 0)`) {
+		t.Fatal("the seed never restored the stored record")
+	}
+	// Slow the record read, re-scan so the seed reads again, and type
+	// while the read is still in flight.
+	var title string
+	evalJSON(t, ctx, `(() => {
+        const c = `+draftsJS+`;
+        // The read happens now and its answer lands later: a stale
+        // read, the way a slow disk delivers one.
+        const real = c.get.bind(c);
+        c.get = (k) => real(k).then((v) => new Promise((resolve) => setTimeout(() => resolve(v), 400)));
+        window.__gofastr._moduleScanners['local-bridge'](document);
+        return new Promise((resolve) => setTimeout(() => {
+            window.__gofastr.setSignal('e2elocal.current', {id: 'current', title: 'typed now'});
+            setTimeout(() => resolve(window.__gofastr._signals['e2elocal.current'].value.title), 700);
+        }, 100));
+    })()`, &title)
+	if title != "typed now" {
+		t.Fatalf("after the stale read landed the signal says %q, want the value the user typed", title)
+	}
+	if !pollTrue(ctx, draftsJS+`.get('current').then(v => !!v && v.title === 'typed now')`) {
+		t.Fatal("the typed value was not written back to the record")
+	}
+}
+
+// Two tabs writing at once: the per-document chain cannot see the other
+// tab, so the write chain also holds a Web Lock on the collection. Six
+// puts of ~310 bytes from two tabs into a collection capped at three
+// records and 1024 bytes cannot all land.
+func TestE2E_TwoTabsCannotPushACollectionPastItsCap(t *testing.T) {
+	e := startE2E(t)
+	tabA := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, tabA, e.srv.URL+"/")
+	tabB, cancelB := chromedp.NewContext(tabA)
+	t.Cleanup(cancelB)
+	openPage(t, tabB, e.srv.URL+"/")
+	// Both tabs fire at one wall-clock instant, so the two bursts
+	// overlap instead of running one after the other.
+	fire := func(tab context.Context, prefix string, at int64) {
+		if err := chromedp.Run(tab, chromedp.Evaluate(`window.__burst = new Promise((resolve) => setTimeout(() => resolve(Promise.all(
+            Array.from({length: 8}, (_, i) => `+draftsJS+`.put({ id: '`+prefix+`' + i, title: 'x'.repeat(290) }))
+        )), Math.max(0, `+strconv.FormatInt(at, 10)+` - Date.now())))`, nil)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A race is a probability, so run it several times and refuse any
+	// overrun.
+	for round := 0; round < 10; round++ {
+		evalJSON(t, tabA, draftsJS+`.clear()`, nil)
+		at := time.Now().Add(400 * time.Millisecond).UnixMilli()
+		fire(tabA, "a", at)
+		fire(tabB, "b", at)
+		evalJSON(t, tabA, `window.__burst`, nil)
+		evalJSON(t, tabB, `window.__burst`, nil)
+		var n float64
+		evalJSON(t, tabA, draftsJS+`.count()`, &n)
+		if n > 3 {
+			t.Fatalf("round %d: %v records stored in a collection capped at 3: two tabs raced the cap", round, n)
+		}
+		var total float64
+		evalJSON(t, tabA, `window.__gofastr.local.entries('local.e2e.drafts:').then(er => er.entries.reduce((s, e) => s + e.size, 0))`, &total)
+		if total > 1024 {
+			t.Fatalf("round %d: %v bytes stored in a collection capped at 1024", round, total)
+		}
 	}
 }

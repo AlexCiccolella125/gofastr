@@ -147,6 +147,11 @@
     // collection -> Set<fn>, this tab's subscribers.
     const subs = new Map();
     // collection -> Promise, the once-per-page readiness (migration).
+    // Dropped when another tab writes the collection's version entry:
+    // a tab left open across a deploy would otherwise keep answering
+    // from the readiness it cached at load and write old-schema records
+    // into a collection a newer tab has already migrated and stamped,
+    // which nothing would ever migrate again.
     const ready = new Map();
     const collections = Object.create(null);
 
@@ -163,7 +168,7 @@
     P.watch('local.' + app + '.', (k) => {
       const rest = k.slice(('local.' + app + '.').length);
       const colon = rest.indexOf(':');
-      if (colon < 0) return; // a version entry, not a record
+      if (colon < 0) { ready.delete(rest); return; } // a version entry: re-check on the next call
       notify(rest.slice(0, colon), rest.slice(colon + 1), 'tab');
     });
 
@@ -262,17 +267,24 @@
       const maxRecords = spec.maxRecords;
       const maxBytes = spec.maxBytes;
 
-      // Cap enforcement is read-then-write across two transactions:
-      // count what is stored, then add one. Two puts racing each other
-      // both read the same total, both decide they fit and both land,
-      // and the collection ends past the cap it declared — which is the
-      // one thing the cap exists to prevent, and it is the common case
-      // in a page that writes on every keystroke. This collection's
-      // puts queue behind each other; reads stay parallel, and two
-      // collections never wait on one another.
+      // Every write to this collection queues behind the one before
+      // it. Cap enforcement is read-then-write across two transactions,
+      // so two puts racing each other both read the same total, both
+      // decide they fit and both land past the cap; and a put racing a
+      // clear or a delete commits after the enumeration that never saw
+      // it, so the record survives a logout that reported success. One
+      // chain per collection covers all three; reads stay parallel, and
+      // two collections never wait on one another.
+      // Across tabs the chain is a Web Lock on the collection, where the
+      // browser has one (Safari lacks it: there the cap holds per tab).
       let chain = Promise.resolve();
+      const locks = window.navigator && window.navigator.locks;
+      const locked = (fn) => {
+        if (!locks || typeof locks.request !== 'function') return fn();
+        try { return locks.request('gofastr.local.' + app + '.' + coll + '.write', fn); } catch (_) { return fn(); }
+      };
       const serial = (fn) => {
-        const mine = chain.then(fn, fn);
+        const mine = chain.then(() => locked(fn), () => locked(fn));
         chain = mine.then(() => {}, () => {});
         return mine;
       };
@@ -323,12 +335,12 @@
         },
         delete(key) {
           if (!validKey(key)) return Promise.resolve(fail(app, coll, String(key), 'key'));
-          return gate(coll).then((no) => no || P.remove(recordKey(coll, key)).then((r) => {
+          return gate(coll).then((no) => no || serial(() => P.remove(recordKey(coll, key)).then((r) => {
             if (!r.ok) return fail(app, coll, key, r.reason);
             if (spec.mirror) mirror(app, coll, key, '', budget);
             notify(coll, key, 'local');
             return { ok: true, reason: '' };
-          }));
+          })));
         },
         // list resolves [{key, value}] sorted by key, or by opts.orderBy
         // (a top-level field; opts.desc reverses). The array is the
@@ -337,7 +349,10 @@
         // data.
         list(opts) {
           const o = opts && typeof opts === 'object' ? opts : {};
+          // An enumeration that failed is not an empty collection: the
+          // page hears it, the way clear() and put() already say so.
           return gate(coll).then((no) => (no ? [] : P.entries(prefixOf(coll)).then((er) => {
+            if (!er.ok) { fail(app, coll, '', er.reason || 'unavailable'); return []; }
             const out = [];
             for (const e of er.entries) out.push({ key: e.key.slice(prefixOf(coll).length), value: e.value });
             if (typeof o.orderBy === 'string' && o.orderBy !== '') {
@@ -357,7 +372,12 @@
             return out;
           })));
         },
-        count() { return gate(coll).then((no) => (no ? 0 : P.keys(prefixOf(coll)).then((r) => r.keys.length))); },
+        count() {
+          return gate(coll).then((no) => (no ? 0 : P.keys(prefixOf(coll)).then((r) => {
+            if (!r.ok) { fail(app, coll, '', r.reason || 'unavailable'); return 0; }
+            return r.keys.length;
+          })));
+        },
         // subscribe calls fn({app, collection, key, source}) after every
         // write to this collection: source 'local' for this tab's own
         // put/delete (including one a response wrote), 'tab' for another
@@ -376,7 +396,7 @@
         // survived. A removal that failed is the same lie one record
         // deep, so both are checked.
         clear() {
-          return gate(coll).then((no) => no || P.keys(prefixOf(coll)).then((r) => {
+          return gate(coll).then((no) => no || serial(() => P.keys(prefixOf(coll)).then((r) => {
             if (!r.ok) return fail(app, coll, '', r.reason || 'unavailable');
             const ks = r.keys;
             return Promise.all(ks.map((k) => P.remove(k))).then((rs) => {
@@ -390,7 +410,7 @@
               if (bad) return fail(app, coll, '', bad);
               return { ok: true, reason: '' };
             });
-          }));
+          })));
         },
       };
       return api;

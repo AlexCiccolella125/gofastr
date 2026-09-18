@@ -102,17 +102,19 @@ func appendOp(w http.ResponseWriter, s *Store, op responseOp) error {
 }
 
 // asciiJSON rewrites every non-ASCII rune of valid JSON as a \u escape
-// (a surrogate pair above the BMP). JSON structure is ASCII, so the
-// runes only occur inside strings, where the escape is legal; the
-// result is a header-safe byte string with no control bytes either,
-// since encoding/json already escaped those.
+// (a surrogate pair above the BMP), and DEL (0x7F) with it: JSON
+// structure is ASCII, so the runes only occur inside strings, where the
+// escape is legal. encoding/json escapes the C0 bytes but not DEL, and
+// a raw DEL in a header value breaks the connection on HTTP/1 and makes
+// the HTTP/2 writer drop the whole header, every op with it. The same
+// gap toast.go closes for its header. The result is printable ASCII.
 func asciiJSON(b []byte) string {
 	var sb strings.Builder
 	sb.Grow(len(b))
 	for i := 0; i < len(b); {
 		r, size := utf8.DecodeRune(b[i:])
 		i += size
-		if r < utf8.RuneSelf {
+		if r < utf8.RuneSelf && r != 0x7F {
 			sb.WriteByte(byte(r))
 			continue
 		}

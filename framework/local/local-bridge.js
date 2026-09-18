@@ -40,6 +40,13 @@
     try { text = JSON.stringify(value); } catch (_) { return null; }
     return typeof text === 'string' ? text : null;
   };
+  // The bound on the trigger is bytes, the unit the server's
+  // MaxBytesReader counts; String.length is UTF-16 units, and
+  // JSON.stringify leaves non-ASCII unescaped, so a CJK draft is up to
+  // three times longer on the wire than in units.
+  const bytesOf = (text) => {
+    try { return new TextEncoder().encode(text).length; } catch (_) { return text.length; }
+  };
 
   const MARKER = '[data-local-seed]';
 
@@ -69,11 +76,11 @@
     try { return ('; ' + document.cookie).indexOf('; ' + name + '=') >= 0; } catch (_) { return false; }
   };
 
-  // mirrorUsed is what this store's OTHER mirror cookies already cost
-  // the Cookie header, which is the number the budget is about: a
-  // record costs more encoded than stored, and a header block past the
-  // 8-16 KiB most proxies allow is a 431 the user can only clear by
-  // hand.
+  // mirrorUsed is what the origin's OTHER mirror cookies already cost
+  // the Cookie header, every store's, which is the number the budget is
+  // about: the header is per origin, a record costs more encoded than
+  // stored, and a header block past the 8-16 KiB most proxies allow is
+  // a 431 the user can only clear by hand.
   const mirrorUsed = (app, seg) => {
     let all = '';
     try { all = document.cookie; } catch (_) { return 0; }
@@ -82,7 +89,7 @@
       const eq = part.indexOf('=');
       if (eq < 0) continue;
       const nm = part.slice(0, eq);
-      if (nm.indexOf('gofastr.local.' + app + '.') !== 0 || nm === 'gofastr.local.' + seg) continue;
+      if (nm.indexOf('gofastr.local.') !== 0 || nm === 'gofastr.local.' + seg) continue;
       used += part.length + 2;
     }
     return used;
@@ -189,6 +196,12 @@
     const c = store.collection(coll);
     if (!c || !validKey(key)) return;
     let entry = seeds.get(name);
+    // One signal, one record. A second element binding the same signal
+    // to another record would read one and write back to the other.
+    if (entry && entry.spec !== spec) {
+      console.warn('[gofastr] local seed: signal', name, 'is already seeded from', entry.spec, '- ignoring', spec);
+      return;
+    }
     const apply = (value) => {
       if (value === undefined) return;
       entry.last = encode(value);
@@ -205,7 +218,7 @@
       // It sat AFTER seeds.set, so the one path that could reach it
       // left a half-wired entry behind; it no longer can.
       if (name === '__proto__' || name === 'constructor' || name === 'prototype') return;
-      entry = { echoing: false, last: null };
+      entry = { echoing: false, last: null, spec: spec };
       seeds.set(name, entry);
       // Own-property read, computed.js's idiom: a name like
       // "constructor" resolves through the prototype chain otherwise.
@@ -224,8 +237,16 @@
     // On EVERY scan, including the one after a client navigation
     // whose DOM came back from the route cache: the record is what
     // this browser holds, so it wins over whatever the cached markup
-    // painted. A restore never writes back (echoing).
-    c.get(key).then(apply);
+    // painted. A restore never writes back (echoing). Unless the signal
+    // moved while the read was in flight: then the user's value is the
+    // newer one, it has already been written back, and the read is
+    // stale.
+    const current = () => (own(NS._signals, name) && NS._signals[name] ? encode(NS._signals[name].value) : null);
+    const before = current();
+    c.get(key).then((value) => {
+      if (current() !== before) return;
+      apply(value);
+    });
   };
 
   // ─── the upload bridge: a request hook on data-fui-rpc ──────────
@@ -294,8 +315,9 @@
     const max = parseInt(node.getAttribute('data-local-max'), 10);
     return gather(store, sendSpec).then((payload) => {
       const text = JSON.stringify(payload);
-      if (max > 0 && text.length > max) {
-        refuse(req, app, 'size', text.length, max);
+      const size = bytesOf(text);
+      if (max > 0 && size > max) {
+        refuse(req, app, 'size', size, max);
         return;
       }
       if (req.isFormData && req.body && typeof req.body.append === 'function') {

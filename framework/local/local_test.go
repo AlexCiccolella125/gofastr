@@ -441,7 +441,11 @@ func TestPutDeleteClearAccumulateOneASCIIHeader(t *testing.T) {
 	s := fresh(t, "site")
 	d := Define[draft](s, "drafts", CollectionConfig{Version: 1, MaxRecordBytes: 64})
 	rec := httptest.NewRecorder()
-	if err := Put(rec, d, "current", draft{ID: "current", Title: "héllo 🙂"}); err != nil {
+	// Above the BMP, above 0x7F, DEL, and a C0 byte: every one of them
+	// has to leave the header as an escape. encoding/json escapes the C0
+	// range and leaves DEL alone, and a raw DEL drops the whole header
+	// under HTTP/2.
+	if err := Put(rec, d, "current", draft{ID: "current", Title: "héllo 🙂 a\x7fb\x01c"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := Delete(rec, d, "old"); err != nil {
@@ -464,7 +468,7 @@ func TestPutDeleteClearAccumulateOneASCIIHeader(t *testing.T) {
 		t.Fatalf("ops = %+v", msg.Ops)
 	}
 	var v draft
-	if err := json.Unmarshal(msg.Ops[0].V, &v); err != nil || v.Title != "héllo 🙂" {
+	if err := json.Unmarshal(msg.Ops[0].V, &v); err != nil || v.Title != "héllo 🙂 a\x7fb\x01c" {
 		t.Fatalf("the escaped value must decode back to the rune: %+v %v", v, err)
 	}
 	if err := Put(rec, d, "", draft{}); err == nil || !strings.Contains(err.Error(), "invalid key") {
