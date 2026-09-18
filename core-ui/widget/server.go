@@ -170,16 +170,11 @@ func serveRuntimeModule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-	// Only a URL that CARRIES the content hash is content-addressed, so
-	// only that one earns the year-long immutable cache. The loader
-	// falls back to an un-versioned URL for a module the manifest does
-	// not carry (an export without the manifest block, a behaviour
-	// registered after a host cached its manifest), and answering that
-	// request "immutable" freezes the module in every browser that
-	// asked for it: the URL cannot bust, so the next deploy never
-	// reaches them and the only cure is the user clearing their cache.
-	// A mismatched or missing ?v= revalidates instead — the policy
-	// every other /__gofastr script follows.
+	// Only a request that carries the content hash earns the year-long
+	// immutable cache. A mismatched or missing ?v= revalidates, the
+	// policy every other /__gofastr script follows: freezing a module
+	// under a URL that cannot bust means the next deploy never reaches
+	// that browser.
 	if r.URL.Query().Get("v") == runtime.ModuleHash(name) {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	} else {
@@ -192,11 +187,9 @@ const computeWorkerCSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eva
 
 // ServeComputeAsset serves registered workers and WebAssembly modules
 // from /__gofastr/compute/<name>.js|wasm. Only a request whose ?v= is
-// the asset's content hash earns the year-long immutable header: the
-// compute manifest is an inline block in the document, so a tab left
-// open across a deploy asks for the old hash, and answering that with
-// the new bytes marked immutable pins an old URL to a new body for a
-// year. Same rule as serveRuntimeModule above.
+// the asset's hash caches immutably: the compute manifest is inline in
+// the document, so a tab open across a deploy asks for the old hash and
+// must not pin the new bytes under it. Same rule as serveRuntimeModule.
 func ServeComputeAsset(w http.ResponseWriter, r *http.Request) {
 	const prefix = "/__gofastr/compute/"
 	path := r.URL.Path
