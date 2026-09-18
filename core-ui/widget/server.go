@@ -190,8 +190,13 @@ func serveRuntimeModule(w http.ResponseWriter, r *http.Request) {
 
 const computeWorkerCSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'"
 
-// ServeComputeAsset serves registered workers and WebAssembly modules from
-// /__gofastr/compute/<name>.js|wasm under immutable cache headers.
+// ServeComputeAsset serves registered workers and WebAssembly modules
+// from /__gofastr/compute/<name>.js|wasm. Only a request whose ?v= is
+// the asset's content hash earns the year-long immutable header: the
+// compute manifest is an inline block in the document, so a tab left
+// open across a deploy asks for the old hash, and answering that with
+// the new bytes marked immutable pins an old URL to a new body for a
+// year. Same rule as serveRuntimeModule above.
 func ServeComputeAsset(w http.ResponseWriter, r *http.Request) {
 	const prefix = "/__gofastr/compute/"
 	path := r.URL.Path
@@ -227,7 +232,11 @@ func ServeComputeAsset(w http.ResponseWriter, r *http.Request) {
 		// Permit WebAssembly compilation without enabling JavaScript eval.
 		w.Header().Set("Content-Security-Policy", computeWorkerCSP)
 	}
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	if r.URL.Query().Get("v") == asset.Hash() {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
 	_, _ = asset.WriteTo(w)
 }
 
