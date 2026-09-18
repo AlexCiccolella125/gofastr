@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -190,4 +193,58 @@ func toString(v any) string {
 		return e.Error()
 	}
 	return ""
+}
+
+// Every reason persist.js can put on gofastr:persist-overflow is one the
+// docs enumerate. The module grew a fifth value (untrusted) while the
+// three documents still listed four, so the list is read from the source
+// and checked against each document's enumeration rather than
+// remembered. The enumeration is parsed, not searched: a reason named
+// in prose beside the list does not count as listed.
+func TestPersistOverflowReasonsAreDocumented(t *testing.T) {
+	reasons := regexp.MustCompile(`notify\(name, '([a-z]+)'`).FindAllStringSubmatch(persistJS, -1)
+	if len(reasons) < 2 {
+		t.Fatalf("persist.js spells %d literal reasons: the scan is broken, not the module clean", len(reasons))
+	}
+	// The primitive's own reasons pass through r.reason; they are the
+	// set local.js documents on set().
+	names := map[string]bool{"quota": true, "encode": true, "unavailable": true}
+	for _, m := range reasons {
+		names[m[1]] = true
+	}
+	// The two spellings the docs use: the attribute table's
+	// reason: "a"|"b" and the guide's `reason` one of `a`, `b`.
+	enums := []*regexp.Regexp{
+		regexp.MustCompile(`reason: ((?:"[a-z]+"\|?)+)`),
+		regexp.MustCompile("`reason` one of ((?:`[a-z]+`,?\\s*)+)"),
+	}
+	word := regexp.MustCompile(`[a-z]+`)
+	docs := []string{
+		filepath.Join("..", "..", "framework", "docs", "content", "runtime-contract.md"),
+		filepath.Join("..", "..", "framework", "docs", "content", "signal-store.md"),
+		filepath.Join("..", "ARCHITECTURE.md"),
+	}
+	for _, p := range docs {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		listed := map[string]bool{}
+		for _, re := range enums {
+			for _, m := range re.FindAllStringSubmatch(string(raw), -1) {
+				for _, w := range word.FindAllString(m[1], -1) {
+					listed[w] = true
+				}
+			}
+		}
+		if len(listed) == 0 {
+			t.Errorf("%s: no persist-overflow reason enumeration found", p)
+			continue
+		}
+		for name := range names {
+			if !listed[name] {
+				t.Errorf("%s does not list the persist-overflow reason %q (lists %v)", p, name, listed)
+			}
+		}
+	}
 }

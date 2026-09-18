@@ -398,3 +398,123 @@ func TestPersistedSliceDoesNotLaunderAnUntrustedValue(t *testing.T) {
 		t.Fatal("the restored value became live markup: persistence laundered the untrusted flag")
 	}
 }
+
+// The cap is in bytes, and the bytes are UTF-8: PersistMax's doc, the
+// attribute table and the primitive's entries() all say so. The module
+// used to compare text.length, which counts UTF-16 units, so a CJK
+// value three times its unit count in bytes passed a cap it was over.
+// The value here is 30 CJK characters: 32 UTF-16 units of JSON text,
+// under a 64-byte cap, and 92 UTF-8 bytes, over it.
+func TestPersistedSliceCountsItsCapInUTF8Bytes(t *testing.T) {
+	sl, html := bindPersisted(t, "e2epersistutf8", "draft", "", 64)
+	srv := startPersistServer(t, html)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(90*time.Second))
+	name := sl.Name()
+
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(srv.URL+"/"),
+		chromedp.WaitVisible(`#ready`, chromedp.ByID),
+	); err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if !persistPollTrue(ctx, persistLoadedExpr) {
+		t.Fatal("the signal-persist module never loaded")
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+        window.__persistOverflow = [];
+        window.addEventListener('gofastr:persist-overflow', (e) => window.__persistOverflow.push(e.detail));
+    })()`, nil)); err != nil {
+		t.Fatal(err)
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(fmt.Sprintf(`window.__gofastr.setSignal(%q, 'fits')`, name), nil)); err != nil {
+		t.Fatal(err)
+	}
+	if !persistPollTrue(ctx, storedExpr(name)+` .then((s) => s === '"fits"')`) {
+		t.Fatal("the value that fits never reached the browser store")
+	}
+	const cjk = "漢字" // two CJK characters, 6 UTF-8 bytes, 2 UTF-16 units
+	value := strings.Repeat(cjk, 15)
+	if n := len(value) + 2; n != 92 {
+		t.Fatalf("fixture: JSON text is %d UTF-8 bytes, want 92", n)
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(fmt.Sprintf(`window.__gofastr.setSignal(%q, %q)`, name, value), nil)); err != nil {
+		t.Fatal(err)
+	}
+	if !persistPollTrue(ctx, `Promise.resolve(window.__persistOverflow.length > 0)`) {
+		t.Fatal("a value over its cap in bytes raised no gofastr:persist-overflow: the cap was measured in UTF-16 units")
+	}
+	var detail map[string]any
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__persistOverflow[0]`, &detail)); err != nil {
+		t.Fatal(err)
+	}
+	if reason, _ := detail["reason"].(string); reason != "size" {
+		t.Fatalf("reason = %q, want \"size\"", reason)
+	}
+	if size, _ := detail["size"].(float64); int(size) != 92 {
+		t.Fatalf("size = %v, want 92 UTF-8 bytes (the UTF-16 count is 32)", detail["size"])
+	}
+	var stored string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(storedExpr(name), &stored, awaitPromise)); err != nil {
+		t.Fatal(err)
+	}
+	if stored != `"fits"` {
+		t.Fatalf("stored = %q, want the last value that fit", stored)
+	}
+}
+
+// A setSignal that lands while the restore's read is still in flight is
+// newer than anything the store holds. The restore used to apply
+// whatever came back, so a keystroke in the first few hundred
+// milliseconds was overwritten by the previous session's value. The
+// page is served without the binding so the read can be slowed before
+// the module wires it: the primitive is loaded, its get() delayed, and
+// only then is the binding inserted and the behaviour loaded.
+func TestPersistedSliceRestoreDoesNotOverwriteANewerValue(t *testing.T) {
+	sl, html := bindPersisted(t, "e2epersistrace", "draft", "server-default", 4096)
+	srv := startPersistServer(t, `<div id="host"></div>`)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(90*time.Second))
+	name := sl.Name()
+
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(srv.URL+"/"),
+		chromedp.WaitVisible(`#ready`, chromedp.ByID),
+		chromedp.Evaluate(`window.__gofastr.loadModule('local')`, nil, awaitPromise),
+		chromedp.Evaluate(fmt.Sprintf(`window.__gofastr.local.set(%q, 'stale-from-store').then((r) => r.ok)`, name), nil, awaitPromise),
+	); err != nil {
+		t.Fatalf("seeding the store: %v", err)
+	}
+	// Slow the read, insert the binding, load the behaviour (which wires
+	// the binding and requests the restore), then type at +100ms.
+	if err := chromedp.Run(ctx, chromedp.Evaluate(fmt.Sprintf(`(() => {
+        const local = window.__gofastr.local;
+        const real = local.get;
+        // Read now, resolve late: the value in flight is the one the
+        // store held when the restore was requested.
+        local.get = (k) => real.call(local, k).then((v) => new Promise((resolve) => setTimeout(() => resolve(v), 500)));
+        document.getElementById('host').innerHTML = %q;
+        return window.__gofastr.loadModule('signal-persist').then(() => {
+          setTimeout(() => window.__gofastr.setSignal(%q, 'typed-while-reading'), 100);
+        });
+    })()`, html, name), nil, awaitPromise)); err != nil {
+		t.Fatal(err)
+	}
+	if !persistPollTrue(ctx, persistLoadedExpr) {
+		t.Fatal("the signal-persist module never loaded")
+	}
+	// Past the delayed read, with margin.
+	time.Sleep(1200 * time.Millisecond)
+	var sig string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(fmt.Sprintf(`String(window.__gofastr.getSignal(%q))`, name), &sig)); err != nil {
+		t.Fatal(err)
+	}
+	if sig != "typed-while-reading" {
+		t.Fatalf("getSignal = %q: the restore overwrote a value set while its read was in flight", sig)
+	}
+	var stored string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(storedExpr(name), &stored, awaitPromise)); err != nil {
+		t.Fatal(err)
+	}
+	if stored != `"typed-while-reading"` {
+		t.Fatalf("stored = %q, want the typed value", stored)
+	}
+}

@@ -313,8 +313,12 @@
         try {
           // Guard spelled at the sink (see get above).
           window.localStorage.setItem(PREFIX + encodeURIComponent(key), text);
-        } catch (_) {
-          return { ok: false, reason: 'quota' };
+        } catch (err) {
+          // Only a quota error is 'quota'. A SecurityError (storage
+          // blocked for the origin) is the engine being gone, which is
+          // 'unavailable', the same answer a blocked IndexedDB gives.
+          const n = (err && err.name) || '';
+          return { ok: false, reason: n === 'QuotaExceededError' || n === 'NS_ERROR_DOM_QUOTA_REACHED' ? 'quota' : 'unavailable' };
         }
         // No announce: a localStorage write already reaches the other
         // tabs of this origin through the native storage event, which
@@ -334,15 +338,20 @@
       if (typeof key !== 'string' || key === '') return Promise.resolve({ ok: false, reason: 'unavailable' });
       return openDB().then((db) => {
         let lsOK = true;
+        // held: the fallback had the key, so its removal fires the
+        // native storage event in the other tabs and set()'s rule
+        // applies: announcing as well would deliver the change twice.
+        let held = false;
         try {
           // Guard spelled at the sink (see get above).
+          held = window.localStorage.getItem(PREFIX + encodeURIComponent(key)) !== null;
           window.localStorage.removeItem(PREFIX + encodeURIComponent(key));
         } catch (_) {
           lsOK = false;
         }
         if (db) {
           return idbRun('readwrite', (s) => s.delete(PREFIX + encodeURIComponent(key))).then((r) => {
-            if (r.ok) announce(key);
+            if (r.ok && !held) announce(key);
             return { ok: r.ok, reason: r.ok ? '' : r.reason };
           });
         }

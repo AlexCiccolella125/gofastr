@@ -126,8 +126,12 @@ reference it.
   cleared store are all normal. A read that fails leaves the server's
   value in place; a write that fails raises `gofastr:persist-overflow`
   on `window` (`{name, reason, size, max}`, `reason` one of `size`,
-  `quota`, `encode`, `unavailable`) and changes nothing else. **Never
-  persist something whose loss is a bug.**
+  `quota`, `encode`, `unavailable`, `untrusted`) and changes nothing
+  else. `untrusted` means the signal held a value the runtime marked as
+  not page-authored (a `?query` seed, for instance), which the store
+  never keeps. `size` is counted in UTF-8 bytes of the JSON text, the
+  unit `PersistMax` is declared in. **Never persist something whose loss
+  is a bug.**
 - **Namespaced.** Storage is the runtime's `local` primitive
   (IndexedDB, with a tiny-value `localStorage` fallback), keyed
   `gofastr.state.` + the component-encoded slice name — and the slice

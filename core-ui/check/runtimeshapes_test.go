@@ -1966,6 +1966,51 @@ func TestStorageKeyRawFiresOnForeignNamespace(t *testing.T) {
 	}
 }
 
+// storageParamKeyFixture is the no-namespace arm on a key the provenance
+// walk cannot see: a function PARAMETER, encoded, with no literal beside
+// it. Before the namespace arm the finding needed data-fui provenance on
+// the encoded value, so this shape was silent; after it, an encoded
+// operand of any provenance with no literal is a key with a dynamic
+// segment and no namespace, and it says so.
+const storageParamKeyFixture = `function storeDraft(param, v) {
+  localStorage.setItem(encodeURIComponent(param), v);
+}
+window.__probe = { storeDraft: storeDraft };
+`
+
+// TestStorageKeyRawFiresOnUnnamedParamKey pins that the no-namespace
+// arm reads any encoded operand, not only an attribute-borne one, and
+// that the finding is the no-namespace one: with the arm narrowed back
+// to attribute provenance the site still fires, but through the
+// foreign-namespace arm with a message that asks for a different fix.
+func TestStorageKeyRawFiresOnUnnamedParamKey(t *testing.T) {
+	dir := writeRuntimeFixture(t, "paramkey.js", storageParamKeyFixture)
+	res, err := LintStorageKeyRaw(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Violations) != 1 {
+		t.Fatalf("expected 1 finding on storeDraft, got %d:\n%s", len(res.Violations), res.Error())
+	}
+	msg := res.Violations[0].Message
+	if !strings.Contains(msg, `"param"`) {
+		t.Errorf("the finding must name the encoded operand: %s", msg)
+	}
+	if !strings.Contains(msg, "names no namespace") {
+		t.Errorf("a parameter-rooted key with no literal is the no-namespace shape, not the foreign-namespace one: %s", msg)
+	}
+	// Mutation: lead the key with the framework's namespace and the
+	// finding is gone.
+	fixed := strings.Replace(storageParamKeyFixture, "encodeURIComponent(param)", "'gofastr.draft.' + encodeURIComponent(param)", 1)
+	fres, err := LintStorageKeyRaw(writeRuntimeFixture(t, "paramkey.js", fixed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fres.HasErrors() {
+		t.Errorf("the namespaced spelling must be accepted:\n%s", fres.Error())
+	}
+}
+
 // Dropping the ENCODING while keeping the namespace is deliberately not
 // one of the mutations below: the key is a parameter there, and the raw
 // arm's documented posture is that provenance stops at the seam

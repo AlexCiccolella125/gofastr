@@ -602,3 +602,88 @@ func TestLocalFallbackDeliversAWriteOnce(t *testing.T) {
 		t.Fatalf("tab A heard %v — one fallback write must deliver once, not once per transport", heard)
 	}
 }
+
+// remove() drops the key from both engines, and when the fallback held
+// it the native storage event already carries the removal to the other
+// tabs. Announcing on BroadcastChannel as well delivered the one remove
+// twice, the same shape set() had already fixed for writes. Tab B holds
+// the key in IndexedDB and in localStorage; tab A hears the remove once.
+func TestLocalRemoveDeliversOnceWhenBothEnginesHeldTheKey(t *testing.T) {
+	srv := startLocalServer(t, "")
+	tabA := chromedptest.Context(t, chromedptest.Timeout(90*time.Second))
+	openLocal(t, tabA, srv.URL+"/")
+	// Open tab A's database now, so adoption runs before the fallback
+	// entry is planted and cannot move it.
+	if err := chromedp.Run(tabA, chromedp.Evaluate(`window.__gofastr.local.available()`, nil, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+
+	tabB, cancelB := chromedp.NewContext(tabA)
+	t.Cleanup(cancelB)
+	openLocal(t, tabB, srv.URL+"/")
+	if err := chromedp.Run(tabB,
+		chromedp.Evaluate(`window.__gofastr.local.set('both', 'x').then((r) => r.ok)`, nil, awaitLocalPromise),
+		chromedp.Evaluate(`localStorage.setItem('gofastr.state.' + encodeURIComponent('both'), '"x"')`, nil),
+	); err != nil {
+		t.Fatal(err)
+	}
+	// The plant fired a storage event in tab A; let it settle before
+	// counting anything.
+	time.Sleep(300 * time.Millisecond)
+	if err := chromedp.Run(tabA, chromedp.Evaluate(`(() => {
+        window.__heard = [];
+        window.__gofastr.local.subscribe('both', (v) => window.__heard.push(v === undefined ? 'gone' : String(v)));
+    })()`, nil)); err != nil {
+		t.Fatal(err)
+	}
+
+	var res map[string]any
+	if err := chromedp.Run(tabB, chromedp.Evaluate(`window.__gofastr.local.remove('both')`, &res, awaitLocalPromise)); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := res["ok"].(bool); !ok {
+		t.Fatalf("remove() = %v, want ok", res)
+	}
+	if !localPollTrue(tabA, `Promise.resolve(window.__heard.length >= 1)`) {
+		t.Fatal("tab A never heard the sibling tab's remove")
+	}
+	time.Sleep(500 * time.Millisecond)
+	var heard []string
+	if err := chromedp.Run(tabA, chromedp.Evaluate(`window.__heard`, &heard)); err != nil {
+		t.Fatal(err)
+	}
+	if len(heard) != 1 {
+		t.Fatalf("tab A heard %v: one remove must deliver once, not once per transport", heard)
+	}
+}
+
+// On the fallback engine every throw from setItem used to be 'quota'. A
+// SecurityError (the origin's storage is blocked) is the engine being
+// gone, and a caller that reads 'quota' would tell the user to free
+// room that does not exist. Only a quota error is 'quota'.
+func TestLocalFallbackNamesABlockedStoreUnavailable(t *testing.T) {
+	srv := startLocalServer(t, noIDB)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(90*time.Second))
+	openLocal(t, ctx, srv.URL+"/")
+
+	for _, tc := range []struct{ thrown, want string }{
+		{"SecurityError", "unavailable"},
+		{"QuotaExceededError", "quota"},
+		{"NS_ERROR_DOM_QUOTA_REACHED", "quota"},
+	} {
+		var res map[string]any
+		if err := chromedp.Run(ctx, chromedp.Evaluate(fmt.Sprintf(`(() => {
+            const real = Storage.prototype.setItem;
+            Storage.prototype.setItem = function () { throw new DOMException('blocked', %q); };
+            return window.__gofastr.local.set('pref', 'dark').finally(() => { Storage.prototype.setItem = real; });
+        })()`, tc.thrown), &res, awaitLocalPromise)); err != nil {
+			t.Fatal(err)
+		}
+		if ok, _ := res["ok"].(bool); ok {
+			t.Fatalf("%s: set() reported ok while setItem threw", tc.thrown)
+		}
+		if reason, _ := res["reason"].(string); reason != tc.want {
+			t.Errorf("setItem threw %s: reason = %q, want %q", tc.thrown, reason, tc.want)
+		}
+	}
+}

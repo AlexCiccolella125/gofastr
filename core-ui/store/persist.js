@@ -46,6 +46,14 @@
   // point of a size-bounded, best-effort store is that the app can say
   // so — "you have run out of room" is a product decision, not a
   // framework one.
+  // bytesOf is the UTF-8 length of the JSON text, the unit PersistMax
+  // is declared in and the unit the local primitive's entries() reports.
+  // text.length counts UTF-16 units, so a CJK value would pass the cap
+  // at a third of its stored size.
+  const bytesOf = (text) => {
+    try { return new TextEncoder().encode(text).length; } catch (_) { return text.length; }
+  };
+
   const notify = (name, reason, size, max) => {
     try {
       window.dispatchEvent(new CustomEvent('gofastr:persist-overflow', {
@@ -77,13 +85,14 @@
     if (text === entry.last) return;      // idempotent: no write amplification
     // The cap is this slice's, declared in Go and carried on the
     // marker; the primitive has its own engine limits underneath.
-    if (text.length > entry.max) {
-      notify(name, 'size', text.length, entry.max);
+    const size = bytesOf(text);
+    if (size > entry.max) {
+      notify(name, 'size', size, entry.max);
       return;
     }
     NS.local.set(name, value).then((r) => {
       if (r.ok) { entry.last = text; return; }
-      notify(name, r.reason, text.length, entry.max);
+      notify(name, r.reason, size, entry.max);
     });
   };
 
@@ -116,8 +125,16 @@
     // Seed from the browser. SSR painted the server's value; this is
     // the one this browser last held, so it wins. Asynchronous by
     // construction — IndexedDB is — so the server's value is what
-    // first paint shows.
-    NS.local.get(name).then(apply);
+    // first paint shows. It wins over the SEED only: a setSignal that
+    // lands while the read is in flight is newer than anything the
+    // store holds, so the restore applies only while the signal still
+    // holds what it held when the read was requested.
+    const current = () => (Object.prototype.hasOwnProperty.call(NS._signals, name) && NS._signals[name] ? NS._signals[name].value : undefined);
+    const seed = current();
+    NS.local.get(name).then((value) => {
+      if (current() !== seed) return;
+      apply(value);
+    });
     // And keep agreeing with the other tabs of this origin.
     NS.local.subscribe(name, apply);
 
