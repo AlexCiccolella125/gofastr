@@ -163,6 +163,9 @@ func setupServer() *framework.App {
 	// with WithPublicLLMMD above), lights up the scanner's Markdown check.
 	markdownNeg := true
 
+	// framework/local: the manifest's URL for the rail now, the route
+	// mounted once the app's router exists.
+	siteLocalURL, mountSiteLocal := siteLocal.Script()
 	host := uihost.New(site,
 		uihost.WithCustomCSS(createStyleSheet(t)),
 		uihost.WithNotFoundScreen(&NotFoundScreen{}),
@@ -213,7 +216,7 @@ func setupServer() *framework.App {
 		// mirrors dashStatusLabel in screen_livedash.go.
 		// framework/local: the store's manifest and the draft-notes page
 		// script ride the same rail, after runtime.js.
-		uihost.WithExtraScripts("/__site/livedash-reducers.js", siteLocal.ScriptURL(), localNotesScriptPath),
+		uihost.WithExtraScripts("/__site/livedash-reducers.js", siteLocalURL, localNotesScriptPath),
 	)
 
 	// ── Presence demo wiring (additive) ────────────────────────────
@@ -646,7 +649,7 @@ func setupServer() *framework.App {
 
 	// Draft notes (framework/local demo): the store manifest, the page
 	// script, and the upload endpoint wrapped by the upload bridge.
-	fwApp.Router().Get(siteLocal.ScriptPath(), siteLocal.ScriptHandler())
+	mountSiteLocal(fwApp.Router())
 	fwApp.Router().Get(localNotesScriptPath, http.HandlerFunc(serveLocalNotesJS))
 	fwApp.Router().Post(localNotesUploadPath, notesUploadSend.HandlerFunc(localNotesUpload))
 

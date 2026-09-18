@@ -8,16 +8,15 @@
 // call best-effort), which this file's registration Requires. What
 // this file adds is what a store needs and a key-value primitive must
 // not carry: named collections with a schema version and migrations,
-// a size cap per record and per collection, a key field, a filtered
+// a size cap per record and per collection, a key field, an ordered
 // list, and a change feed that includes this tab's own writes. The
-// three bridges to Go screens — a signal seeded from a record, an
-// upload declared per request, and records written from a response —
-// are local-bridge.js, a second module that Requires this one: two
-// files because the per-module byte budget holds every registered
-// behaviour, and a page that only reads records never pays for the
-// bridges.
+// bridges to Go screens — a signal seeded from a record, a mirror
+// cookie, an upload declared per request, and records written from a
+// response — are local-bridge.js, which Requires this one; the version
+// steps are local-migrate.js, loaded at idle. A page that only reads
+// records pays for neither.
 //
-// The declaration arrives from Go, not from the DOM: Store.ScriptJS
+// The declaration arrives from Go, not from the DOM: Store.Script
 // serves `window.__gofastr_local[<app>]` on the host's extra-script
 // rail (uihost.WithExtraScripts), the same rail computed reducers use,
 // so a marker planted in an island response cannot redefine a
@@ -280,9 +279,6 @@
 
       const api = {
         name: coll,
-        // available resolves what the engine underneath offers, after
-        // the collection's migration settled.
-        available() { return gate(coll).then((no) => no || P.available()); },
         // get resolves undefined on a gated collection, like a missing
         // key; the refusal itself rides gofastr:local-error.
         get(key) {
@@ -335,20 +331,15 @@
           }));
         },
         // list resolves [{key, value}] sorted by key, or by opts.orderBy
-        // (a top-level field; opts.desc reverses), after opts.where
-        // (equality on top-level fields, all of them), with opts.offset
-        // and opts.limit applied last. Filters run here, over one
-        // collection this browser owns; nothing is re-implemented that
-        // the server does for server data.
+        // (a top-level field; opts.desc reverses). The array is the
+        // page's to filter and slice: one collection this browser owns,
+        // and nothing re-implemented that the server does for server
+        // data.
         list(opts) {
           const o = opts && typeof opts === 'object' ? opts : {};
           return gate(coll).then((no) => (no ? [] : P.entries(prefixOf(coll)).then((er) => {
-            const entries = er.entries;
-            let out = [];
-            for (const e of entries) {
-              if (isObject(o.where) && !Object.keys(o.where).every((f) => isObject(e.value) && e.value[f] === o.where[f])) continue;
-              out.push({ key: e.key.slice(prefixOf(coll).length), value: e.value });
-            }
+            const out = [];
+            for (const e of er.entries) out.push({ key: e.key.slice(prefixOf(coll).length), value: e.value });
             if (typeof o.orderBy === 'string' && o.orderBy !== '') {
               const pick = (r) => (isObject(r.value) ? r.value[o.orderBy] : undefined);
               // Entries arrive sorted by key, and the sort is stable, so
@@ -363,9 +354,6 @@
               });
             }
             if (o.desc) out.reverse();
-            const off = o.offset > 0 ? o.offset : 0;
-            const lim = o.limit > 0 ? o.limit : out.length;
-            if (off || lim < out.length) out = out.slice(off, off + lim);
             return out;
           })));
         },
@@ -416,16 +404,16 @@
     const store = {
       app,
       collections,
-      // The validators local-bridge needs, on the object it already
-      // fetches. They were an undocumented global bag, __gofastr
-      // ._localHelpers, which is a second public surface nothing
-      // documents and anything on the origin can replace — and
-      // replacing validKey is how a key escapes the namespace.
-      helpers: { validKey, encode, isObject },
+      // The one validator local-bridge needs, on the object it already
+      // fetches: a byte length and a reserved-name set that must agree
+      // with the Go side. It was an undocumented global bag, __gofastr
+      // ._localHelpers, a second public surface anything on the origin
+      // could replace — and replacing validKey is how a key escapes the
+      // namespace.
+      helpers: { validKey },
       collection(name) {
         return typeof name === 'string' && own(collections, name) ? collections[name] : null;
       },
-      available() { return P.available(); },
       // clear drops every record of every collection: logout. It
       // reports the first collection that could not be cleared, because
       // "the previous user's records are gone" is the only thing a

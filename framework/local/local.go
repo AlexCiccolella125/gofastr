@@ -5,11 +5,12 @@
 // Collection[T] is a Go type with a JSON round-trip, an optional key
 // field, a size cap per record and per collection, and a schema
 // version with migrations the browser runs once. The browser API is
-// generated from that declaration and served by the runtime as two
-// composed modules beside this file: "local-store" (the store, caps,
-// migrations, mirror) and "local-bridge" (the seed, upload and
-// download bridges; Requires the first). Both keep every record in
-// the kernel's `local` primitive
+// generated from that declaration and served by the runtime as three
+// modules beside this file: "local-store" (the store and its caps),
+// "local-bridge" (the seed, the mirror cookie, the upload and the
+// download; Requires the first) and "local-migrate" (the version
+// steps, loaded at idle). All three keep every record in the kernel's
+// `local` primitive
 // (core-ui/runtime/src/local.js: IndexedDB, with a tiny-value
 // localStorage fallback). No dependency was added: both engines are
 // browser APIs.
@@ -28,7 +29,7 @@
 //   - Upload: Send declares which collections or keys accompany an RPC
 //     trigger's request as the reserved field __local, and Upload.Wrap
 //     reads them on the server into the request context for
-//     Get/List/FromContext. Nothing undeclared is ever uploaded; an
+//     Get and List. Nothing undeclared is ever uploaded; an
 //     undeclared collection in the field is refused.
 //   - Download: Put, Delete and Clear on an RPC response write records
 //     into the browser through the X-Gofastr-Local header, so a
@@ -51,7 +52,6 @@ package local
 import (
 	"fmt"
 	"regexp"
-	"sort"
 	"sync"
 )
 
@@ -73,8 +73,9 @@ const KeyMaxLen = 256
 // most KeyMaxLen bytes, and not a name the browser's object model
 // reserves. Mirrors validKey in local-store.js, which counts the same
 // UTF-8 bytes. Unexported: Collection.Key panics with the reason, Put
-// and Delete return ErrBadKey, and the browser refuses with reason
-// 'key' — nothing a caller does needs to ask the question separately.
+// and Delete return an error that names the key, and the browser
+// refuses with reason 'key' — nothing a caller does needs to ask the
+// question separately.
 func validRecordKey(key string) bool {
 	if key == "" || len(key) > KeyMaxLen {
 		return false
@@ -122,21 +123,6 @@ func New(app string) *Store {
 	s := &Store{app: app, colls: map[string]*collectionDef{}}
 	apps[app] = s
 	return s
-}
-
-// App returns the store's app id.
-func (s *Store) App() string { return s.app }
-
-// collections returns the declared collection names, sorted.
-func (s *Store) collections() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]string, 0, len(s.colls))
-	for n := range s.colls {
-		out = append(out, n)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // freeze marks the declaration served; a Define after this point

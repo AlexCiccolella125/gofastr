@@ -35,25 +35,6 @@ secret or a session token.
 
 **Import:** `github.com/DonaldMurillo/gofastr/framework/local`
 
-**Until this is released**, the package exists only on the
-`feat/framework-local` branch of the fork, so an app in its own module
-cannot `go get` it. Pin the released version and point it at a checkout
-of the branch:
-
-```bash
-git clone https://github.com/AlexCiccolella125/gofastr
-git -C gofastr checkout feat/framework-local
-```
-
-```
-require github.com/DonaldMurillo/gofastr v0.85.0
-replace github.com/DonaldMurillo/gofastr => /absolute/path/to/gofastr
-```
-
-`go mod tidy` resolves the rest against the checkout. When the feature
-lands upstream, delete the `replace` and bump the `require` to the
-release that carries it — nothing else in the app changes.
-
 ## Shape
 
 This block compiles: `go test ./framework/docs -run TestDocExamplesCompile`
@@ -89,46 +70,28 @@ var Drafts = local.Define[Draft](Site, "drafts", local.CollectionConfig{
 })
 var Prefs = local.Define[View](Site, "prefs", local.CollectionConfig{Version: 1, Mirror: true})
 
-// Adopt a key the app already wrote: a version step that runs ONCE,
-// under the same lock and stamp. The app supplies only the parse,
-// registered on the rail as window.__gofastr._localAdopters["<name>"]
-// ((text, key) => [{k, v}, …]); the foreign key is never deleted.
-var Teams = local.Define[Draft](Site, "teams", local.CollectionConfig{
-	Version: 2, KeyField: "id",
-	Migrations: []local.Migration{{Version: 2, Steps: []local.Step{local.Adopt("legacy_teams", "adopt-teams")}}},
-})
-
-// Serve the declaration on the extra-script rail (once, in main). Serve
-// mounts the route AND returns the URL: doing one half is a silent 404,
-// an undefined window.__gofastr_local and a null store in the browser.
-// Site.Script() returns the URL and the mount step instead, for a host
-// built before its router.
-var host = uihost.New(site, uihost.WithExtraScripts(Site.Serve(rt)))
+// Serve the declaration on the extra-script rail (once, in main).
+// Script returns the URL for the rail AND the mount step; doing one
+// half is a silent 404, an undefined window.__gofastr_local and a null
+// store in the browser. The host is usually built before its router,
+// so the URL goes on first and mount(app.Router()) runs later.
+var scriptURL, mount = Site.Script()
+var host = uihost.New(site, uihost.WithExtraScripts(scriptURL))
 
 // Seed a signal from a record; the runtime patches it in after
-// hydration. Name() is the signal a page script writes with setSignal.
+// hydration. A page script writes it with setSignal, reading the name
+// off the bound element's data-fui-signal.
 var title = local.SeedSignal(Drafts, "current", store.JSON[Draft](S, "draft", Draft{}))
 
 // Upload: the trigger declares what rides along; the handler reads it.
-// AnyKey is one record whose key the page writes on the trigger as
-// data-local-key at click time; the bound is one record, not the
-// collection's.
-var up = local.Send(Drafts.Key("current"))
-var pick = local.Send(Teams.AnyKey())
-
-// A collection's SIZE, not a record: no summary record to keep in step.
-var howMany = local.SeedCount(Drafts, S.Int("ndrafts", 0))
+var up = local.Send(Drafts.Key("current")) // or local.Send(Drafts)
 
 func screen(ctx context.Context) render.HTML {
-	_ = howMany.Bind(ctx, "span", nil)
 	return title.Bind(ctx, "p", nil) // + up.Merge(...) on the RPC trigger
 }
 
 func routes() {
-	rt.Post("/teams/check", pick.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		one, _ := local.List(r.Context(), Teams) // exactly one record
-		_ = one
-	}))
+	mount(rt)
 	rt.Post("/drafts/upload", up.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// src is local.SourceUpload, SourceMirror or SourceNone. A mirror
 		// read is a CLIENT HINT — any script on the origin writes that
@@ -147,16 +110,12 @@ func routes() {
 }
 ```
 
-A server started in a **git worktree** remaps its `-addr`
-(`isolation remapped the listen address`); a harness that names its own
-address sets `GOFASTR_ISOLATION=off`.
-
 Browser side (after `__gofastr.loadModule('local-store')`):
 `__gofastr.localStore('site').collection('drafts')` → `get`, `put`,
-`delete`, `list({where, orderBy, desc, limit, offset})`, `count`,
-`subscribe`, `clear`, `available`. Every call settles `{ok, reason}`;
-refusals raise `gofastr:local-error`. A collection whose migration did
-not complete refuses every call with reason `migration` rather than
-serving records on a schema this build cannot read.
+`delete`, `list({orderBy, desc})`, `count`, `subscribe`, `clear`. Every
+call settles `{ok, reason}`; refusals raise `gofastr:local-error`. A
+collection whose migration did not complete refuses every call with
+reason `migration` rather than serving records on a schema this build
+cannot read.
 
 Docs: `gofastr docs local-state`.

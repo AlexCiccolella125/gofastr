@@ -26,8 +26,7 @@ import (
 // trigger had none. Upload.Wrap reads the field on the server, refuses
 // anything the declaration did not name, enforces the caps, strips the
 // field so the wrapped handler decodes the body it always did, and
-// puts the records on the request context for Get, List and
-// FromContext.
+// puts the records on the request context for Get and List.
 
 // The reserved field name, on both sides.
 const uploadField = "__local"
@@ -54,15 +53,10 @@ const (
 	UploadRecordOverhead = 64
 )
 
-var (
-	// ErrUndeclared is a collection or key in the upload the Send did
-	// not name — or a collection the store never declared.
-	ErrUndeclared = errors.New("local: undeclared collection or key")
-	// ErrTooLarge is a record, collection or header over its cap.
-	ErrTooLarge = errors.New("local: over the size cap")
-	// ErrBadKey is a key ValidKey refuses.
-	ErrBadKey = errors.New("local: invalid key")
-)
+// ErrTooLarge is a record, collection or header over its cap: the one
+// refusal that decides a status code (413 where every other refusal is
+// a 400 that says why in its text).
+var ErrTooLarge = errors.New("local: over the size cap")
 
 // Upload is one declaration of what accompanies a request.
 type Upload struct {
@@ -259,7 +253,7 @@ func wrappedFor(ctx context.Context, app string) bool {
 
 // parse validates the reserved field's value against the declaration
 // and the caps. It returns app-scoped records, or an error that maps
-// to 400 (ErrUndeclared, ErrBadKey, malformed) or 413 (ErrTooLarge).
+// to 400 (undeclared, bad key, malformed) or 413 (ErrTooLarge).
 func (u *Upload) parse(raw []byte) (map[string]map[string]json.RawMessage, error) {
 	var wire map[string][]uploadRecord
 	if err := handler.UnmarshalStrict(raw, &wire); err != nil {
@@ -272,17 +266,17 @@ func (u *Upload) parse(raw []byte) (map[string]map[string]json.RawMessage, error
 		// which the old per-first-record pre-check let through as an
 		// empty collection on the context.
 		if u.store.defOf(coll) == nil {
-			return nil, fmt.Errorf("%w: %q", ErrUndeclared, coll)
+			return nil, fmt.Errorf("local: undeclared collection %q", coll)
 		}
 		total := 0
 		byKey := map[string]json.RawMessage{}
 		for _, rec := range recs {
 			if !validRecordKey(rec.K) {
-				return nil, fmt.Errorf("%w: %q in %q", ErrBadKey, rec.K, coll)
+				return nil, fmt.Errorf("local: invalid key %q in %q", rec.K, coll)
 			}
 			def := u.allowed(coll, rec.K)
 			if def == nil {
-				return nil, fmt.Errorf("%w: %q/%q", ErrUndeclared, coll, rec.K)
+				return nil, fmt.Errorf("local: undeclared key %q/%q", coll, rec.K)
 			}
 			if rec.V == nil {
 				return nil, fmt.Errorf("local: record %q/%q has no value", coll, rec.K)
@@ -317,7 +311,7 @@ func (u *Upload) parse(raw []byte) (map[string]map[string]json.RawMessage, error
 // parsing. A request with no reserved field passes through with no
 // records. An undeclared collection or key is a 400; a record over a
 // cap is a 413. h then sees the records through Get, List and
-// FromContext, and app.RequestFromContext works inside it.
+// and app.RequestFromContext works inside it.
 func (u *Upload) Wrap(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(markWrapped(app.WithRequest(r.Context(), r), u.store.app))
@@ -438,7 +432,7 @@ func (u *Upload) stripForm(r *http.Request, ct string) ([]byte, error) {
 	return []byte(vals[0]), nil
 }
 
-// sortedKeys is the deterministic order List and FromContext use.
+// sortedKeys is the deterministic order List uses.
 func sortedKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

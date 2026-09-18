@@ -171,7 +171,7 @@ window.__migrations = []; window.addEventListener('gofastr:local-migrated', (e) 
 			`<script type="application/json" id="gofastr-behaviors">%s</script></head><body>`+
 			`<main role="main"><span id="ready">ready</span></main>`+
 			`<script src="/__gofastr/runtime.js"></script><script src="%s"></script>`+
-			`<script src="/app.js"></script></body></html>`, block, e2eSite.ScriptURL())
+			`<script src="/app.js"></script></body></html>`, block, e2eSite.scriptURL())
 	})
 	mux.HandleFunc("/plain", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -190,7 +190,7 @@ window.__migrations = []; window.addEventListener('gofastr:local-migrated', (e) 
 			`<main role="main"><span id="ready">ready</span>%s%s<span id="result" data-fui-signal="up-result"></span>`+
 			`<a id="away" href="/other">other</a></main>`+
 			`<script src="/__gofastr/runtime.js"></script><script src="%s"></script><script src="/app.js"></script></body></html>`,
-			block, seedEl, form, e2eSite.ScriptURL())
+			block, seedEl, form, e2eSite.scriptURL())
 	})
 	if len(tls) > 0 && tls[0] {
 		e.srv = httptest.NewTLSServer(mux)
@@ -342,15 +342,11 @@ func TestE2E_CapsRefuseWithAReasonNotAnException(t *testing.T) {
 	if max, _ := errs[0]["max"].(float64); int(max) != 512 {
 		t.Fatalf("the size event must carry the cap: %v", errs[0])
 	}
-	// list with a filter and an order.
+	// list with an order.
 	var rows []map[string]any
-	evalJSON(t, ctx, draftsJS+`.list({orderBy: 'title', desc: true, limit: 2})`, &rows)
-	if len(rows) != 2 || rows[0]["key"] != "3" || rows[1]["key"] != "2" {
-		t.Fatalf("list(orderBy title desc, limit 2) = %v", rows)
-	}
-	evalJSON(t, ctx, draftsJS+`.list({where: {title: 'a'}})`, &rows)
-	if len(rows) != 1 || rows[0]["key"] != "1" {
-		t.Fatalf("list(where title=a) = %v", rows)
+	evalJSON(t, ctx, draftsJS+`.list({orderBy: 'title', desc: true})`, &rows)
+	if len(rows) != 3 || rows[0]["key"] != "3" || rows[1]["key"] != "2" || rows[2]["key"] != "1" {
+		t.Fatalf("list(orderBy title desc) = %v", rows)
 	}
 }
 

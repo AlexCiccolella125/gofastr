@@ -8,9 +8,9 @@
 // request/response hooks on rpc.js's data-fui-rpc-with seam, and
 // nothing else.
 //
-// The line between the two modules is a responsibility, not a byte
-// count: local-store keeps records, local-bridge is every way those
-// records reach a Go handler. A page whose store keeps its records to
+// The line between the modules is a responsibility, not a byte count:
+// local-store keeps records, local-migrate rewrites them between
+// versions, local-bridge is every way they reach a Go handler. A page whose store keeps its records to
 // itself never loads this file; local-store asks for it when a
 // declaration mirrors a collection or a logout is pending.
 (() => {

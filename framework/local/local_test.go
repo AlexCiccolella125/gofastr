@@ -91,8 +91,8 @@ func TestDefineValidatesTheDeclaration(t *testing.T) {
 
 	// Mirror clamps to the cookie-sized defaults and ceilings.
 	p := Define[prefs](s, "prefs", CollectionConfig{Version: 1, Mirror: true})
-	if p.Caps().MaxRecordBytes != MirrorDefaultMaxRecordBytes || p.Caps().MaxRecords != MirrorDefaultMaxRecords {
-		t.Fatalf("mirror caps = %d/%d, want %d/%d", p.Caps().MaxRecordBytes, p.Caps().MaxRecords, MirrorDefaultMaxRecordBytes, MirrorDefaultMaxRecords)
+	if p.def.maxRecord != MirrorDefaultMaxRecordBytes || p.def.maxRecords != MirrorDefaultMaxRecords {
+		t.Fatalf("mirror caps = %d/%d, want %d/%d", p.def.maxRecord, p.def.maxRecords, MirrorDefaultMaxRecordBytes, MirrorDefaultMaxRecords)
 	}
 	mustPanic(t, "exceeds the ceiling", func() {
 		Define[prefs](s, "prefs2", CollectionConfig{Version: 1, Mirror: true, MaxRecordBytes: 4096})
@@ -105,7 +105,7 @@ func TestDefineValidatesTheDeclaration(t *testing.T) {
 	})
 
 	// The manifest freezes the declaration.
-	_ = s.ScriptJS()
+	_ = s.scriptJS()
 	mustPanic(t, "after store", func() { Define[draft](s, "late", CollectionConfig{Version: 1}) })
 }
 
@@ -119,7 +119,7 @@ func TestManifestCarriesTheDeclaration(t *testing.T) {
 		},
 	})
 	Define[prefs](s, "prefs", CollectionConfig{Version: 1, Mirror: true})
-	js := string(s.ScriptJS())
+	js := string(s.scriptJS())
 	if !strings.HasPrefix(js, "// framework/local") || !strings.Contains(js, `window.__gofastr_local["site"] = {`) {
 		t.Fatalf("manifest script shape:\n%s", js)
 	}
@@ -155,13 +155,13 @@ func TestManifestCarriesTheDeclaration(t *testing.T) {
 	if !p.Mirror || p.MaxRecord != MirrorDefaultMaxRecordBytes || len(p.Migrations) != 0 {
 		t.Fatalf("prefs entry = %+v", p)
 	}
-	if !strings.HasPrefix(s.ScriptURL(), s.ScriptPath()+"?v=") || s.ScriptPath() != "/__gofastr/local/site.js" {
-		t.Fatalf("ScriptURL = %q", s.ScriptURL())
+	if !strings.HasPrefix(s.scriptURL(), s.ScriptPath()+"?v=") || s.ScriptPath() != "/__gofastr/local/site.js" {
+		t.Fatalf("ScriptURL = %q", s.scriptURL())
 	}
 
 	// The handler serves it immutably when the hash matches.
 	rec := httptest.NewRecorder()
-	s.ScriptHandler().ServeHTTP(rec, httptest.NewRequest("GET", s.ScriptURL(), nil))
+	s.ScriptHandler().ServeHTTP(rec, httptest.NewRequest("GET", s.scriptURL(), nil))
 	if rec.Code != 200 || rec.Header().Get("Content-Type") != "application/javascript; charset=utf-8" || !strings.Contains(rec.Header().Get("Cache-Control"), "immutable") {
 		t.Fatalf("script handler: %d %v", rec.Code, rec.Header())
 	}
@@ -172,20 +172,9 @@ func TestManifestCarriesTheDeclaration(t *testing.T) {
 	}
 }
 
-func TestKeyOfReadsTheDeclaredField(t *testing.T) {
+func TestKeyRefusesWhatTheBrowserWouldRefuse(t *testing.T) {
 	s := fresh(t, "site")
 	d := Define[draft](s, "drafts", CollectionConfig{Version: 1, KeyField: "id"})
-	k, err := d.keyOf(draft{ID: "abc"})
-	if err != nil || k != "abc" {
-		t.Fatalf("KeyOf = %q, %v", k, err)
-	}
-	if _, err := d.keyOf(draft{}); err == nil {
-		t.Fatal("an empty key field must not be a key")
-	}
-	n := Define[draft](s, "nokey", CollectionConfig{Version: 1})
-	if _, err := n.keyOf(draft{ID: "x"}); err == nil {
-		t.Fatal("KeyOf on a collection with no KeyField must error")
-	}
 	mustPanic(t, "not a valid key", func() { d.Key("") })
 	mustPanic(t, "not a valid key", func() { d.Key("__proto__") })
 }
@@ -285,8 +274,7 @@ func TestWrapLiftsTheReservedFieldOutOfAJSONBody(t *testing.T) {
 	if e.err != nil || len(e.drafts) != 2 || e.drafts[0].Key != "b" || e.drafts[1].Key != "current" {
 		t.Fatalf("List = %+v, %v (want two, sorted by key)", e.drafts, e.err)
 	}
-	raw := FromContext(context.Background(), s)
-	if len(raw.Collections()) != 0 {
+	if raw := carriedBy(context.Background(), s); len(raw.recs) != 0 {
 		t.Fatal("a bare context carries nothing")
 	}
 }
@@ -420,9 +408,9 @@ func TestGetReadsAMirrorCookieAndIgnoresTheRest(t *testing.T) {
 	if _, found, _ := Get(ctx, d, "current"); found.Found() {
 		t.Fatal("an unmirrored collection must never be read from a cookie")
 	}
-	all := FromContext(ctx, s)
-	if cols := all.Collections(); len(cols) != 1 || cols[0] != "prefs" || len(all.Keys("prefs")) != 1 {
-		t.Fatalf("FromContext saw %v / %v — malformed, oversized, foreign and unmirrored cookies must all be ignored", cols, all.Keys("prefs"))
+	all := carriedBy(ctx, s)
+	if len(all.recs) != 1 || len(all.recs["prefs"]) != 1 {
+		t.Fatalf("the request carried %v — malformed, oversized, foreign and unmirrored cookies must all be ignored", all.recs)
 	}
 	// A record that does not decode into T is an error, not a zero value.
 	req2 := httptest.NewRequest("GET", "/", nil)
@@ -479,7 +467,7 @@ func TestPutDeleteClearAccumulateOneASCIIHeader(t *testing.T) {
 	if err := json.Unmarshal(msg.Ops[0].V, &v); err != nil || v.Title != "héllo 🙂" {
 		t.Fatalf("the escaped value must decode back to the rune: %+v %v", v, err)
 	}
-	if err := Put(rec, d, "", draft{}); !errors.Is(err, ErrBadKey) {
+	if err := Put(rec, d, "", draft{}); err == nil || !strings.Contains(err.Error(), "invalid key") {
 		t.Fatalf("bad key: %v", err)
 	}
 	if err := Put(rec, d, "big", draft{Text: strings.Repeat("x", 100)}); !errors.Is(err, ErrTooLarge) {
@@ -618,8 +606,8 @@ func TestAnUndeclaredCollectionIsRefusedEvenWhenEmpty(t *testing.T) {
 	s := fresh(t, "undecl")
 	d := Define[draft](s, "drafts", CollectionConfig{Version: 1})
 	u := Send(d)
-	if _, err := u.parse([]byte(`{"nope":[]}`)); !errors.Is(err, ErrUndeclared) {
-		t.Fatalf("parse({\"nope\":[]}) = %v, want ErrUndeclared", err)
+	if _, err := u.parse([]byte(`{"nope":[]}`)); err == nil || !strings.Contains(err.Error(), "undeclared") {
+		t.Fatalf("parse({\"nope\":[]}) = %v, want an undeclared-collection refusal", err)
 	}
 	// A declared collection with no records is still fine.
 	recs, err := u.parse([]byte(`{"drafts":[]}`))
@@ -675,7 +663,7 @@ func TestTheUploadBoundFollowsTheCapsItNames(t *testing.T) {
 	})
 	// MaxBytes was not declared, so it defaulted to 1 MiB — a size these
 	// ten records can never reach.
-	if got := small.Caps().MaxBytes; got != DefaultMaxBytes {
+	if got := small.def.maxBytes; got != DefaultMaxBytes {
 		t.Fatalf("MaxBytes = %d, want the %d default", got, DefaultMaxBytes)
 	}
 	u := Send(small)
@@ -702,29 +690,7 @@ func TestTheUploadBoundFollowsTheCapsItNames(t *testing.T) {
 	}
 }
 
-// The caps are readable, not write-only. What a caller declared and what
-// holds are different numbers — MaxBytes defaults under a far smaller
-// MaxRecords x MaxRecordBytes, and Mirror lowers two of them — so an app
-// that sizes a textarea or derives its own bound needs them back.
-func TestCapsReadsBackTheResolvedDeclaration(t *testing.T) {
-	s := fresh(t, "site")
-	d := Define[draft](s, "drafts", CollectionConfig{Version: 2, KeyField: "id", MaxRecordBytes: 512, MaxRecords: 10,
-		Migrations: []Migration{{Version: 2}}})
-	want := Caps{Version: 2, KeyField: "id", MaxRecordBytes: 512, MaxRecords: 10, MaxBytes: DefaultMaxBytes}
-	if got := d.Caps(); got != want {
-		t.Fatalf("Caps = %+v, want %+v", got, want)
-	}
-	// A Mirror collection is clamped: the caps a caller reads back are
-	// the clamped ones, not the defaults it did not write.
-	p := Define[prefs](s, "prefs", CollectionConfig{Version: 1, Mirror: true})
-	mirrored := Caps{Version: 1, MaxRecordBytes: MirrorDefaultMaxRecordBytes,
-		MaxRecords: MirrorDefaultMaxRecords, MaxBytes: DefaultMaxBytes, Mirrored: true}
-	if got := p.Caps(); got != mirrored {
-		t.Fatalf("mirror Caps = %+v, want %+v", got, mirrored)
-	}
-}
-
-// fakeRouter records what Serve mounted.
+// fakeRouter records what Script's mount step registered.
 type fakeRouter struct {
 	pattern string
 	handler http.Handler
@@ -734,48 +700,21 @@ func (f *fakeRouter) Get(pattern string, handler http.Handler) {
 	f.pattern, f.handler = pattern, handler
 }
 
-// Serving the declaration is one call, because the route and the extra
-// script are two halves of one thing and doing only one of them fails
-// silently: the manifest 404s, window.__gofastr_local stays undefined
-// and localStore(app) answers null.
-func TestServeMountsTheRouteAndReturnsTheScriptURL(t *testing.T) {
-	s := fresh(t, "site")
-	Define[draft](s, "drafts", CollectionConfig{Version: 1})
-	rt := &fakeRouter{}
-	url := s.Serve(rt)
-	if rt.pattern != s.ScriptPath() {
-		t.Fatalf("Serve mounted %q, want %q", rt.pattern, s.ScriptPath())
-	}
-	if want := s.ScriptURL(); url != want {
-		t.Fatalf("Serve returned %q, want %q", url, want)
-	}
-	if !strings.HasPrefix(url, s.ScriptPath()+"?v=") {
-		t.Fatalf("Serve returned %q: the URL must carry the content hash", url)
-	}
-	rec := httptest.NewRecorder()
-	rt.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "window.__gofastr_local") {
-		t.Fatalf("the mounted handler served %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-// A page script writes a seeded signal with setSignal(name, value), so
-// the name has to come from Go rather than be retyped in JavaScript —
-// and it has to be the same string the binding carries as
-// data-fui-signal, or the script reads the DOM and writes somewhere else.
-func TestScriptMountsAfterTheHostWasBuilt(t *testing.T) {
+// Serving the declaration is one expression, because the route and the
+// extra script are two halves of one thing and doing only one of them
+// fails silently: the manifest 404s, window.__gofastr_local stays
+// undefined and localStore(app) answers null. The mount step runs
+// after the URL was handed out, the order every uihost app builds in.
+func TestScriptServesBothHalvesInEitherOrder(t *testing.T) {
 	s := fresh(t, "site")
 	Define[draft](s, "drafts", CollectionConfig{Version: 1})
 	// The order every uihost app is built in: the URL for the rail
 	// first, the router later.
 	url, mount := s.Script()
-	if want := s.ScriptURL(); url != want {
-		t.Fatalf("Script returned %q, want %q — the same URL Serve returns", url, want)
+	if want := s.scriptURL(); url != want || !strings.HasPrefix(url, s.ScriptPath()+"?v=") {
+		t.Fatalf("Script returned %q, want %q with the content hash", url, want)
 	}
 	rt := &fakeRouter{}
-	if rt.pattern != "" {
-		t.Fatal("Script must not touch a router it was not given")
-	}
 	mount(rt)
 	if rt.pattern != s.ScriptPath() {
 		t.Fatalf("mount registered %q, want %q", rt.pattern, s.ScriptPath())
@@ -784,23 +723,6 @@ func TestScriptMountsAfterTheHostWasBuilt(t *testing.T) {
 	rt.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "window.__gofastr_local") {
 		t.Fatalf("the mounted handler served %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestSeededSignalNamesTheSignalAPageScriptWrites(t *testing.T) {
-	s := fresh(t, "site")
-	d := Define[draft](s, "drafts", CollectionConfig{Version: 1})
-	sl := store.JSON[draft](store.New("seedname"), "current", draft{})
-	seed := SeedSignal(d, "current", sl)
-	if seed.Name() != "seedname.current" {
-		t.Fatalf("Name = %q, want the fully-qualified slice name", seed.Name())
-	}
-	if seed.Name() != sl.Name() {
-		t.Fatalf("Name = %q but the slice is %q", seed.Name(), sl.Name())
-	}
-	html := string(seed.Bind(context.Background(), "p", nil))
-	if !strings.Contains(html, `data-fui-signal="`+seed.Name()+`"`) {
-		t.Fatalf("the binding does not carry Name() as data-fui-signal:\n%s", html)
 	}
 }
 

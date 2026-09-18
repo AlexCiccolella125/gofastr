@@ -69,20 +69,18 @@ type Record[T any] struct {
 	Source Source
 }
 
-// Records is the raw view FromContext returns: every record the
-// request carried for one store, by collection and key, as JSON.
-type Records struct {
-	app  string
+// carried is every record the request carried for one store, by
+// collection and key, as JSON, with where each came from.
+type carried struct {
 	recs map[string]map[string]json.RawMessage
 	srcs map[string]map[string]Source
 }
 
-// FromContext returns every record the request carried for s: the
-// uploaded ones and the mirrored cookies. Prefer the typed Get and
-// List; this is the escape hatch for a handler that inspects what
-// arrived.
-func FromContext(ctx context.Context, s *Store) *Records {
-	out := &Records{app: s.app, recs: map[string]map[string]json.RawMessage{}, srcs: map[string]map[string]Source{}}
+// carriedBy gathers every record the request carried for s: the
+// uploaded ones and the mirrored cookies. List reads it; Get takes the
+// shorter path through rawFor.
+func carriedBy(ctx context.Context, s *Store) *carried {
+	out := &carried{recs: map[string]map[string]json.RawMessage{}, srcs: map[string]map[string]Source{}}
 	put := func(coll, key string, raw json.RawMessage, src Source) {
 		if out.recs[coll] == nil {
 			out.recs[coll] = map[string]json.RawMessage{}
@@ -108,22 +106,6 @@ func FromContext(ctx context.Context, s *Store) *Records {
 		}
 	}
 	return out
-}
-
-// Collections returns the collection names that carried at least one
-// record, sorted.
-func (r *Records) Collections() []string { return sortedKeys(r.recs) }
-
-// Keys returns the keys that arrived for collection, sorted.
-func (r *Records) Keys(collection string) []string { return sortedKeys(r.recs[collection]) }
-
-// Raw returns the JSON of one record and where it came from.
-func (r *Records) Raw(collection, key string) (json.RawMessage, Source) {
-	v, ok := r.recs[collection][key]
-	if !ok {
-		return nil, SourceNone
-	}
-	return v, r.srcs[collection][key]
 }
 
 // decodeCookie recognises a mirror cookie of this store: the name is
@@ -206,7 +188,7 @@ func Get[T any](ctx context.Context, c *Collection[T], key string) (value T, src
 // the whole list. A list can mix the two sources, and a caller that
 // authorises on any of it must read Source per record.
 func List[T any](ctx context.Context, c *Collection[T]) ([]Record[T], error) {
-	from := FromContext(ctx, c.def.store)
+	from := carriedBy(ctx, c.def.store)
 	all := from.recs[c.def.name]
 	if len(all) == 0 {
 		warnUnwrapped(ctx, c.def, "List")

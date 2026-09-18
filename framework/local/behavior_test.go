@@ -29,6 +29,12 @@ func TestBehaviorIsRegisteredAndServed(t *testing.T) {
 			t.Fatalf("runtime.Module(%q) does not serve the registered source", name)
 		}
 	}
+	// The bridge evaluates after the store it reaches into, on the seed
+	// marker; an RPC trigger names it in data-fui-rpc-with instead.
+	b, ok := registry.LookupBehavior(BridgeName)
+	if !ok || len(b.Markers) != 1 || b.Markers[0] != "[data-local-seed]" || len(b.Requires) != 1 || b.Requires[0] != BehaviorName {
+		t.Fatalf("%s = %+v, want the seed marker and Requires(%q)", BridgeName, b, BehaviorName)
+	}
 	// The migration engine is never on the critical path: it loads at
 	// idle, and local-store forces it by name the moment a rewrite is
 	// due.

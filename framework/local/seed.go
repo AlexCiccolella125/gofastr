@@ -44,27 +44,11 @@ func SeedSignal[T any](c *Collection[T], key string, slice *store.Slice[T]) *See
 	return &SeededSignal[T]{coll: c, key: key, slice: slice}
 }
 
-// boundSlice returns the bound slice. Unexported: the caller passed the
-// slice in and still holds it; handing it back was a second name for
-// something nothing asked for.
-func (s *SeededSignal[T]) boundSlice() *store.Slice[T] { return s.slice }
-
-// Name is the signal key the browser knows the slice by — the
-// fully-qualified core-ui/store name, "<store>.<slice>". A page script
-// WRITES a seeded signal with __gofastr.setSignal(name, value), and the
-// seed bridge writes that value on to the record; without this the
-// script had to hardcode a string Go owns, which is the kind of
-// duplication that survives the rename it should not have survived.
-// The same name is on every binding as data-fui-signal, so a script can
-// read it off the DOM instead of being handed it.
-func (s *SeededSignal[T]) Name() string { return s.slice.Name() }
-
 // Attrs returns the two marker attributes a binding carries:
 // data-local-store="<app>" and data-local-seed="<collection>:<key>".
 // The signal's own name is not among them: store.Slice.Bind already
-// puts it on the same element as data-fui-signal, and a second spelling
-// of one name is a second thing to keep in step. Name() is the Go-side
-// reader.
+// puts it on the same element as data-fui-signal, which is where a page
+// script reads it.
 func (s *SeededSignal[T]) Attrs() map[string]string {
 	return map[string]string{
 		"data-local-store": s.coll.def.store.app,
@@ -82,9 +66,4 @@ func (s *SeededSignal[T]) withMarkers(attrs map[string]string) map[string]string
 // Bind renders the slice's text binding with the seed markers on it.
 func (s *SeededSignal[T]) Bind(ctx context.Context, tag string, attrs map[string]string) render.HTML {
 	return s.slice.Bind(ctx, tag, s.withMarkers(attrs))
-}
-
-// BindAttr renders the slice's attribute binding with the seed markers.
-func (s *SeededSignal[T]) BindAttr(ctx context.Context, tag, htmlAttr string, attrs map[string]string) render.HTML {
-	return s.slice.BindAttr(ctx, tag, htmlAttr, s.withMarkers(attrs))
 }
