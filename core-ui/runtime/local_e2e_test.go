@@ -187,7 +187,7 @@ func TestLocalMissingKeyIsUndefined(t *testing.T) {
 const noIDB = `<script>Object.defineProperty(window, 'indexedDB', { value: undefined, configurable: true });</script>`
 
 // Without IndexedDB the primitive falls back to localStorage, under the
-// same namespace — and only for tiny values. A larger one is refused
+// same namespace, and only for tiny values. A larger one is refused
 // with a reason rather than silently dropped or half-written.
 func TestLocalFallsBackToLocalStorageForTinyValuesOnly(t *testing.T) {
 	srv := startLocalServer(t, noIDB)
@@ -451,11 +451,11 @@ func TestLocalWatchCrossesTabsByPrefix(t *testing.T) {
 	}
 }
 
-// available() names the engine that will actually answer, and the two
+// available() names the engine that will answer, and the two
 // enumerations settle the way set and remove do.
 //
-// Two booleans could not say which engine answers — a caller reading
-// { idb: false, ls: true } has to re-derive the rule — and keys/entries
+// Two booleans could not say which engine answers, since a caller reading
+// { idb: false, ls: true } has to re-derive the rule, and keys/entries
 // resolving a bare array made an aborted transaction indistinguishable
 // from an empty store, which is how a clear() built on them reported
 // success over records that all survived.
@@ -509,7 +509,7 @@ func TestLocalNamesItsEngineAndSettlesItsEnumerations(t *testing.T) {
 
 // A session that fell back to localStorage leaves entries no IndexedDB
 // session can see: invisible to get, invisible to keys, and out of
-// reach of any clear — the previous user's records surviving a logout.
+// reach of any clear: the previous user's records surviving a logout.
 // The first session that does open the database adopts them and empties
 // the fallback of this namespace.
 func TestLocalAdoptsFallbackEntriesWhenIndexedDBReturns(t *testing.T) {

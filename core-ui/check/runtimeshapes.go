@@ -3227,7 +3227,7 @@ func regexTestDominates(code, v string, pos int) bool {
 // gofastr.sidebar-collapse., gofastr.banner-dismiss., gofastr.state.,
 // gofastr.colorScheme, gofastr:scroll), so the rule is that spelling:
 // the first operand of the key is a literal, or an identifier provably
-// holding one, whose text starts with gofastr. or gofastr: —
+// holding one, whose text starts with gofastr. or gofastr:,
 // machine-checked instead of conventional. A registered behaviour
 // shares the origin with the kernel's own modules and shares this
 // namespace with them.
@@ -3283,7 +3283,7 @@ func LintStorageKeyRaw(roots ...string) (*Result, error) {
 			}
 			if fault == keyFaultForeignNamespace {
 				res.add(f.Path, f.lineOf(site.pos),
-					fmt.Sprintf("[storage-key-raw] %s encodes %q behind a namespace that is not the framework's — an attribute value still reaches every key on the origin under that prefix; lead the key with a gofastr. (or gofastr:) literal, the namespace every storage key in the runtime already uses", site.kind, culprit))
+					fmt.Sprintf("[storage-key-raw] %s encodes %q behind a namespace that is not the framework's; an attribute value still reaches every key on the origin under that prefix; lead the key with a gofastr. (or gofastr:) literal, the namespace every storage key in the runtime already uses", site.kind, culprit))
 				continue
 			}
 			if fault == keyFaultNoNamespace {
@@ -3370,7 +3370,7 @@ func gofastrNamespace(text string) bool {
 // literalTextAt returns the string a key operand provably holds at pos,
 // and whether it holds one: a quoted literal spelled inline, or an
 // identifier whose deciding assignment (the last-assignment rule the
-// other lints use) is a quoted literal — banner.js's STORAGE_PREFIX.
+// other lints use) is a quoted literal, banner.js's STORAGE_PREFIX.
 func literalTextAt(op string, events []safeEvent, pos int) (string, bool) {
 	if isJSStringLiteral(op) {
 		return op[1 : len(op)-1], true

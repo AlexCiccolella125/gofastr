@@ -100,7 +100,7 @@ func persistPollTrue(ctx context.Context, js string) bool {
 
 const persistLoadedExpr = `!!(window.__gofastr && window.__gofastr.loadedModules && window.__gofastr.loadedModules['signal-persist'] && window.__gofastr.local)`
 
-// storedExpr reads what the browser store actually holds for a slice,
+// storedExpr reads what the browser store holds for a slice,
 // through the primitive's own public API.
 func storedExpr(name string) string {
 	return fmt.Sprintf(`window.__gofastr.local.get(%q).then((v) => v === undefined ? '' : JSON.stringify(v))`, name)
@@ -218,7 +218,7 @@ func TestUnpersistedSliceIsNeverStored(t *testing.T) {
 }
 
 // Over the declared cap the value is NOT written and the page is told,
-// so an app can surface "you have run out of room" instead of losing
+// so an app can say "you have run out of room" instead of losing
 // the write silently. The previously stored value stays put, and the
 // in-memory signal is untouched: persistence is best-effort, the UI is
 // not.
@@ -329,7 +329,7 @@ func TestPersistedSliceConvergesAcrossTwoTabs(t *testing.T) {
 // and refuses to write an untrusted value through innerHTML. Both ends
 // of persistence used to launder that flag: the write-back stored an
 // untrusted value like any other, and the restore called setSignal with
-// no options, which CLEARS the flag — so the value the browser handed
+// no options, which CLEARS the flag, so the value the browser handed
 // back took the innerHTML branch on the next load. Two assertions, one
 // per end.
 func TestPersistedSliceDoesNotLaunderAnUntrustedValue(t *testing.T) {

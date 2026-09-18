@@ -32,7 +32,7 @@
 // needs it declares registry.Requires('local') and the loader has it
 // registered before the dependent evaluates, and an application can
 // reach it with __gofastr.loadModule('local'). window.__gofastr.local
-// is the public API — get, set, remove, keys, entries, subscribe,
+// is the public API: get, set, remove, keys, entries, subscribe,
 // watch, available.
 //
 // Every call settles and none throws. set, remove, keys and entries
@@ -48,8 +48,9 @@
 // encoded prefix is a prefix of every encoded key beneath it, and the
 // range is [PREFIX + enc(prefix), PREFIX + enc(prefix) + '\uffff'].
 //
-// Opinionated storage — schemas, migrations, an upload channel, a
-// sync lane — is a layer ABOVE this one and does not belong here.
+// Schemas, migrations, an upload channel, a sync lane: opinionated
+// storage of that kind is a layer ABOVE this one and does not belong
+// here.
 (() => {
   'use strict';
   const NS = window.__gofastr = window.__gofastr || {};
@@ -63,7 +64,7 @@
   // and its quota is the whole origin's.
   const LS_MAX_BYTES = 8192;
 
-  // key -> Set<fn>. Maps, never plain objects: an application key is
+  // key to Set<fn>. Maps, never plain objects: an application key is
   // often attribute-borne, and a bracket write keyed by one is how
   // __proto__ re-parents a store.
   const subs = new Map();
@@ -99,9 +100,9 @@
   // could not open IndexedDB wrote its entries to the fallback; every
   // later IndexedDB session was blind to them, so they were records
   // nothing could read, nothing could overwrite and no clear() could
-  // ever remove — a ghost that outlives a logout. The first session
+  // ever remove, a ghost that outlives a logout. The first session
   // that does open the database moves them across (a key IndexedDB
-  // already holds is simply dropped) and empties the fallback of this
+  // already holds is dropped) and empties the fallback of this
   // namespace. One way only: the fallback never receives from
   // IndexedDB, so the two cannot diverge a second time.
   const adopt = (db) => new Promise((resolve) => {
@@ -225,7 +226,7 @@
   // announce tells the other tabs of this origin that a key moved. The
   // key travels, never the value: a subscriber re-reads, so a large
   // entry is not copied into every tab and a listener always sees what
-  // the store actually holds.
+  // the store holds.
   const announce = (key) => {
     if (!channel) return;
     try { channel.postMessage({ k: key }); } catch (_) { /* best-effort */ }
@@ -265,9 +266,9 @@
   });
 
   const api = {
-    // available reports what this browser actually gives us, probed
+    // available reports what this browser gives us, probed
     // rather than feature-detected: { idb, ls, engine }, where engine
-    // is the one that will actually answer a get or a set — 'idb',
+    // is the one that will answer a get or a set: 'idb',
     // 'ls' or 'none'. Two booleans could not say that, and "which
     // engine am I on" is the first question a bug report needs.
     available() {
@@ -328,7 +329,6 @@
       });
     },
 
-    // remove drops the entry. Resolves { ok } and never throws.
     // remove drops the entry from BOTH engines. Adoption runs once, at
     // open, so a fallback entry written after it (or by a script this
     // module did not run) would otherwise survive a delete and a

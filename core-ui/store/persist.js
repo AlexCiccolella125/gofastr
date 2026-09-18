@@ -8,7 +8,7 @@
 // bus, which is the only opinion core-ui takes about it. Registered by
 // persist.go with Requires('local'), so the loader has the primitive
 // registered before this file evaluates, and loaded when
-// [data-fui-signal-persist] is in the page — which is exactly when a
+// [data-fui-signal-persist] is in the page, which is exactly when a
 // persisted slice rendered a binding.
 //
 // Per bound slice name, once:
@@ -22,7 +22,7 @@
 //
 // Nothing here is sent to the server: a Go render never sees these
 // bytes. A screen that must know a browser-held value at FIRST PAINT
-// wants the cookie mirror ui.Banner uses, not this — the restore lands
+// wants the cookie mirror ui.Banner uses, not this: the restore lands
 // after hydration, by construction.
 (() => {
   'use strict';
@@ -37,15 +37,11 @@
   // attribute is missing or unreadable.
   const DEFAULT_MAX_BYTES = 65536;
 
-  // Slice name -> { max, last, echoing }. A Map, never a plain object:
+  // Slice name to { max, last, echoing }. A Map, never a plain object:
   // the key arrives from a DOM attribute, and a bracket write keyed by
   // one is how __proto__ re-parents a store.
   const slices = new Map();
 
-  // notify tells the page that a value could not be stored. The whole
-  // point of a size-bounded, best-effort store is that the app can say
-  // so — "you have run out of room" is a product decision, not a
-  // framework one.
   // bytesOf is the UTF-8 length of the JSON text, the unit PersistMax
   // is declared in and the unit the local primitive's entries() reports.
   // text.length counts UTF-16 units, so a CJK value would pass the cap
@@ -54,6 +50,10 @@
     try { return new TextEncoder().encode(text).length; } catch (_) { return text.length; }
   };
 
+  // notify tells the page that a value could not be stored. The whole
+  // point of a size-bounded, best-effort store is that the app can say
+  // so; "you have run out of room" is a product decision, not a
+  // framework one.
   const notify = (name, reason, size, max) => {
     try {
       window.dispatchEvent(new CustomEvent('gofastr:persist-overflow', {
@@ -124,7 +124,7 @@
 
     // Seed from the browser. SSR painted the server's value; this is
     // the one this browser last held, so it wins. Asynchronous by
-    // construction — IndexedDB is — so the server's value is what
+    // construction, since IndexedDB is, so the server's value is what
     // first paint shows. It wins over the SEED only: a setSignal that
     // lands while the read is in flight is newer than anything the
     // store holds, so the restore applies only while the signal still
@@ -139,7 +139,7 @@
     NS.local.subscribe(name, apply);
 
     // Write back on every later change, through the store's own
-    // listener list — the same one computed and animate subscribe to.
+    // listener list, the same one computed and animate subscribe to.
     // The subscription is per NAME, not per element, and a persisted
     // slice is app-global (Persist implies Global in Go), so it
     // deliberately outlives any one page: there is nothing to tear

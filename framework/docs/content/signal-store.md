@@ -116,7 +116,7 @@ _ = Filter.Bind(ctx, "span", nil)
 
 Every binding a persisted slice renders carries
 `data-fui-signal-persist="<cap>"`, and that marker is what loads the
-runtime half — so a persisted slice is restored on the screens that
+runtime half, so a persisted slice is restored on the screens that
 bind it, exactly as a page-scoped slice is seeded on the screens that
 reference it.
 
@@ -134,17 +134,17 @@ reference it.
   is a bug.**
 - **Namespaced.** Storage is the runtime's `local` primitive
   (IndexedDB, with a tiny-value `localStorage` fallback), keyed
-  `gofastr.state.` + the component-encoded slice name — and the slice
+  `gofastr.state.` + the component-encoded slice name, and the slice
   name carries its `Store` namespace, so `Teams` above is
   `gofastr.state.teambuilder.teams`. An app cannot choose the raw key;
   `core-ui/check`'s storage-key lint refuses one.
 - **Size-bounded.** A value over the slice's cap is not written and the
   page is told instead, so an app can say "you have run out of room"
   rather than lose the write silently. `PersistMax` accepts up to 1 MiB:
-  a signal is re-serialised on every change, so genuinely large data
+  a signal is re-serialised on every change, so large data
   wants `__gofastr.local` directly, or the server.
 - **Invisible to the server.** Nothing is posted, no cookie is set, no
-  header is added, and the restore lands AFTER hydration — first paint
+  header is added, and the restore lands AFTER hydration, so first paint
   always shows the server's seed. When a Go render must know a
   browser-held value at first paint, use the cookie mirror `ui.Banner`
   uses (`framework/ui/banner.go` reads it with
@@ -154,7 +154,7 @@ reference it.
 `Persist` implies `.Global()`: the browser's value has to survive a
 client-side navigation, and the app-global merge rule ("seed a global
 only the first time it is seen") is what keeps a partial render from
-clobbering it. Two open tabs of the same origin converge — the
+clobbering it. Two open tabs of the same origin converge: the
 primitive mirrors one tab's write into the other.
 
 It does **not** make GoFastr offline-first (an explicit
@@ -222,7 +222,7 @@ ui.Counter(ui.CounterConfig{Slice: store.New("cart").Int("count", 0)})
 - **Expecting a persisted value at first paint.** The restore is
   asynchronous and runs after hydration, so SSR always renders the
   server's seed. A screen that must not flash needs the value on the
-  request — the cookie mirror `ui.Banner` uses — not in the browser
+  request, the cookie mirror `ui.Banner` uses, not in the browser
   store.
 - **Persisting a slice the page never binds.** The marker rides on the
   bindings, exactly as the seed rides on references: a persisted slice

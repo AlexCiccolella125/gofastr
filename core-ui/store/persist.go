@@ -59,9 +59,10 @@ import (
 // signal-persist with Requires("local") and loaded by the kernel when
 // a persisted slice rendered a binding.
 //
-// Anything more opinionated than "a browser remembers a projection" —
-// schemas, migrations, an upload channel, conflict resolution — is a
-// layer ABOVE core-ui and does not belong in this package.
+// Anything more opinionated than "a browser remembers a projection",
+// such as schemas, migrations, an upload channel or conflict
+// resolution, is a layer ABOVE core-ui and does not belong in this
+// package.
 
 // PersistDefaultMaxBytes is the cap Persist applies: 64 KiB of
 // JSON-encoded value, generous for a preference set or a draft and
@@ -73,8 +74,8 @@ const PersistDefaultMaxBytes = 64 << 10
 // IndexedDB would allow far more, and that is the point: a signal is a
 // UI projection the whole page re-serialises on every change, so a
 // slice asking to round-trip megabytes through JSON on each keystroke
-// is a design mistake, refused where it is written. Genuinely large,
-// genuinely durable data wants the `local` primitive directly (or the
+// is a design mistake, refused where it is written. Large, durable
+// data wants the `local` primitive directly (or the
 // server), not a signal.
 const PersistMaxBytesLimit = 1 << 20
 
@@ -119,10 +120,10 @@ func (sl *Slice[T]) Persist() *Slice[T] { return sl.PersistMax(PersistDefaultMax
 // primitive exists to avoid.
 func (sl *Slice[T]) PersistMax(maxBytes int) *Slice[T] {
 	if sl.comp != nil {
-		panic(fmt.Sprintf("store: slice %q is computed — a derived value is recomputed from its dependencies on every load, so persisting it would restore a stale answer; persist the dependencies", sl.name))
+		panic(fmt.Sprintf("store: slice %q is computed; a derived value is recomputed from its dependencies on every load, so persisting it would restore a stale answer; persist the dependencies", sl.name))
 	}
 	if maxBytes <= 0 || maxBytes > PersistMaxBytesLimit {
-		panic(fmt.Sprintf("store: slice %q: persist cap %d is outside (0, %d] — a signal is re-serialised on every change, so a megabyte-scale value belongs in the local primitive directly", sl.name, maxBytes, PersistMaxBytesLimit))
+		panic(fmt.Sprintf("store: slice %q: persist cap %d is outside (0, %d]; a signal is re-serialised on every change, so a megabyte-scale value belongs in the local primitive directly", sl.name, maxBytes, PersistMaxBytesLimit))
 	}
 	sl.persist = &persistCfg{maxBytes: maxBytes}
 	return sl.Global()

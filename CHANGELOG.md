@@ -10,16 +10,18 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
 ### Added
 - **The `local` browser store** (`core-ui/runtime/src/local.js`): the
   runtime's five hard-coded Web-storage keys, generalised into one
-  primitive with one owner. `window.__gofastr.local` is `available()`
-  → `{idb, ls, engine}`, `get`, `set`, `remove`, `keys` and `entries`
-  → `{ok, reason, …}`, `subscribe` and `watch`;
+  primitive with one owner. `window.__gofastr.local` is `available()`,
+  `get`, `set`, `remove`, `keys`, `entries`, `subscribe` and `watch`.
+  `available()` resolves to `{idb, ls, engine}`; `set`, `remove`, `keys`
+  and `entries` resolve to `{ok, reason, …}`.
   `keys` and `entries` take an optional prefix and read one IndexedDB
   key range (an entry's `size` is the stored UTF-8 length of its JSON
   text) and settle the way `set` does, so an aborted enumeration is
   never mistaken for an empty store; `watch(prefix, fn)` hears another tab's write of any key
-  under a prefix — the three calls a layer that groups records under a
-  common prefix needs, with no opinion about what a group means. The engine is
-  **IndexedDB** — a saved value is not a preference: asynchronous, not
+  under a prefix. Those are the three calls a layer that groups records
+  under a common prefix needs, with no opinion about what a group means.
+  The engine is **IndexedDB**, because a saved value is not a
+  preference: asynchronous, not
   capped at the few megabytes `localStorage` shares across an origin,
   and a large read does not block the main thread; `localStorage` is
   the fallback, used only when IndexedDB will not open and only for
@@ -38,8 +40,8 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   Every call settles rather than throwing and `set` says which of
   `size`/`quota`/`encode`/`unavailable` refused it: the contract is
   best-effort, and truth still lives on the server. Like `action` it is
-  a marker-less primitive — no `data-fui-*` attribute, no core-bundle
-  bytes — reached through `registry.Requires("local")` or
+  a marker-less primitive, with no `data-fui-*` attribute and no
+  core-bundle bytes, reached through `registry.Requires("local")` or
   `__gofastr.loadModule('local')`. `gofastr docs runtime-contract`.
 - **`store.Slice.Persist()` / `.PersistMax(n)`**: a slice the browser
   remembers. Every binding it renders carries
@@ -55,7 +57,7 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   never written (reason `untrusted`), and a value read back out of the
   browser is restored untrusted: what the browser stored is not
   server-authored HTML, so an `html`-mode binding renders it as text. The restore is asynchronous, so first paint
-  always shows the server's seed, and nothing reaches the server — no
+  always shows the server's seed, and nothing reaches the server: no
   cookie, no header, no post. This is not offline-first, which remains
   an explicit non-goal: no conflict resolution, no pending-mutation
   queue, no sync. `gofastr docs signal-store`.
@@ -119,7 +121,7 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   '.gofastr'` passed while naming nothing at all. A Web-storage key
   with a component-encoded operand must now lead with a literal (or an
   identifier provably holding one) that opens `gofastr.` or
-  `gofastr:` — the namespace every storage key in the tree already
+  `gofastr:`, the namespace every storage key in the tree already
   used, machine-checked instead of conventional. The namespace arm
   reads any encoded operand, not only an attribute-borne one, because
   the `local` primitive's key is an application-chosen parameter the

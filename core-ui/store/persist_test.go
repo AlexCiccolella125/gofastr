@@ -160,7 +160,7 @@ func TestPersistBehaviorIsRegistered(t *testing.T) {
 }
 
 // The namespace the docs and the attribute table promise is the one the
-// primitive actually writes. It lives in core-ui/runtime/src/local.js
+// primitive writes. It lives in core-ui/runtime/src/local.js
 // now, so this is the gate that keeps the two documents honest.
 func TestLocalPrimitiveCarriesTheDocumentedNamespace(t *testing.T) {
 	src, ok := gofastrruntime.Module("local")

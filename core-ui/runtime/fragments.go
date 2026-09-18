@@ -76,8 +76,8 @@ type fragmentDef struct {
 // The local module is the same shape as action: the browser-store
 // primitive (IndexedDB, with a tiny-value localStorage fallback) owns
 // no attribute and has no marker, and is reached through
-// registry.Requires("local") — core-ui/store's signal-persist
-// behaviour declares it — or __gofastr.loadModule('local').
+// registry.Requires("local"), which core-ui/store's signal-persist
+// behaviour declares, or __gofastr.loadModule('local').
 // window.__gofastr.local (get, set, remove, keys, entries, subscribe,
 // watch, available) is its public API.
 // boot-embed depends on kernel. RPC requests inside an embed route through

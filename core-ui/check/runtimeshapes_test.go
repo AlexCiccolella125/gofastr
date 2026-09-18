@@ -1919,7 +1919,7 @@ function persistRead(el) {
   const name = el.getAttribute('data-fui-signal');
   return localStorage.getItem('gofastr.state.' + encodeURIComponent(name));
 }
-// FIRES: a literal namespace, but not the framework's — an attribute
+// FIRES: a literal namespace, but not the framework's; an attribute
 // value still reaches every key on the origin starting with 'x.'.
 function foreignPrefix(el) {
   const name = el.getAttribute('data-fui-signal');
@@ -2024,7 +2024,7 @@ func TestStorageKeyRawFiresOnUnnamedParamKey(t *testing.T) {
 // browser-store module (core-ui/runtime/src/local.js): the shape the
 // docs promise is the shape the lint accepts, and each of the three
 // ways to break the guarantee makes it fire. The keys there are
-// function PARAMETERS, not attribute reads — that is the posture the
+// function PARAMETERS, not attribute reads; that is the posture the
 // namespace arm exists for, since the provenance walk cannot see an
 // application key and the primitive's whole promise is that such a key
 // can never name another feature's storage.
