@@ -601,8 +601,8 @@ func TestKeyLengthIsCountedInBytesNotCharacters(t *testing.T) {
 
 // An undeclared collection is refused even when it carries no records.
 //
-// The pre-check only looked at the FIRST record, so {"nope": []} —
-// a collection the store never declared, with nothing in it — passed
+// The pre-check only looked at the FIRST record, so {"nope": []},
+// a collection the store never declared, with nothing in it, passed
 // through and landed on the context as an empty collection a handler
 // could read back. The loop below it already refused every record of an
 // undeclared collection, which is what made that check both unreachable
@@ -658,7 +658,7 @@ func TestStripJSONLeavesNoStaleContentLength(t *testing.T) {
 
 // The derived upload bound follows the caps the Send named, both of
 // them. Summing MaxBytes alone let a collection that declares 512 bytes
-// x 10 records — the POC's declaration, 5 KiB of records — render
+// x 10 records, the POC's declaration, 5 KiB of records, render
 // data-local-max="1114112": the browser's fail-closed pre-flight could
 // never fire and the server accepted a megabyte for a 5 KiB collection.
 func TestTheUploadBoundFollowsTheCapsItNames(t *testing.T) {
@@ -666,7 +666,7 @@ func TestTheUploadBoundFollowsTheCapsItNames(t *testing.T) {
 	small := Define[draft](s, "notes", CollectionConfig{
 		Version: 1, KeyField: "id", MaxRecordBytes: 512, MaxRecords: 10,
 	})
-	// MaxBytes was not declared, so it defaulted to 1 MiB — a size these
+	// MaxBytes was not declared, so it defaulted to 1 MiB, a size these
 	// ten records can never reach.
 	if got := small.def.maxBytes; got != DefaultMaxBytes {
 		t.Fatalf("MaxBytes = %d, want the %d default", got, DefaultMaxBytes)
@@ -763,7 +763,7 @@ func TestAReadOutsideWrapWarnsInDev(t *testing.T) {
 	if logs.Len() != 0 {
 		t.Fatalf("the warning repeated: %s", logs.String())
 	}
-	// A mirrored collection legitimately arrives on a cookie, with no
+	// A mirrored collection arrives on a cookie, with no
 	// wrapper in sight: a screen render is not a mistake.
 	logs.Reset()
 	_, _, _ = Get(context.Background(), p, "view")

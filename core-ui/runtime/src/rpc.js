@@ -212,9 +212,9 @@
     // The request as one object a hook can decorate. A trigger that
     // names modules in data-fui-rpc-with has each loaded first (the
     // loader is idempotent), so a module that must ride on this
-    // request — framework/local's upload bridge is the one that
-    // exists — is registered before the fetch, never racing the
-    // marker scan. Hooks are a seam, not a policy: NS._rpcHooks.request
+    // request is registered before the fetch, never racing the
+    // marker scan; framework/local's upload bridge is the one that
+    // exists. Hooks are a seam, not a policy: NS._rpcHooks.request
     // is awaited in order before the fetch, NS._rpcHooks.response is
     // awaited in order on a 2xx after the headers the runtime itself
     // reads and before it reads the body. A response hook must not
@@ -227,7 +227,7 @@
     // request, and a hook that could not prepare the request is saying
     // the server would be handed something other than what the markup
     // promised. Dispatching anyway is the worst of the three outcomes:
-    // the handler acts on a request that looks complete and is not — a
+    // the handler acts on a request that looks complete and is not: a
     // save with the draft missing, a check run against no team, and
     // nothing in the page to say so. A module that would not load, a
     // hook that threw, or a hook that set req.fatal itself cancels the

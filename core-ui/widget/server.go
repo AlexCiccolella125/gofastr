@@ -178,7 +178,7 @@ func serveRuntimeModule(w http.ResponseWriter, r *http.Request) {
 	// request "immutable" freezes the module in every browser that
 	// asked for it: the URL cannot bust, so the next deploy never
 	// reaches them and the only cure is the user clearing their cache.
-	// A mismatched or missing ?v= revalidates instead — the policy
+	// A mismatched or missing ?v= revalidates instead, the policy
 	// every other /__gofastr script follows.
 	if r.URL.Query().Get("v") == runtime.ModuleHash(name) {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")

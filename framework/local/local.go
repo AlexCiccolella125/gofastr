@@ -74,7 +74,7 @@ const KeyMaxLen = 256
 // reserves. Mirrors validKey in local-store.js, which counts the same
 // UTF-8 bytes. Unexported: Collection.Key panics with the reason, Put
 // and Delete return an error that names the key, and the browser
-// refuses with reason 'key' — nothing a caller does needs to ask the
+// refuses with reason 'key'; nothing a caller does needs to ask the
 // question separately.
 func validRecordKey(key string) bool {
 	if key == "" || len(key) > KeyMaxLen {
@@ -89,7 +89,7 @@ func validRecordKey(key string) bool {
 
 // Store is one app's declaration: an id and its collections. Declare
 // it once, at package level or in main, and define every collection
-// before the first render — the browser manifest is fixed when it is
+// before the first render: the browser manifest is fixed when it is
 // first served.
 type Store struct {
 	app string

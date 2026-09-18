@@ -53,8 +53,8 @@ var (
 	e2ePref   *Collection[e2ePrefs]
 	e2eSeed   *SeededSignal[e2eDraft]
 	// Collections no marker on the page touches, so a test can plant a
-	// stored version and watch the FIRST migration of a collection run
-	// — the page's own markers migrate drafts and prefs at scan time.
+	// stored version and watch the FIRST migration of a collection run.
+	// The page's own markers migrate drafts and prefs at scan time.
 	e2eNotes  *Collection[e2eDraft]
 	e2eTagged *Collection[e2eTag]
 )
@@ -466,7 +466,7 @@ func TestE2E_SeededSignalRoundTripsAndSurvivesNavigation(t *testing.T) {
 }
 
 // The upload bridge delivers exactly the declared collection and key
-// to the wrapped Go handler — and not the undeclared records — and
+// to the wrapped Go handler, and not the undeclared records, and
 // the download bridge writes the handler's records back.
 func TestE2E_UploadDeliversOnlyTheDeclaredAndDownloadWritesBack(t *testing.T) {
 	e := startE2E(t)
@@ -575,10 +575,10 @@ func TestE2E_ClearOnNextLoad(t *testing.T) {
 
 // A logout that could not read the store must not report success.
 //
-// The primitive's enumerations settle {ok, reason, …} precisely so a
+// The primitive's enumerations settle {ok, reason, …} so a
 // caller can tell an aborted transaction from an empty collection.
 // clear() built on the bare array could not: it reported {ok:true} for
-// a store whose records — and whose mirror cookies — all survived,
+// a store whose records, and whose mirror cookies, all survived,
 // which on the logout path is the previous user's data left in the
 // browser with the UI saying it is gone.
 func TestE2E_ClearReportsAnEnumerationItCouldNotRead(t *testing.T) {
@@ -611,7 +611,7 @@ func TestE2E_ClearReportsAnEnumerationItCouldNotRead(t *testing.T) {
 	if ok, _ := res["ok"].(bool); ok {
 		t.Fatalf("store.clear() = %v — a logout has to report the collection it could not clear", res)
 	}
-	// The record is still there, which is exactly why the report matters.
+	// The record is still there, which is why the report matters.
 	var kept e2eDraft
 	evalJSON(t, ctx, draftsJS+`.get('a').then((v) => v || null)`, &kept)
 	if kept.Title != "kept" {
@@ -650,7 +650,7 @@ func plantV1(t *testing.T, ctx context.Context, coll, key, json string, version 
 //
 // P.set settles {ok:false} on a quota refusal or an aborted transaction
 // rather than rejecting, so Promise.all resolved and the new version was
-// stamped over records that were still on the old schema — a corruption
+// stamped over records that were still on the old schema, a corruption
 // that never re-runs. And whenReady's answer was discarded by every
 // method, so the records were served anyway.
 func TestE2E_AFailedMigrationNeitherStampsNorAnswers(t *testing.T) {
@@ -745,7 +745,7 @@ func TestE2E_AVersionDowngradeIsRefusedNotAccepted(t *testing.T) {
 
 // The mirror cookie carries the MIGRATED record. Re-encoding the
 // entry's pre-migration value handed the server the old schema on every
-// request, for as long as nothing wrote the record again — and the
+// request, for as long as nothing wrote the record again, and the
 // server validates the cookie against the NEW type, so the record the
 // browser holds and the record the server reads disagree.
 func TestE2E_TheMirrorCarriesTheMigratedRecord(t *testing.T) {
@@ -768,7 +768,7 @@ func TestE2E_TheMirrorCarriesTheMigratedRecord(t *testing.T) {
 }
 
 // On https the mirror cookie is Secure. Without it a single plain-http
-// request to the origin — a typo, a stripped link, a captive portal —
+// request to the origin, a typo, a stripped link, a captive portal,
 // carries every mirrored record in clear text, and the Go side has set
 // Secure from the request scheme since the first commit.
 func TestE2E_TheMirrorCookieIsSecureOnHTTPS(t *testing.T) {
@@ -807,10 +807,10 @@ func TestE2E_TheMirrorCookieIsSecureOnHTTPS(t *testing.T) {
 
 // Every mirrored collection rides the Cookie header on EVERY request.
 // The Go declaration bounds what a store may ask for; the browser
-// bounds what it actually holds, because component encoding is not
+// bounds what it holds, because component encoding is not
 // free. Past the budget the origin starts answering 431 and the app is
 // unreachable from that browser until the user clears cookies by hand,
-// so the mirror write is refused — loudly, and without losing the
+// so the mirror write is refused, loudly and without losing the
 // record.
 func TestE2E_TheMirrorRefusesToOverfillTheCookieHeader(t *testing.T) {
 	e := startE2E(t)
@@ -858,7 +858,7 @@ func TestE2E_TheMirrorRefusesToOverfillTheCookieHeader(t *testing.T) {
 // A logout by full navigation lands on whatever page the app redirects
 // to, and that page need not carry a store marker. The clear bit was
 // honoured only inside openStore, so such a page dropped it on the
-// floor — and the bit expired five minutes later, with the previous
+// floor, and the bit expired five minutes later, with the previous
 // user's records still in the browser.
 func TestE2E_ClearOnNextLoadIsHonouredWithoutAStoreMarker(t *testing.T) {
 	e := startE2E(t)
@@ -887,11 +887,11 @@ func TestE2E_ClearOnNextLoadIsHonouredWithoutAStoreMarker(t *testing.T) {
 // The upload bridge fails closed.
 //
 // A trigger that declares records is promising the handler those
-// records. When they cannot be attached — the store is not declared,
-// the body is not one the field can ride on, the gather failed, or they
-// are past the bound the declaration itself implies — the request is
-// not sent at all. Sending it anyway gave the handler something that
-// looks complete and is not, and the page never heard.
+// records. When they cannot be attached, because the store is not
+// declared, the body is not one the field can ride on, the gather
+// failed, or they are past the bound the declaration itself implies,
+// the request is not sent at all. Sending it anyway gave the handler
+// something that looks complete and is not, and the page never heard.
 func TestE2E_TheUploadRefusesRatherThanSendWithoutItsRecords(t *testing.T) {
 	e := startE2E(t)
 	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
@@ -937,7 +937,7 @@ func TestE2E_TheUploadRefusesRatherThanSendWithoutItsRecords(t *testing.T) {
 // A download op the browser refused is not silence. The response has
 // already been written when the header is read, so the server believes
 // it wrote what the browser would not take; the bridge is advisory by
-// construction, which is exactly why it has to say so.
+// construction, which is why it has to say so.
 func TestE2E_ARefusedDownloadOpIsReported(t *testing.T) {
 	e := startE2E(t)
 	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
@@ -989,9 +989,9 @@ func TestE2E_TheBrowserCountsKeyBytesLikeGoDoes(t *testing.T) {
 //
 // Cap enforcement is read-then-write across two IndexedDB transactions:
 // count what is stored, then add one. Fired together, both reads saw
-// the same total, both decided they fit and both landed — and a page
+// the same total, both decided they fit and both landed, and a page
 // that writes on every keystroke fires them together all the time. The
-// declared cap is then simply not a cap.
+// declared cap is then not a cap.
 func TestE2E_RacingPutsCannotPassTheCollectionCap(t *testing.T) {
 	e := startE2E(t)
 	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
@@ -1034,7 +1034,7 @@ func TestE2E_RacingPutsCannotPassTheCollectionCap(t *testing.T) {
 // Forgetting the manifest route used to fail silently: localStore(app)
 // answered null and the page script died on a null read with nothing
 // naming the missing line. /plain serves the runtime and the modules and
-// no manifest at all — the shape of an app that registered the extra
+// no manifest at all, the shape of an app that registered the extra
 // script and not the route, or neither.
 func TestE2E_AStoreWithNoManifestSaysWhichURLItWanted(t *testing.T) {
 	e := startE2E(t)

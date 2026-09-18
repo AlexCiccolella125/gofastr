@@ -19,11 +19,11 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   by responsibility and each under the per-module byte budget:
   `local-store` (`Requires("local")`: the store, the caps and the
   collection API), `local-bridge` (`Requires("local-store")`: every way
-  the store reaches a Go handler — the seed, the mirror cookie, the
+  the store reaches a Go handler, the seed, the mirror cookie, the
   upload and the download; a store that keeps its records to itself
   never loads it) and `local-migrate` (`LoadIdle`: the version steps,
   asked for by name the moment a rewrite is due, so a collection with no
-  version step never runs a line of it) — on top of the kernel's
+  version step never runs a line of it), on top of the kernel's
   browser-store primitive (IndexedDB; no dependency): `get`, `put`, `delete`, `list`
   with ordering, `count`, `subscribe` (this tab's writes and other
   tabs'), `clear`; every call settles, and a refusal
@@ -43,9 +43,9 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   field stripped before the handler); `Put`/`Delete`/`Clear` write
   records back through the `X-Gofastr-Local` response header, and
   `ClearOnNextLoad` covers a full-navigation logout. Reads say where
-  the record came from — `local.SourceUpload` or `local.SourceMirror`,
-  a mirror being a **client hint** anyone on the origin can write —
-  and the mirrored collections of every store share one 4 KiB cookie
+  the record came from: `local.SourceUpload` or `local.SourceMirror`,
+  a mirror being a **client hint** anyone on the origin can write.
+  The mirrored collections of every store share one 4 KiB cookie
   budget (`MirrorStoreMaxBytes`, a panic at `Define` naming the stores,
   refused in the browser with reason `mirror`) so they cannot cook a
   Cookie header into a 431.
@@ -54,8 +54,8 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   the declaration, is not sent at all. Local-first state, not offline
   sync. Proof: `examples/site` at `/forms/draft-notes`;
   `gofastr docs local-state`.
-  `Store.Script()` serves the declaration as one expression — the URL
-  for the rail and the step that mounts the route — because doing one
+  `Store.Script()` serves the declaration as one expression, the URL
+  for the rail and the step that mounts the route, because doing one
   half without the other 404s the manifest and leaves `localStore(app)`
   answering `null`, which the module warns about by name; the upload
   bound `Send` derives is the smaller of a collection's two caps rather

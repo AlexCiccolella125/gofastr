@@ -32,10 +32,10 @@ import (
 const uploadField = "__local"
 
 // Upload body bounds. The default is DERIVED from what the Send named:
-// per item the most that item can actually put on the wire, summed,
+// per item the most that item can put on the wire, summed,
 // plus UploadBodySlack for the rest of the body. There is no floor: a
-// flat one meant a collection capped at 512 bytes x 10 records — 5 KiB
-// of records — still declared a 1 MiB bound, so the browser's
+// flat one meant a collection capped at 512 bytes x 10 records, 5 KiB
+// of records, still declared a 1 MiB bound, so the browser's
 // fail-closed pre-flight could never fire and the server accepted a
 // megabyte for a 5 KiB collection. A bound the declaration cannot
 // reach is not a bound. Raise it explicitly with Upload.Max.
@@ -232,9 +232,9 @@ type uploadRecord struct {
 	V json.RawMessage `json:"v"`
 }
 
-// records is what Wrap puts on the context: app → collection → key →
-// raw JSON. A map keyed by app so two stores' uploads on one request
-// do not collide.
+// records is what Wrap puts on the context: raw JSON by app, then
+// collection, then key. A map keyed by app so two stores' uploads on
+// one request do not collide.
 type records map[string]map[string]map[string]json.RawMessage
 
 type recordsKey struct{}
@@ -255,7 +255,7 @@ func recordsFrom(ctx context.Context, app string) map[string]map[string]json.Raw
 }
 
 // wrappedKey marks a context that went through some store's Upload.Wrap,
-// on EVERY path through it — a GET, a body the field cannot ride on and
+// on EVERY path through it: a GET, a body the field cannot ride on and
 // a body without the field all reach the handler with no records, and
 // "the wrapper ran and the browser sent nothing" has to be
 // distinguishable from "nobody wrapped this handler". Only the dev
@@ -335,8 +335,8 @@ func (u *Upload) parse(raw []byte) (map[string]map[string]json.RawMessage, error
 // field removed from r.Form / r.PostForm / r.MultipartForm after
 // parsing. A request with no reserved field passes through with no
 // records. An undeclared collection or key is a 400; a record over a
-// cap is a 413. h then sees the records through Get, List and
-// and app.RequestFromContext works inside it.
+// cap is a 413. h then sees the records through Get and List, and
+// app.RequestFromContext works inside it.
 func (u *Upload) Wrap(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(markWrapped(app.WithRequest(r.Context(), r), u.store.app))
@@ -397,7 +397,7 @@ func respondUploadError(w http.ResponseWriter, err error) {
 // handler sees semantically the same object with a different encoding:
 // keys in Go's map order, no insignificant whitespace. A handler that
 // hashes or signs the raw body must do it upstream of Wrap. Both
-// r.ContentLength and the Content-Length HEADER are corrected — a stale
+// r.ContentLength and the Content-Length HEADER are corrected: a stale
 // header is what a downstream proxy, a middleware that re-reads the
 // body, or a test that trusts it will believe over the reader.
 func (u *Upload) stripJSON(r *http.Request) ([]byte, error) {

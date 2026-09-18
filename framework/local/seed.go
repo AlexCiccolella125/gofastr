@@ -15,11 +15,11 @@ import (
 // the signal in place, then writes every later value of the signal
 // back to the record and mirrors another tab's write in. The marker
 // rides on the bindings, so a page that never binds the slice never
-// restores it — the same rule store.Persist keeps.
+// restores it, the same rule store.Persist keeps.
 //
 // The record cannot appear at FIRST PAINT: IndexedDB is asynchronous by
 // construction. A screen that must not flash the default needs the
-// value on the request — a Mirror collection read with Get — not a
+// value on the request, a Mirror collection read with Get, not a
 // seeded signal.
 type SeededSignal[T any] struct {
 	coll  *Collection[T]

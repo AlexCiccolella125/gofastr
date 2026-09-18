@@ -1,23 +1,24 @@
-# framework/local — local-first state, declared in Go
+# framework/local: local-first state, declared in Go
 
 A `local.Store` declares, once per app, the collections a browser keeps
 for that app: a Go record type, a schema version with migrations, a key
 field, a size cap per record and per collection. The browser API is
 generated from that declaration and served as three runtime modules:
 `local-store` (the store, the caps, the collection API), `local-bridge`
-(every way the store reaches a Go handler — seed, mirror cookie, upload,
+(every way the store reaches a Go handler: seed, mirror cookie, upload,
 download) and `local-migrate` (`LoadIdle`: the version steps). All on
 the kernel's `local` primitive (IndexedDB, tiny-value localStorage
 fallback), under `gofastr.state.local.<app>.<collection>:<key>`.
 
-The bridges are **HTTP-shaped** — the upload is a request-body field,
-the download a response header — so a WebSocket app uploads through an
+The bridges are **HTTP-shaped**, the upload a request-body field and
+the download a response header, so a WebSocket app uploads through an
 action. The mirror is for a few small preferences (4 KiB of Cookie
 header for the mirrored collections of every store the process
-declares, a panic at `Define` past it); a large record is read at action time through the upload, or
-painted after hydration by a seed. A mirror read is a **client hint**
-(check the `local.Source`), and the upload **fails closed** — a request
-whose declared records could not be attached is not sent.
+declares, a panic at `Define` past it); a large record is read at
+action time through the upload, or painted after hydration by a seed.
+A mirror read is a **client hint** (check the `local.Source`), and the
+upload **fails closed**: a request whose declared records could not be
+attached is not sent.
 
 **Use this when** the prompt mentions: local-first, browser state,
 persisted draft, "keep it on the device", read a browser value on the
@@ -98,7 +99,7 @@ func routes() {
 ```
 
 Browser side (after `__gofastr.loadModule('local-store')`):
-`__gofastr.localStore('site').collection('drafts')` → `get`, `put`,
+`__gofastr.localStore('site').collection('drafts')` has `get`, `put`,
 `delete`, `list({orderBy, desc})`, `count`, `subscribe`, `clear`. Every
 call settles `{ok, reason}`; refusals raise `gofastr:local-error`, and a
 collection whose migration did not complete refuses every call with

@@ -6,8 +6,8 @@
 // keeping records: it happens once per browser per version, it rewrites
 // every record of a collection at once, and when it goes wrong the
 // damage is a collection on two schemas rather than one write lost. So
-// it is its own module, registered LoadIdle — never on the critical
-// path — and local-store asks for it by name at the moment a rewrite is
+// it is its own module, registered LoadIdle, never on the critical
+// path, and local-store asks for it by name at the moment a rewrite is
 // due. A collection that declares no version step never runs a line of
 // this file.
 //
@@ -34,8 +34,8 @@
 
   // applyStep runs one declared step over one record. Steps are data
   // transforms declared in Go (rename, default, remove) plus `func`,
-  // a host-registered function on window.__gofastr._localMigrations
-  // — a real function loaded from the script rail, never text, so the
+  // a host-registered function on window.__gofastr._localMigrations,
+  // a real function loaded from the script rail, never text, so the
   // page stays CSP-clean. A rename onto an existing field, or of a
   // missing one, is a no-op, which is what lets two tabs migrate the
   // same collection without a lock: every declared step is
@@ -67,13 +67,13 @@
   };
 
   // _localMigrate rewrites every record of one collection through the
-  // declared steps, then stamps the new version — in that order, and
+  // declared steps, then stamps the new version, in that order, and
   // only if every write landed.
   //
   // P.set settles {ok:false} on a quota refusal or an aborted
   // transaction; it does not reject. Stamping the version over a
   // half-rewritten collection would record the migration as done, so it
-  // would never run again and every later read would mix two schemas —
+  // would never run again and every later read would mix two schemas,
   // which is why every settlement is checked rather than awaited.
   NS._localMigrate = (ctx) => ctx.P.entries(ctx.prefix).then((er) => {
     if (!er.ok) return ctx.fail(ctx.app, ctx.coll, '', 'migration').ok;
@@ -99,6 +99,6 @@
       });
     });
     // A func step whose function is not registered throws; the records
-    // and the version are left exactly as they were.
+    // and the version are left as they were.
   }).catch(() => ctx.fail(ctx.app, ctx.coll, '', 'migration').ok);
 })();

@@ -233,8 +233,8 @@ view, src, err := local.Get(ctx, Prefs, "view")
 _, _, _ = view, src, err
 ```
 
-`src` is the **provenance**, and reading it is not optional for anything
-that matters. `local.SourceMirror` means the value came from a cookie;
+`src` says where the value came from, and reading it is not optional for
+anything that matters. `local.SourceMirror` means the value came from a cookie;
 `local.SourceUpload` means it came through `Upload.Wrap`, on a request
 whose trigger declared it; `local.SourceNone` means the request carried
 nothing (`src.Found()` is the plain "did anything arrive"). `List`
@@ -412,7 +412,7 @@ redirect lands on, marker or not. `examples/site` wires the second at
 - **No secrets, no session tokens.** The store is readable by any script
   on the origin, and a mirrored record travels on every request as a
   cookie. A session is a signed token in an `HttpOnly` cookie
-  ([Reactivity](reactivity.md) → Sessions); it never belongs here.
+  (the Sessions section of [Reactivity](reactivity.md)); it never belongs here.
 
 ## The runnable proof
 

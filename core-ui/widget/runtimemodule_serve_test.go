@@ -70,8 +70,8 @@ func TestServeRuntimeModuleServesRegisteredBehavior(t *testing.T) {
 	}
 }
 
-// A module URL WITHOUT the content hash — the loader's fallback for a
-// name the manifest does not carry — must not be cached immutably.
+// A module URL WITHOUT the content hash, the loader's fallback for a
+// name the manifest does not carry, must not be cached immutably.
 // Freezing it pins that build of the module in the browser under a URL
 // that can never bust: the next deploy never reaches it, and only the
 // user clearing their cache does.

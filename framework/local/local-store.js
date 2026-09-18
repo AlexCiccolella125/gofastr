@@ -1,5 +1,5 @@
 // local-store: the runtime half of framework/local, a local-first
-// state API for GoFastr apps — declared in Go, persisted in the
+// state API for GoFastr apps: declared in Go, persisted in the
 // browser, with a documented contract.
 //
 // This module is the OPINION; the storage is not here. Records live in
@@ -10,11 +10,11 @@
 // not carry: named collections with a schema version and migrations,
 // a size cap per record and per collection, a key field, an ordered
 // list, and a change feed that includes this tab's own writes. The
-// bridges to Go screens — a signal seeded from a record, a mirror
-// cookie, an upload declared per request, and records written from a
-// response — are local-bridge.js, which Requires this one; the version
-// steps are local-migrate.js, loaded at idle. A page that only reads
-// records pays for neither.
+// bridges to Go screens are local-bridge.js, which Requires this one:
+// a signal seeded from a record, a mirror cookie, an upload declared
+// per request, and records written from a response. The version steps
+// are local-migrate.js, loaded at idle. A page that only reads records
+// pays for neither.
 //
 // The declaration arrives from Go, not from the DOM: Store.Script
 // serves `window.__gofastr_local[<app>]` on the host's extra-script
@@ -77,7 +77,7 @@
   };
   // KeyMaxLen in local.go, in the same unit: BYTES. String.length is
   // UTF-16 code units, so 200 accented characters passed here and were
-  // refused by the Go validator — a key the browser wrote happily and
+  // refused by the Go validator: a key the browser wrote happily and
   // the server would not read, on a record that then only exists on one
   // side. The two validators mirror each other or they do not.
   const validKey = (key) => typeof key === 'string' && key !== '' && bytesOf(key) <= 256 && !RESERVED.test(key);
@@ -98,8 +98,8 @@
 
   // ─── the mirror seam ────────────────────────────────────────────
 
-  // The mirror is a BRIDGE to a Go screen — a cookie a render reads at
-  // first paint — not part of keeping records, so it lives with the
+  // The mirror is a BRIDGE to a Go screen, a cookie a render reads at
+  // first paint, not part of keeping records, so it lives with the
   // other three in local-bridge.js and this file holds one seam to it.
   // Calls made before the bridge installs itself are queued, never
   // dropped: a cookie is read on the NEXT request, so the only thing
@@ -181,15 +181,12 @@
     // whose function is not registered leaves the records and the
     // version untouched and raises gofastr:local-error with reason
     // 'migration': the data is worth more than the schema.
-    // migrate brings one collection to its declared version, once per
-    // page, under the Web Locks API when the browser has it so two tabs
-    // do not race the same rewrite.
     //
     // The rewrite itself is local-migrate.js, a third module this one
     // asks for by name. Schema evolution is not the same job as keeping
-    // records — different failure mode, different blast radius, and a
-    // collection that declares no version step never runs a line of it
-    // — so it is a module of its own, registered LoadIdle so it is
+    // records: different failure mode, different blast radius, and a
+    // collection that declares no version step never runs a line of it.
+    // So it is a module of its own, registered LoadIdle so it is
     // never on the critical path yet always there before the first read
     // of a versioned collection.
     const migrate = (coll, spec) => {
@@ -251,7 +248,7 @@
     // usable, {ok:false, reason:'migration'} when it is not. EVERY
     // method goes through it. A collection whose migration failed holds
     // records on a schema this build cannot read, and serving them
-    // anyway — which is what discarding whenReady's answer did — turns
+    // anyway, which is what discarding whenReady's answer did, turns
     // one failed rewrite into corrupt data everywhere the records go.
     const gate = (coll) => whenReady(coll).then((ok) => (ok ? null : fail(app, coll, '', 'migration')));
 
@@ -391,8 +388,8 @@
         },
         // clear removes every record of the collection, and says so
         // only when it did. An enumeration that aborted used to look
-        // exactly like an empty collection, so the logout path reported
-        // {ok:true} over records — and mirror cookies — that all
+        // the same as an empty collection, so the logout path reported
+        // {ok:true} over records, and mirror cookies, that all
         // survived. A removal that failed is the same lie one record
         // deep, so both are checked.
         clear() {
@@ -427,8 +424,8 @@
       // The one validator local-bridge needs, on the object it already
       // fetches: a byte length and a reserved-name set that must agree
       // with the Go side. It was an undocumented global bag, __gofastr
-      // ._localHelpers, a second public surface anything on the origin
-      // could replace — and replacing validKey is how a key escapes the
+      // ._localHelpers, a second public object anything on the origin
+      // could replace, and replacing validKey is how a key escapes the
       // namespace.
       helpers: { validKey },
       collection(name) {

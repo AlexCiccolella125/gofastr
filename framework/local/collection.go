@@ -34,14 +34,14 @@ const (
 	// store in the process may declare together: the sum of MaxRecords
 	// × MaxRecordBytes over them. The per-collection ceilings bound one
 	// cookie; nothing bounded the Cookie HEADER, and that is the one
-	// the world has an opinion about — most proxies and servers refuse
-	// a request header block over 8–16 KiB, and the answer is a 431
+	// the world has an opinion about: most proxies and servers refuse
+	// a request header block over 8 to 16 KiB, and the answer is a 431
 	// that makes the origin unreachable from that browser until the
 	// user clears their cookies by hand. Four mirrored collections at
 	// the old ceilings were 64 KiB of declaration. 4 KiB leaves room
 	// for the session cookie, the CSRF cookie and everything else the
 	// app puts on the origin, and the browser measures the same bound
-	// on what it actually holds (encoding is not free). The budget is
+	// on what it holds (encoding is not free). The budget is
 	// per process and not per store because the Cookie header is per
 	// origin: two stores an app declares ride the same header.
 	MirrorStoreMaxBytes = 4 << 10

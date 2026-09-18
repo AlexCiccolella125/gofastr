@@ -36,7 +36,7 @@ func (s *Store) scriptJS() []byte {
 		cols[n] = d.manifest()
 	}
 	// mirrorMax travels with the declaration: the browser enforces the
-	// same aggregate budget on the cookies it actually holds, which are
+	// same aggregate budget on the cookies it holds, which are
 	// larger than the records they carry (component encoding).
 	body, err := json.Marshal(map[string]any{"collections": cols, "mirrorMax": MirrorStoreMaxBytes})
 	if err != nil {

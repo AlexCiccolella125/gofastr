@@ -152,7 +152,7 @@ func TestRPCHooksDecorateTheRequestAndSeeTheResponse(t *testing.T) {
 // data-fui-rpc-with is a PRECONDITION, not a hint: the trigger is
 // saying this request is not itself without that module's decoration.
 // Dispatching anyway sent the server a request that looks complete and
-// is not — a save with the draft missing — and the page had no way to
+// is not, a save with the draft missing, and the page had no way to
 // know. The same holds for a request hook that throws, or one that
 // marks the request fatal itself.
 func TestRPCWithUnknownModuleDoesNotDispatch(t *testing.T) {

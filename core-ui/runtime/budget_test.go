@@ -160,9 +160,9 @@ const (
 	// the downward direction under the 2026-09-04 precedent above: the
 	// loader's module URL lost its ternary when the un-versioned
 	// fallback became a sentinel ?v= (no module URL is bare), so the
-	// real core got smaller at level 1 (15438 → 15427) while the fixture
+	// real core got smaller at level 1 (15438 to 15427) while the fixture
 	// padded onto the level-6 goal stopped crossing the old window
-	// (15443 <= 15446 — the anti-vacuity bracket had gone vacuous). The
+	// (15443 <= 15446: the anti-vacuity bracket had gone vacuous). The
 	// line moved to the largest value below the fixture's crossing,
 	// restoring the bracket [real 15427, fixture 15443]; verified by
 	// running TestCoreBudgetRejectsCliffOverflow, not by arithmetic.

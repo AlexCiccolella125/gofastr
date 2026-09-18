@@ -1,5 +1,5 @@
 // local-bridge: the four bridges between framework/local's browser
-// store and Go screens — the seed (a signal filled from a record), the
+// store and Go screens: the seed (a signal filled from a record), the
 // mirror (a record a render reads at first paint, through a cookie),
 // the upload (records that ride an RPC request) and the download
 // (records a response writes back). Requires local-store, which owns
@@ -10,9 +10,10 @@
 //
 // The line between the modules is a responsibility, not a byte count:
 // local-store keeps records, local-migrate rewrites them between
-// versions, local-bridge is every way they reach a Go handler. A page whose store keeps its records to
-// itself never loads this file; local-store asks for it when a
-// declaration mirrors a collection or a logout is pending.
+// versions, local-bridge is every way they reach a Go handler. A page
+// whose store keeps its records to itself never loads this file;
+// local-store asks for it when a declaration mirrors a collection or a
+// logout is pending.
 (() => {
   'use strict';
   const NAME = 'local-bridge';
@@ -22,15 +23,15 @@
   (NS.loadedModules = NS.loadedModules || {})[NAME] = true;
 
   // The reserved-name guard is spelled here because this file needs it
-  // BEFORE it has a store — an app id off a marker names the store it
+  // BEFORE it has a store: an app id off a marker names the store it
   // would fetch. Everything else comes off the store object this file
-  // already fetches, so there is no second global surface for a script
-  // on the origin to replace.
+  // already fetches, so there is no second global for a script on the
+  // origin to replace.
   const RESERVED = /^(__proto__|constructor|prototype)$/;
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
   const openStore = (app) => NS.localStore(app);
-  // validKey is the one validator with real content — a byte length and
-  // a reserved-name set that must agree with the Go side — so it comes
+  // validKey is the one validator with real content, a byte length and
+  // a reserved-name set that must agree with the Go side, so it comes
   // off the store rather than being spelled twice. encode and isObject
   // are two lines each and are spelled here.
   const validKeyOf = (store) => (store && store.helpers && store.helpers.validKey) || (() => false);
@@ -62,8 +63,8 @@
   //
   // On https the cookie is Secure, like every cookie the Go side sets
   // (response.go follows the request scheme). Without it a single
-  // plain-http request to the origin — a typo, a stripped link, a
-  // captive portal — carries every mirrored record in clear text.
+  // plain-http request to the origin, a typo, a stripped link, a
+  // captive portal, carries every mirrored record in clear text.
   // Spelled as whole literal writes per case rather than a
   // concatenated suffix: the cookie lint reads a document.cookie
   // assignment operand by operand and refuses any non-literal that is
@@ -128,8 +129,8 @@
 
   // Clear-on-next-load: a full-navigation logout cannot ride an RPC
   // response header, so the Go side plants a bit in a cookie and this
-  // module honours it once, then drops the cookie — but only once the
-  // clear actually succeeded, or a logout that could not reach the
+  // module honours it once, then drops the cookie, but only once the
+  // clear succeeded, or a logout that could not reach the
   // store would be forgotten.
   //
   // Honoured over every app the manifest declares, not only the ones a
@@ -210,9 +211,9 @@
     };
     if (!entry) {
       // Spelled at the sink, and BEFORE the entry is inserted. wireSeed
-      // already refused a reserved name above, so this is unreachable —
+      // already refused a reserved name above, so this is unreachable,
       // but core-ui/check's proto-key-write lint reads the guard
-      // immediately before the write, deliberately: a guard a function
+      // right before the write, on purpose: a guard a function
       // scope away is one the next edit moves out from under, and
       // data-fui-signal="__proto__" re-parents the whole signal store.
       // It sat AFTER seeds.set, so the one path that could reach it
@@ -285,8 +286,8 @@
   // refuse marks the request fatal so rpc.js cancels the dispatch, and
   // tells the page why. The upload bridge FAILS CLOSED: a request whose
   // declared records could not be attached is not the request the
-  // markup promised, and a handler that acts on it — saving a draft
-  // that is not there, checking a team it never received — is worse
+  // markup promised, and a handler that acts on it, saving a draft
+  // that is not there or checking a team it never received, is worse
   // than no request at all.
   const refuse = (req, app, reason, size, max) => {
     req.fatal = 'local:' + reason;
@@ -310,7 +311,7 @@
     }
     // The declaration's own ceiling, carried on the trigger by
     // Upload.Attrs. Without it the browser posted whatever it had and
-    // the server answered a bare 413 the page could not see — the one
+    // the server answered a bare 413 the page could not see, the one
     // failure a size-capped store exists to report.
     const max = parseInt(node.getAttribute('data-local-max'), 10);
     return gather(store, sendSpec).then((payload) => {
@@ -355,7 +356,7 @@
   // The download bridge is ADVISORY and the doc says so: the response
   // has already been written when the browser reads the header, so the
   // server believes it wrote whatever the browser then refuses. What
-  // the bridge owes the page is to be loud about it — every settlement
+  // the bridge owes the page is to be loud about it: every settlement
   // is read, a refusal is warned and raised, and a store the manifest
   // never declared is not silence.
   const responseHook = (node, r) => {
@@ -375,8 +376,8 @@
       if (r && r.ok) return;
       // The op carries the store's own gofastr:local-error too; this
       // one says the op came from a RESPONSE, so the server believes it
-      // wrote what the browser refused. Advisory by construction — the
-      // response is already sent — which is exactly why it has to be
+      // wrote what the browser refused. Advisory by construction, the
+      // response is already sent, which is why it has to be
       // visible.
       const why = (r && r.reason) || 'unavailable';
       console.warn('[gofastr] local download refused:', msg.app, coll, key, why);

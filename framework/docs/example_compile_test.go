@@ -170,7 +170,7 @@ func repoGoDirective(t *testing.T, repoRoot string) string {
 // agentDocs are the package-level agents.md files whose snippets opt into
 // this gate too. They are read from disk rather than contentFS: they live
 // beside the code they describe, not in the guide corpus, and a shape
-// snippet that does not compile is the same rot there as here —
+// snippet that does not compile is the same rot there as here:
 // framework/local/agents.md reused a type name as a variable name and
 // referred to three identifiers it never declared.
 var agentDocs = []string{

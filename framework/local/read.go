@@ -58,7 +58,7 @@ const (
 	// SourceMirror is a mirror cookie: a CLIENT HINT. Any script on the
 	// origin can write it, any client can forge it, and it rides every
 	// request whether the handler wanted it or not. Treat it the way you
-	// would treat a query parameter — never as proof of anything.
+	// would treat a query parameter, never as proof of anything.
 	SourceMirror Source = "mirror"
 )
 
@@ -174,8 +174,8 @@ func validStrict(text []byte) bool {
 // nothing, and the missing line is one the compiler cannot ask for. A
 // non-mirrored collection can ONLY arrive through the wrapper, so a read
 // of one on a request that was never wrapped is always the mistake and
-// never a browser with an empty store. Under GOFASTR_DEV — the flag the
-// dev loop sets, the one framework/dev gates livereload on — say so
+// never a browser with an empty store. Under GOFASTR_DEV, the flag the
+// dev loop sets and the one framework/dev gates livereload on, say so
 // once per collection; in production this costs one atomic read.
 var unwrappedWarned sync.Map // "<app>/<collection>" -> struct{}
 

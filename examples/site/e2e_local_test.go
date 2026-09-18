@@ -164,8 +164,8 @@ func e2ePollTrue(ctx context.Context, js string) bool {
 }
 
 // The draft-notes handler acts on an upload and on nothing else. Reading
-// local.Source as a bare boolean (src.Found()) accepts a mirror cookie —
-// a value any script on the origin writes and any client forges — and
+// local.Source as a bare boolean (src.Found()) accepts a mirror cookie,
+// a value any script on the origin writes and any client forges, and
 // the team-builder example (github.com/AlexCiccolella125/gofastr-team-builder)
 // already requires SourceUpload. Two examples teaching two habits is how
 // the weaker one gets copied.

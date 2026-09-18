@@ -128,7 +128,7 @@ func (s *LocalNotesScreen) RenderCtx(ctx context.Context) render.HTML {
 		}),
 	)
 
-	// A full-navigation logout: a native POST, answered with a redirect.
+	// A full-navigation logout: a plain form POST, answered with a redirect.
 	// No RPC attributes, so rpc.js never sees the response and the clear
 	// rides ClearOnNextLoad instead of the response header.
 	logoutForm := ui.Form(ui.FormConfig{
@@ -201,8 +201,8 @@ func localNotesLogout(w http.ResponseWriter, r *http.Request) {
 
 // actOnDraft is the habit every handler in this tree keeps: a record is
 // acted on only when it came through Upload.Wrap, on a request whose
-// trigger declared it. src.Found() would also accept a mirror cookie —
-// a value any script on the origin writes and any client forges — which
+// trigger declared it. src.Found() would also accept a mirror cookie,
+// a value any script on the origin writes and any client forges, which
 // is fine for deciding what to paint (the view preference above says so
 // on the page) and never for acting on. The team-builder example
 // (github.com/AlexCiccolella125/gofastr-team-builder) requires the same

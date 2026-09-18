@@ -137,8 +137,8 @@ func writeU(sb *strings.Builder, r rune) {
 }
 
 // ClearOnNextLoad plants the cookie gofastr.local.clear.<app> that the
-// local-store module honours on the next page that loads it — clearing
-// every record of s, then dropping the cookie, and only if the clear
+// local-store module honours on the next page that loads it: it clears
+// every record of s, then drops the cookie, and only if the clear
 // succeeded. The channel for a logout that is a full navigation.
 //
 // The module honours the bit at load over every app the manifest

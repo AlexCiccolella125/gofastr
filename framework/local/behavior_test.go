@@ -45,7 +45,7 @@ func TestBehaviorIsRegisteredAndServed(t *testing.T) {
 }
 
 // Every registered module of this package is held to the JavaScript
-// lints every embedded module is held to — and those lints still refuse
+// lints every embedded module is held to, and those lints still refuse
 // a raw storage key and an unencoded cookie key. The clean half runs
 // over this package's own source; the refusing half runs over mutated
 // copies, so each guard is watched failing, not reasoned about.

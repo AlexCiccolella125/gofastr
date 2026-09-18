@@ -162,9 +162,9 @@ It does **not** make GoFastr offline-first (an explicit
 queue of pending mutations and no sync. It is a browser remembering a
 projection.
 
-When one slice is not enough — named collections, a schema version with
-migrations, a key field, a filtered list, a value the server reads at
-render or action time or pushes back — the next step is
+One slice stops being enough at named collections, a schema version
+with migrations, a key field, a filtered list, or a value the server
+reads at render or action time or pushes back. The next step is then
 [`framework/local`](local-state.md), which builds on the same primitive
 and adds the explicit bridges. Its `SeedSignal` is the collection-backed
 cousin of `Persist`: a slice cannot be both.
