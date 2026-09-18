@@ -76,14 +76,12 @@ _, _ = Drafts, Prefs
   and `*Limit` constants). A `Mirror` collection defaults to 512 bytes
   and 4 records, clamped to 1 KiB and 16 (`Mirror*`): every record rides
   a cookie on every request.
-- **Caps across tabs.** A cap is enforced per document: one tab's puts
-  are serialised against each other, but two tabs writing at once each
-  count what they can see, and together they can pass the cap by a few
-  records. Nothing corrects it afterwards; the extra records stay until
-  something deletes them. An app that cares has one tab write (a page
-  that writes on every keystroke should elect one, or write from one),
-  or declares fewer records than it needs and leaves the margin. A cap
-  is a budget for browser-owned state, not a hard limit the store holds.
+- **Caps across tabs.** Every write to a collection queues on one chain
+  per document and holds a Web Lock on the collection while it reads the
+  total and writes, so two tabs writing at once cannot pass the cap
+  either. Safari has no Web Locks; there the cap holds per tab, and two
+  tabs writing at the same instant can pass it by a few records. An app
+  that must hold the cap there writes from one tab.
 - **Versions.** `Version` is 1 or more, and every step from 2 to `Version`
   needs a `Migration` (an empty one is fine). The browser runs the steps
   in (stored, declared] once, before the page's first read or write of
