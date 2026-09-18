@@ -45,9 +45,10 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   `ClearOnNextLoad` covers a full-navigation logout. Reads say where
   the record came from — `local.SourceUpload` or `local.SourceMirror`,
   a mirror being a **client hint** anyone on the origin can write —
-  and a store's mirrored collections share one 4 KiB cookie budget
-  (`MirrorStoreMaxBytes`, a panic at `Define`, refused in the browser
-  with reason `mirror`) so they cannot cook a Cookie header into a 431.
+  and the mirrored collections of every store share one 4 KiB cookie
+  budget (`MirrorStoreMaxBytes`, a panic at `Define` naming the stores,
+  refused in the browser with reason `mirror`) so they cannot cook a
+  Cookie header into a 431.
   The upload bridge **fails closed**: a request whose declared records
   could not be attached, or that is past the bound `Send` derives from
   the declaration, is not sent at all. Local-first state, not offline
@@ -92,7 +93,11 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   values up to 8 KiB. Both are browser APIs, so no dependency was
   added. Every entry, in either engine, lives under the literal
   `gofastr.state.` plus the component-encoded key, so an application
-  key can never name another feature's storage. `subscribe` fires when
+  key can never name another feature's storage (and `core-ui/check`'s
+  `storage-key-raw` lint now requires that namespace, `gofastr.` or
+  `gofastr:`, in front of any component-encoded storage key, the
+  primitive's application-chosen key included, where any literal prefix
+  used to pass). `subscribe` fires when
   another tab of the origin changes the key (BroadcastChannel, plus the
   `storage` event for the fallback, never both, so one write delivers
   once); a tab never hears its own writes. The fallback is a fallback
@@ -129,8 +134,11 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   component's package embeds its runtime module beside the Go and
   registers it with the markers the kernel scans for; the host serves
   it at `/__gofastr/runtime/<name>.js` under the same minification and
-  cache rules as the embedded modules, lists it in the manifest, and
-  preloads it when a marker is in the page. The kernel reads registered
+  cache rules as the embedded modules (a module URL always carries a
+  `?v=`, a sentinel when the manifest has none, and the route earns
+  `immutable` only when the `?v=` is the served bytes' hash, so no
+  build is ever pinned under a URL that cannot bust), lists it in the
+  manifest, and preloads it when a marker is in the page. The kernel reads registered
   markers from one block beside the manifest and loads the module once
   when one appears. No trigger vocabulary: the marker is the trigger.
   Spec: `docs/spec-behavior-registry.md`.
@@ -178,19 +186,6 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   marker: owners reach it through `Requires("action")`.
 
 ### Changed
-- **`core-ui/check`'s `storage-key-raw` lint now checks the
-  namespace.** "Any literal prefix" was the rule; `'x' +
-  encodeURIComponent(v)` passed it while the value still reached every
-  key on the origin under an `x`, and `encodeURIComponent(v) +
-  '.gofastr'` passed while naming nothing at all. A Web-storage key
-  with a component-encoded operand must now lead with a literal (or an
-  identifier provably holding one) that opens `gofastr.` or
-  `gofastr:`, the namespace every storage key in the tree already
-  used, machine-checked instead of conventional. The namespace arm
-  reads any encoded operand, not only an attribute-borne one, because
-  the `local` primitive's key is an application-chosen parameter the
-  provenance walk cannot see. No change to the raw and no-namespace
-  arms; the tree was already clean.
 - **One home per helper.** A clone survey over the tree found the same
   bodies re-implemented across packages; each now has one canonical
   definition and the copies are gone (164 files, about 2,500 lines
@@ -267,17 +262,6 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   where the old module reverted in silence.
 
 ### Fixed
-- **A runtime module URL is never bare, and only a matching `?v=` is
-  cached forever.** The kernel's loader dropped the cachebuster for a
-  module the manifest carried no version for, and
-  `/__gofastr/runtime/<name>.js` answered every request with a year-long
-  `immutable` — so that fallback pinned a build of the module in the
-  browser under a URL that can never bust, and the next deploy never
-  reached it. The URL now always carries a `?v=` (a sentinel when the
-  manifest has none, which costs fewer bytes than the ternary it
-  replaced) and the route earns `immutable` only when the `?v=` is the
-  served bytes' hash, revalidating otherwise — the policy every other
-  `/__gofastr` script already followed.
 - **Action groups converge on one committed member.** Two members of
   one `data-fui-toggle-group` clicked inside one round trip both
   passed the per-element re-entry guard, and the click-time revoke

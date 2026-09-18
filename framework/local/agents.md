@@ -13,8 +13,8 @@ fallback), under `gofastr.state.local.<app>.<collection>:<key>`.
 The bridges are **HTTP-shaped** — the upload is a request-body field,
 the download a response header — so a WebSocket app uploads through an
 action. The mirror is for a few small preferences (4 KiB of Cookie
-header for all of a store's mirrored collections, a panic at `Define`
-past it); a large record is read at action time through the upload, or
+header for the mirrored collections of every store the process
+declares, a panic at `Define` past it); a large record is read at action time through the upload, or
 painted after hydration by a seed. A mirror read is a **client hint**
 (check the `local.Source`), and the upload **fails closed** — a request
 whose declared records could not be attached is not sent.

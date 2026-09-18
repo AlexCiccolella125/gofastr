@@ -12,6 +12,7 @@ import (
 
 	"github.com/DonaldMurillo/gofastr/core-ui/app"
 	"github.com/DonaldMurillo/gofastr/core/config"
+	"github.com/DonaldMurillo/gofastr/core/handler"
 )
 
 // Reading browser-held records on the server. Two sources, both
@@ -26,7 +27,10 @@ import (
 // A context record wins over a cookie for the same key. Everything is
 // a client hint: validated against the declaration (collection, key,
 // size, JSON shape into T), never trusted. A value that fails to
-// decode into T is an error, not a zero value marching on.
+// decode into T is an error, not a zero value marching on. The decode
+// into T is the strict one every /__gofastr endpoint uses: a struct T
+// refuses a field it does not declare, and a duplicate key is refused
+// at every level, for a cookie and an upload alike.
 //
 // The two sources are NOT the same evidence, so every read says which
 // one answered. An uploaded record arrived on a request whose trigger
@@ -77,8 +81,9 @@ type carried struct {
 }
 
 // carriedBy gathers every record the request carried for s: the
-// uploaded ones and the mirrored cookies. List reads it; Get takes the
-// shorter path through rawFor.
+// uploaded ones and the mirrored cookies. List reads it, and so does
+// Get for a mirrored collection, so the caps counted here hold for
+// both.
 func carriedBy(ctx context.Context, s *Store) *carried {
 	out := &carried{recs: map[string]map[string]json.RawMessage{}, srcs: map[string]map[string]Source{}}
 	put := func(coll, key string, raw json.RawMessage, src Source) {
@@ -90,10 +95,25 @@ func carriedBy(ctx context.Context, s *Store) *carried {
 		out.srcs[coll][key] = src
 	}
 	if r := app.RequestFromContext(ctx); r != nil {
+		// The per-record cap is checked in decodeCookie; the collection's
+		// caps are counted here. A cookie past MaxRecords or MaxBytes is
+		// ignored, not an error: the cookie is a client hint, and the
+		// browser refuses the same write, so the extras are only ever a
+		// forged header. The count is per collection, in cookie order.
+		counts := map[string]int{}
+		sizes := map[string]int{}
 		for _, c := range r.Cookies() {
 			coll, key, raw, ok := s.decodeCookie(c)
 			if !ok {
 				continue
+			}
+			def := s.defOf(coll)
+			if _, seen := out.recs[coll][key]; !seen {
+				if counts[coll] >= def.maxRecords || sizes[coll]+len(raw) > def.maxBytes {
+					continue
+				}
+				counts[coll]++
+				sizes[coll] += len(raw)
 			}
 			put(coll, key, raw, SourceMirror)
 		}
@@ -110,9 +130,11 @@ func carriedBy(ctx context.Context, s *Store) *carried {
 
 // decodeCookie recognises a mirror cookie of this store: the name is
 // the namespace plus one component-encoded "<app>.<collection>.<key>",
-// the value the component-encoded JSON text. Anything else — another
-// app's, an undeclared or unmirrored collection, a bad key, a value
-// over the record cap — is ignored.
+// the value the component-encoded JSON text. Anything else is
+// ignored: another app's, an undeclared or unmirrored collection, a
+// bad key, a value over the record cap, JSON the upload would refuse
+// (a duplicate or case-folded key at any level, more than one value).
+// The collection's caps are counted by the callers.
 func (s *Store) decodeCookie(c *http.Cookie) (coll, key string, raw json.RawMessage, ok bool) {
 	if !strings.HasPrefix(c.Name, cookiePrefix) {
 		return "", "", nil, false
@@ -132,10 +154,19 @@ func (s *Store) decodeCookie(c *http.Cookie) (coll, key string, raw json.RawMess
 		return "", "", nil, false
 	}
 	text, err := url.PathUnescape(c.Value)
-	if err != nil || len(text) > def.maxRecord || !json.Valid([]byte(text)) {
+	if err != nil || len(text) > def.maxRecord || !validStrict([]byte(text)) {
 		return "", "", nil, false
 	}
 	return coll, key, json.RawMessage(text), true
+}
+
+// validStrict is the validity the upload's parse applies, on a cookie:
+// json.Valid accepts {"a":1,"a":2}, which reads two ways, and a stream
+// of two values. The same bytes through the strict decoder into a raw
+// message settle the question the same way for both sources.
+func validStrict(text []byte) bool {
+	var raw json.RawMessage
+	return handler.UnmarshalStrict(text, &raw) == nil
 }
 
 // Reading outside Upload.Wrap is the quiet failure this package has: Get
@@ -211,15 +242,12 @@ func rawFor(ctx context.Context, def *collectionDef, key string) (json.RawMessag
 	if !def.mirror {
 		return nil, SourceNone
 	}
-	r := app.RequestFromContext(ctx)
-	if r == nil {
-		return nil, SourceNone
-	}
-	for _, c := range r.Cookies() {
-		coll, k, raw, ok := def.store.decodeCookie(c)
-		if ok && coll == def.name && k == key {
-			return raw, SourceMirror
-		}
+	// The whole gather, not a scan for the one cookie: the collection's
+	// caps are counted over every cookie, and a Get past them must see
+	// what List sees.
+	from := carriedBy(ctx, def.store)
+	if v, ok := from.recs[def.name][key]; ok {
+		return v, from.srcs[def.name][key]
 	}
 	return nil, SourceNone
 }

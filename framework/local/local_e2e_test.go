@@ -101,6 +101,11 @@ type e2eSeen struct {
 	Found   Source
 	Theme   string
 	Err     error
+	// Note is the form field beside the records, as the wrapped handler
+	// sees it after a form body was parsed; LeakedField says whether the
+	// reserved field survived the strip.
+	Note        string
+	LeakedField bool
 }
 
 func startE2E(t *testing.T, tls ...bool) *e2eServer {
@@ -144,6 +149,8 @@ window.__migrations = []; window.addEventListener('gofastr:local-migrated', (e) 
 		b, _ := io.ReadAll(r.Body)
 		var s e2eSeen
 		s.Body = string(b)
+		s.Note = r.PostForm.Get("note")
+		_, s.LeakedField = r.PostForm[uploadField]
 		s.Drafts, s.Err = List(r.Context(), e2eDrafts)
 		s.Current, s.Found, _ = Get(r.Context(), e2eDrafts, "current")
 		if p, src, _ := Get(r.Context(), e2ePref, "theme"); src.Found() {
@@ -186,6 +193,9 @@ window.__migrations = []; window.addEventListener('gofastr:local-migrated', (e) 
 		ctx := context.Background()
 		seedEl := e2eSeed.Bind(ctx, "p", map[string]string{"id": "seeded"})
 		form := `<form id="up" data-fui-rpc="/upload" data-fui-rpc-signal="up-result"` + attrString(up.Attrs()) + `><input name="note" value="hi"><button id="send" type="submit">send</button></form>`
+		// The same declaration on a multipart form: a file input makes the
+		// runtime post FormData, and the bridge appends the field to it.
+		form += `<form id="up-multi" enctype="multipart/form-data" data-fui-rpc="/upload" data-fui-rpc-signal="up-result"` + attrString(up.Attrs()) + `><input name="note" value="multi"><input type="file" name="attachment"><button id="send-multi" type="submit">send multipart</button></form>`
 		fmt.Fprintf(w, `<!doctype html><html><head><title>local</title>`+
 			`<script type="application/json" id="gofastr-behaviors">%s</script></head><body>`+
 			`<main role="main"><span id="ready">ready</span>%s%s<span id="result" data-fui-signal="up-result"></span>`+
@@ -1260,5 +1270,46 @@ func TestE2E_TwoTabsCannotPushACollectionPastItsCap(t *testing.T) {
 		if total > 1024 {
 			t.Fatalf("round %d: %v bytes stored in a collection capped at 1024", round, total)
 		}
+	}
+}
+
+// The FormData arm of the upload bridge: a multipart form (a file input
+// on it) makes the runtime post FormData rather than JSON, the bridge
+// appends __local as a form field, and the wrapper lifts it out of the
+// parsed form so the handler sees the record through local.Get and the
+// form's own fields with the reserved one gone.
+func TestE2E_TheUploadRidesAMultipartForm(t *testing.T) {
+	e := startE2E(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
+	openPage(t, ctx, e.srv.URL+"/")
+	evalJSON(t, ctx, `Promise.all([
+        `+draftsJS+`.put({id: 'current', title: 'multipart draft'}),
+        `+prefsJS+`.put('theme', {theme: 'dark'}),
+    ])`, nil)
+	before := len(e.seen)
+	if err := chromedp.Run(ctx, chromedp.Click(`#send-multi`, chromedp.ByID)); err != nil {
+		t.Fatal(err)
+	}
+	if !pollTrue(ctx, `Promise.resolve((document.getElementById('result').textContent || '').indexOf('ok') >= 0)`) {
+		t.Fatal("the multipart upload RPC never answered")
+	}
+	e.mu.Lock()
+	after := len(e.seen)
+	e.mu.Unlock()
+	if after != before+1 {
+		t.Fatalf("the endpoint was called %d times", after-before)
+	}
+	seen := e.last(t)
+	if seen.Found != SourceUpload || seen.Current.Title != "multipart draft" {
+		t.Fatalf("Get(current) = %+v found=%v; the record must arrive through the FormData field", seen.Current, seen.Found)
+	}
+	if seen.Note != "multi" {
+		t.Fatalf("the form's own field reached the handler as %q", seen.Note)
+	}
+	if seen.LeakedField {
+		t.Fatal("the reserved field survived the strip on a multipart body")
+	}
+	if seen.Theme != "dark" {
+		t.Fatalf("the mirrored prefs record did not arrive: theme=%q", seen.Theme)
 	}
 }

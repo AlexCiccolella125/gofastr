@@ -28,6 +28,7 @@ const (
 	localNotesPath       = "/forms/draft-notes"
 	localNotesUploadPath = "/__site/local/upload"
 	localNotesScriptPath = "/__site/local-notes.js"
+	localNotesLogoutPath = "/__site/local/logout"
 )
 
 // siteDraft is the record the browser keeps. The key field is id, so
@@ -127,6 +128,15 @@ func (s *LocalNotesScreen) RenderCtx(ctx context.Context) render.HTML {
 		}),
 	)
 
+	// A full-navigation logout: a native POST, answered with a redirect.
+	// No RPC attributes, so rpc.js never sees the response and the clear
+	// rides ClearOnNextLoad instead of the response header.
+	logoutForm := ui.Form(ui.FormConfig{
+		Action:      localNotesLogoutPath,
+		SubmitLabel: "Sign out and clear this browser's store",
+		ID:          "local-logout",
+	})
+
 	return container(
 		ui.PageHeader(ui.PageHeaderConfig{
 			Eyebrow:  "Forms",
@@ -169,8 +179,24 @@ func (s *LocalNotesScreen) RenderCtx(ctx context.Context) render.HTML {
 					ui.Button(ui.ButtonConfig{Label: "Toggle view", Variant: ui.ButtonSecondary, ID: "toggle-view"}),
 				),
 			),
+			ui.Section(ui.SectionConfig{
+				Heading:     "Logout clears the store",
+				Description: "battery/auth ends the session and knows nothing about this store, so the app clears it: local.ClearOnNextLoad before the redirect of a full-navigation logout, and every collection and mirror cookie is gone on the page you land on.",
+				Ctx:         ctx,
+			},
+				logoutForm,
+			),
 		),
 	)
+}
+
+// localNotesLogout is the full-navigation logout: the auth battery
+// would end the session here, and the app clears its own store, which
+// the battery cannot know about. ClearOnNextLoad goes before the
+// redirect so the landing page's module finds the bit.
+func localNotesLogout(w http.ResponseWriter, r *http.Request) {
+	local.ClearOnNextLoad(w, r, siteLocal)
+	http.Redirect(w, r, "/forms/draft-notes", http.StatusSeeOther)
 }
 
 // actOnDraft is the habit every handler in this tree keeps: a record is
@@ -178,9 +204,10 @@ func (s *LocalNotesScreen) RenderCtx(ctx context.Context) render.HTML {
 // trigger declared it. src.Found() would also accept a mirror cookie —
 // a value any script on the origin writes and any client forges — which
 // is fine for deciding what to paint (the view preference above says so
-// on the page) and never for acting on. examples/team-builder requires
-// the same thing; two examples teaching two habits is how the weaker one
-// gets copied.
+// on the page) and never for acting on. The team-builder example
+// (github.com/AlexCiccolella125/gofastr-team-builder) requires the same
+// thing; two examples teaching two habits is how the weaker one gets
+// copied.
 func actOnDraft(src local.Source) bool { return src == local.SourceUpload }
 
 // localNotesUpload is the wrapped handler: the upload bridge has

@@ -215,8 +215,12 @@
     // request — framework/local's upload bridge is the one that
     // exists — is registered before the fetch, never racing the
     // marker scan. Hooks are a seam, not a policy: NS._rpcHooks.request
-    // is awaited in order before the fetch, NS._rpcHooks.response runs
-    // on a 2xx after the headers the runtime itself reads.
+    // is awaited in order before the fetch, NS._rpcHooks.response is
+    // awaited in order on a 2xx after the headers the runtime itself
+    // reads and before it reads the body. A response hook must not
+    // read the body: the runtime reads it once, after the hooks, and a
+    // body read twice is a TypeError. A hook that rejects is logged and
+    // the response is still applied.
     //
     // req.fatal is how the seam FAILS CLOSED. A trigger that names a
     // module in data-fui-rpc-with declares it a PRECONDITION of the
@@ -298,7 +302,7 @@
       const toastHeader = r.headers.get('X-Gofastr-Toast');
       if (toastHeader) NS._dispatchToastHeader(toastHeader);
       for (const hook of hooks.response) {
-        try { hook(node, r); }
+        try { await hook(node, r); }
         catch (err) { console.warn('[gofastr] rpc response hook failed', err); }
       }
       const ct = r.headers.get('content-type') || '';

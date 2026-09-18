@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -795,5 +796,176 @@ func TestAReadOutsideWrapIsSilentWithoutTheDevFlag(t *testing.T) {
 	_, _, _ = Get(context.Background(), d, "current")
 	if logs.Len() != 0 {
 		t.Fatalf("warned outside the dev loop: %s", logs.String())
+	}
+}
+
+// ─── review round: the mirror read keeps the collection's caps ─────
+
+// plantMirror adds one mirror cookie in the browser's spelling.
+func plantMirror(req *http.Request, app, coll, key, json string) {
+	req.AddCookie(&http.Cookie{Name: cookiePrefix + url.PathEscape(app+"."+coll+"."+key), Value: url.PathEscape(json)})
+}
+
+// The mirror read enforced the per-record cap and nothing else: fifty
+// cookies for a collection declared at four records all landed in List.
+// A cookie is a client hint, so the extras are ignored rather than
+// refused, the same way an oversized or malformed one is.
+func TestTheMirrorReadStopsAtTheCollectionCaps(t *testing.T) {
+	s := fresh(t, "site")
+	p := Define[prefs](s, "prefs", CollectionConfig{Version: 1, Mirror: true, MaxRecords: 4})
+	req := httptest.NewRequest("GET", "/", nil)
+	for i := range 50 {
+		plantMirror(req, "site", "prefs", fmt.Sprintf("k%02d", i), `{"theme":"dark"}`)
+	}
+	ctx := app.WithRequest(context.Background(), req)
+	got, err := List(ctx, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("List = %d records for a collection declared at 4; the mirror read counts the per-record cap only", len(got))
+	}
+	// Get on a key past the cap sees nothing either: the two paths agree.
+	if _, src, _ := Get(ctx, p, "k49"); src.Found() {
+		t.Fatal("Get read a record List refused")
+	}
+	if v, src, _ := Get(ctx, p, "k00"); src != SourceMirror || v.Theme != "dark" {
+		t.Fatalf("Get(k00) = %+v %v", v, src)
+	}
+
+	// The byte cap: each record is 300 bytes, the collection allows 1024,
+	// so three fit and the rest are dropped whatever MaxRecords says.
+	s2 := fresh(t, "bytes")
+	big := Define[prefs](s2, "prefs", CollectionConfig{Version: 1, Mirror: true, MaxRecordBytes: 512, MaxRecords: 8, MaxBytes: 1024})
+	rec := `{"theme":"` + strings.Repeat("x", 300-12) + `"}`
+	if len(rec) != 300 {
+		t.Fatalf("the sample record is %d bytes, want 300", len(rec))
+	}
+	req2 := httptest.NewRequest("GET", "/", nil)
+	for i := range 8 {
+		plantMirror(req2, "bytes", "prefs", fmt.Sprintf("k%d", i), rec)
+	}
+	got, err = List(app.WithRequest(context.Background(), req2), big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := 0
+	for _, r := range got {
+		sum += len(r.Value.Theme) + 12
+	}
+	if len(got) != 3 || sum > 1024 {
+		t.Fatalf("List = %d records, %d bytes, for a collection capped at 1024 bytes", len(got), sum)
+	}
+}
+
+// The mirror budget is per process, because the Cookie header is per
+// origin: two stores whose mirrored collections fit on their own can
+// still overfill the header together, and the second Define says so,
+// naming both stores.
+func TestTheMirrorBudgetIsSharedAcrossStores(t *testing.T) {
+	resetForTest()
+	a := New("alpha")
+	b := New("beta")
+	// 1024 x 3 = 3072 bytes each: under 4096 alone, over it together.
+	Define[prefs](a, "prefs", CollectionConfig{Version: 1, Mirror: true, MaxRecordBytes: 1024, MaxRecords: 3})
+	mustPanic(t, `"alpha", "beta"`, func() {
+		Define[prefs](b, "prefs", CollectionConfig{Version: 1, Mirror: true, MaxRecordBytes: 1024, MaxRecords: 3})
+	})
+	// An unmirrored collection on the second store costs nothing.
+	Define[draft](b, "drafts", CollectionConfig{Version: 1})
+	// And a store with no mirrored collection is not named.
+	c := New("gamma")
+	mustPanic(t, `"alpha", "gamma"`, func() {
+		Define[prefs](c, "prefs", CollectionConfig{Version: 1, Mirror: true, MaxRecordBytes: 1024, MaxRecords: 3})
+	})
+}
+
+// A Send that names a key beside its whole collection, in either
+// order, or the same item twice, is refused at declaration: the bound
+// counts the records twice and the declaration says two things.
+func TestSendRefusesAnItemAnotherItemCovers(t *testing.T) {
+	s := fresh(t, "site")
+	d := Define[draft](s, "drafts", CollectionConfig{Version: 1})
+	p := Define[prefs](s, "prefs", CollectionConfig{Version: 1})
+	mustPanic(t, `collection "drafts" and key "drafts:a"`, func() { Send(d, d.Key("a")) })
+	mustPanic(t, `key "drafts:a" and collection "drafts"`, func() { Send(d.Key("a"), d) })
+	mustPanic(t, `key "drafts:a" and key "drafts:a"`, func() { Send(d.Key("a"), d.Key("a")) })
+	mustPanic(t, `collection "drafts" and collection "drafts"`, func() { Send(d, d) })
+	// Two keys of one collection, and a key beside another collection,
+	// are what the shape is for.
+	if got := Send(d.Key("a"), d.Key("b"), p).Attrs()["data-local-send"]; got != "drafts:a,drafts:b,prefs" {
+		t.Fatalf("data-local-send = %q", got)
+	}
+}
+
+// The derived bound is a product of two caps. At the ceilings that
+// product is past 2^31 (100 000 records x 64 KiB is 6.5 GB), so on a
+// 32-bit int it wrapped negative, and a negative bound is a
+// MaxBytesReader that refuses every body and a data-local-max the
+// browser reads as "nothing fits". The product is taken in int64 and
+// clamped to UploadMaxBytesLimit before it narrows.
+func TestTheUploadBoundIsClampedBeforeItNarrows(t *testing.T) {
+	s := fresh(t, "site")
+	d := Define[draft](s, "drafts", CollectionConfig{
+		Version: 1, MaxRecords: MaxRecordsLimit, MaxRecordBytes: 64 << 10, MaxBytes: MaxBytesLimit,
+	})
+	product := int64(MaxRecordsLimit) * int64(64<<10)
+	if product <= 1<<31 {
+		t.Fatalf("the product is %d; it has to be past 2^31 for this test to mean anything", product)
+	}
+	if int64(int32(product)) >= 0 {
+		t.Fatalf("the product narrows to %d on 32 bits; pick caps whose product wraps negative", int32(product))
+	}
+	if got := (sendItem{def: d.def}).bound(); got != UploadMaxBytesLimit {
+		t.Fatalf("bound() = %d, want the %d ceiling", got, UploadMaxBytesLimit)
+	}
+	if got := Send(d).max; got != UploadMaxBytesLimit {
+		t.Fatalf("Send(d).max = %d, want the %d ceiling", got, UploadMaxBytesLimit)
+	}
+}
+
+// A mirror cookie is validated the way the upload is: the upload's
+// parse refuses a duplicate key at any level with a 400, and the cookie
+// with the same JSON is ignored, which is what decodeCookie does with
+// everything it will not accept. json.Valid took {"theme":"a","theme":"b"}
+// and the decode then read it one way on one build and the other way on
+// the next.
+func TestAMirrorCookieIsValidatedLikeTheUpload(t *testing.T) {
+	s := fresh(t, "site")
+	p := Define[prefs](s, "prefs", CollectionConfig{Version: 1, Mirror: true})
+	dup := `{"theme":"a","theme":"b"}`
+	req := httptest.NewRequest("GET", "/", nil)
+	plantMirror(req, "site", "prefs", "theme", dup)
+	plantMirror(req, "site", "prefs", "folded", `{"theme":"a","Theme":"b"}`)
+	plantMirror(req, "site", "prefs", "two", `{"theme":"a"} {"theme":"b"}`)
+	plantMirror(req, "site", "prefs", "fine", `{"theme":"a"}`)
+	ctx := app.WithRequest(context.Background(), req)
+	for _, key := range []string{"theme", "folded", "two"} {
+		if v, src, err := Get(ctx, p, key); src.Found() || err != nil {
+			t.Fatalf("Get(%s) = %+v %v %v; a cookie the upload would refuse is ignored, not read", key, v, src, err)
+		}
+	}
+	got, err := List(ctx, p)
+	if err != nil || len(got) != 1 || got[0].Key != "fine" {
+		t.Fatalf("List = %+v %v, want only the well-formed record", got, err)
+	}
+	// The same bytes through the upload are a 400, so the two sources
+	// draw the line in the same place.
+	rec := httptest.NewRecorder()
+	body := `{"__local":{"prefs":[{"k":"theme","v":` + dup + `}]}}`
+	up := httptest.NewRequest("POST", "/", strings.NewReader(body))
+	up.Header.Set("Content-Type", "application/json")
+	Send(p).HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("the handler ran on a duplicate key") }).ServeHTTP(rec, up)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("upload with a duplicate key = %d, want 400", rec.Code)
+	}
+	// Strict is about the JSON, not about T: a well-formed record with a
+	// field T does not declare still reads, the way an upload does. The
+	// browser is allowed to keep more than the Go type reads.
+	req2 := httptest.NewRequest("GET", "/", nil)
+	plantMirror(req2, "site", "prefs", "theme", `{"theme":"a","extra":1}`)
+	ctx2 := app.WithRequest(context.Background(), req2)
+	if v, src, err := Get(ctx2, p, "theme"); src != SourceMirror || err != nil || v.Theme != "a" {
+		t.Fatalf("Get with an extra field = %+v %v %v, want the record", v, src, err)
 	}
 }

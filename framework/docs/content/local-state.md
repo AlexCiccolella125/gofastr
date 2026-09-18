@@ -76,6 +76,14 @@ _, _ = Drafts, Prefs
   and `*Limit` constants). A `Mirror` collection defaults to 512 bytes
   and 4 records, clamped to 1 KiB and 16 (`Mirror*`): every record rides
   a cookie on every request.
+- **Caps across tabs.** A cap is enforced per document: one tab's puts
+  are serialised against each other, but two tabs writing at once each
+  count what they can see, and together they can pass the cap by a few
+  records. Nothing corrects it afterwards; the extra records stay until
+  something deletes them. An app that cares has one tab write (a page
+  that writes on every keystroke should elect one, or write from one),
+  or declares fewer records than it needs and leaves the margin. A cap
+  is a budget for browser-owned state, not a hard limit the store holds.
 - **Versions.** `Version` is 1 or more, and every step from 2 to `Version`
   needs a `Migration` (an empty one is fine). The browser runs the steps
   in (stored, declared] once, before the page's first read or write of
@@ -246,11 +254,13 @@ require `local.SourceUpload`, and even that is a record the browser
 supplied.
 
 It travels on every request, which is why the caps are cookie-sized and
-why a store's mirrored collections share one budget
-(`local.MirrorStoreMaxBytes`, 4 KiB): a Cookie header past the 8 to
-16 KiB most proxies allow is a 431 the user can only clear by hand.
-`Define` panics over the budget, and the browser refuses the cookie (not
-the record) with `gofastr:local-error{reason:"mirror"}` if the encoded
+why every store's mirrored collections share one budget
+(`local.MirrorStoreMaxBytes`, 4 KiB, summed over every store the process
+declares, because the Cookie header is per origin and not per store): a
+Cookie header past the 8 to 16 KiB most proxies allow is a 431 the user
+can only clear by hand. `Define` panics over the budget, naming the
+stores that share it, and the browser refuses the cookie (not the
+record) with `gofastr:local-error{reason:"mirror"}` if the encoded
 reality passes it.
 
 **What the mirror is for.** A few small preferences: a theme, a
@@ -359,6 +369,19 @@ that needs more than a few records is pushing a dataset, which is what a
 body is for. `ClearOnNextLoad` plants a script-readable cookie the module
 honours once on its next load, for a logout that never reaches `rpc.js`.
 
+**Logout is the app's line to write.** `battery/auth`'s logout does not
+clear the store: it cannot know which stores the app declared, and the
+records are the app's, not the session's. Nothing expires them either;
+a mirror cookie lives a year, so the previous user's preferences are
+what the next user's first paint renders. There are two wiring points.
+A logout that answers an RPC calls `local.Clear(w, Site)` on the
+response, and the runtime's response hook empties every collection and
+drops every mirror cookie. A logout that is a full navigation (a form
+POST answered with a redirect) calls `local.ClearOnNextLoad(w, r, Site)`
+before the redirect, and the module clears the store on the page the
+redirect lands on, marker or not. `examples/site` wires the second at
+`/__site/local/logout`.
+
 ## Rules the package keeps
 
 - **No inline scripts.** All three modules are registered behaviours, and
@@ -426,3 +449,8 @@ receipt back. Browser coverage: `examples/site/e2e_local_test.go` and
   otherwise, so a typo in the version cannot silently orphan data.
 - **Persisting the same value twice.** A slice cannot be both
   `store.Persist`-ed and seeded; `SeedSignal` panics on one that is.
+- **Expecting logout to clear the store.** `battery/auth` ends the
+  session and knows nothing about the app's stores; the records and the
+  year-long mirror cookies stay for the next user of the browser. Call
+  `local.Clear` on an RPC logout response, or `local.ClearOnNextLoad`
+  before the redirect of a full-navigation logout.

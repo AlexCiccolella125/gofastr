@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/DonaldMurillo/gofastr/internal/chromedptest"
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -216,5 +217,45 @@ func TestRPCRequestHookThatThrowsCancelsTheDispatch(t *testing.T) {
 	}
 	if strings.Contains(out, "ok") {
 		t.Fatalf("the endpoint answered %q — the request must not have been sent", out)
+	}
+}
+
+// A response hook that rejects does not escape the dispatch.
+//
+// The response hooks ran without await, so a hook returning a rejected
+// promise (every async hook that throws) left the try block before the
+// rejection landed: the RPC completed and the page logged an unhandled
+// rejection nobody could catch. The hook is awaited like the request
+// side; the rejection is logged, and the response is still applied.
+func TestRPCResponseHookThatRejectsIsCaught(t *testing.T) {
+	s := startRPCHooksServer(t)
+	ctx := chromedptest.Context(t, chromedptest.Timeout(90*time.Second))
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(s.srv.URL+"/"),
+		chromedp.WaitVisible(`#ready`, chromedp.ByID),
+		chromedp.Evaluate(`(() => {
+            window.__unhandled = 0;
+            window.addEventListener('unhandledrejection', () => { window.__unhandled++; });
+            const h = window.__gofastr._rpcHooks || (window.__gofastr._rpcHooks = { request: [], response: [] });
+            h.response.push(async () => { throw new Error('the download could not be applied'); });
+            h.response.push(() => Promise.reject(new Error('and a bare rejected promise')));
+        })()`, nil),
+		chromedp.Click(`#bare`, chromedp.ByID),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !localPollTrue(ctx, `Promise.resolve((document.getElementById('out').textContent || '').indexOf('ok') >= 0)`) {
+		t.Fatal("the RPC never completed: a response hook that rejects must not cancel the response")
+	}
+	// Let any escaped rejection reach the window before counting.
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`new Promise((res) => setTimeout(res, 200))`, nil, func(p *runtime.EvaluateParams) *runtime.EvaluateParams { return p.WithAwaitPromise(true) })); err != nil {
+		t.Fatal(err)
+	}
+	var unhandled int
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.__unhandled`, &unhandled)); err != nil {
+		t.Fatal(err)
+	}
+	if unhandled != 0 {
+		t.Fatalf("%d unhandled rejection(s) escaped the response hook loop: the hook is awaited inside the try, like the request side", unhandled)
 	}
 }

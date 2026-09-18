@@ -89,7 +89,7 @@
       const eq = part.indexOf('=');
       if (eq < 0) continue;
       const nm = part.slice(0, eq);
-      if (nm.indexOf('gofastr.local.') !== 0 || nm === 'gofastr.local.' + seg) continue;
+      if (nm.indexOf('gofastr.local.') !== 0 || nm.indexOf('gofastr.local.clear.') === 0 || nm === 'gofastr.local.' + seg) continue;
       used += part.length + 2;
     }
     return used;

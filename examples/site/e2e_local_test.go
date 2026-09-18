@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -164,8 +166,9 @@ func e2ePollTrue(ctx context.Context, js string) bool {
 // The draft-notes handler acts on an upload and on nothing else. Reading
 // local.Source as a bare boolean (src.Found()) accepts a mirror cookie —
 // a value any script on the origin writes and any client forges — and
-// the team-builder example already requires SourceUpload. Two examples
-// teaching two habits is how the weaker one gets copied.
+// the team-builder example (github.com/AlexCiccolella125/gofastr-team-builder)
+// already requires SourceUpload. Two examples teaching two habits is how
+// the weaker one gets copied.
 func TestLocalNotesActsOnlyOnAnUpload(t *testing.T) {
 	if !actOnDraft(local.SourceUpload) {
 		t.Fatal("an uploaded draft must be acted on")
@@ -175,4 +178,24 @@ func TestLocalNotesActsOnlyOnAnUpload(t *testing.T) {
 			t.Fatalf("a %q record must not be acted on: it is a client hint, not a declared upload", src)
 		}
 	}
+}
+
+// The site's logout clears the store. battery/auth cannot: it does not
+// know the app's stores, and a mirror cookie lives a year, so without
+// this line the next user's first paint renders the previous user's
+// preferences. The redirect is a full navigation, so the clear rides
+// ClearOnNextLoad, not the response header rpc.js reads.
+func TestLocalNotesLogoutPlantsTheClearBit(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, localNotesLogoutPath, nil)
+	localNotesLogout(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want a redirect", rec.Code)
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "gofastr.local.clear.site" && c.Value == "1" && c.Path == "/" {
+			return
+		}
+	}
+	t.Fatalf("no gofastr.local.clear.site cookie on the logout response: %v", rec.Header()["Set-Cookie"])
 }

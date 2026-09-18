@@ -652,6 +652,7 @@ func setupServer() *framework.App {
 	mountSiteLocal(fwApp.Router())
 	fwApp.Router().Get(localNotesScriptPath, http.HandlerFunc(serveLocalNotesJS))
 	fwApp.Router().Post(localNotesUploadPath, notesUploadSend.HandlerFunc(localNotesUpload))
+	fwApp.Router().Post(localNotesLogoutPath, http.HandlerFunc(localNotesLogout))
 
 	// battery/print demo documents under /print/*.
 	registerPrintDemos(fwApp)

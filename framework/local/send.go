@@ -68,7 +68,10 @@ type Upload struct {
 // Send declares the collections (whole) or records (Collection.Key)
 // that ride on the requests of the trigger rendered with Attrs, and
 // that Wrap accepts on the server. Every item must belong to one
-// store; an empty Send panics.
+// store; an empty Send panics, and so does an item another item of
+// the same Send already covers (a key beside its whole collection, in
+// either order, or the same item twice): the bound would count the
+// records twice, and the declaration would say two things.
 func Send(items ...Sendable) *Upload {
 	if len(items) == 0 {
 		panic("local: Send needs at least one collection or key")
@@ -82,6 +85,11 @@ func Send(items ...Sendable) *Upload {
 		} else if u.store != si.def.store {
 			panic(fmt.Sprintf("local: Send mixes stores %q and %q — one store per upload", u.store.app, si.def.store.app))
 		}
+		for _, prev := range u.items {
+			if prev.def == si.def && (prev.key == "" || si.key == "" || prev.key == si.key) {
+				panic(fmt.Sprintf("local: Send names %s and %s; the second is already covered by the first", prev, si))
+			}
+		}
 		u.items = append(u.items, si)
 		declared += si.bound()
 	}
@@ -89,20 +97,37 @@ func Send(items ...Sendable) *Upload {
 	return u
 }
 
+// String names the item the way Attrs spells it, for a panic.
+func (si sendItem) String() string {
+	if si.key == "" {
+		return "collection " + strconv.Quote(si.def.name)
+	}
+	return "key " + strconv.Quote(si.def.name+":"+si.key)
+}
+
 // bound is the most one Send item can put on the wire. A whole
 // collection is bounded by the SMALLER of its two caps: ten records of
 // 512 bytes never reach the 1 MiB MaxBytes the declaration defaulted
 // to, and summing MaxBytes alone is how the derived bound came out 200
 // times the size the declaration allows.
+//
+// The product is taken in int64: MaxRecordsLimit × MaxRecordBytesLimit
+// is 2^37, past a 32-bit int, and a wrapped product is a bound the
+// browser's pre-flight can never fire on. It is clamped to
+// UploadMaxBytesLimit before it narrows, so no platform sees the wrap.
 func (si sendItem) bound() int {
 	if si.key != "" {
 		return si.def.maxRecord + UploadRecordOverhead
 	}
-	n := si.def.maxRecords * si.def.maxRecord
-	if si.def.maxBytes < n {
-		n = si.def.maxBytes
+	n := int64(si.def.maxRecords) * int64(si.def.maxRecord)
+	if int64(si.def.maxBytes) < n {
+		n = int64(si.def.maxBytes)
 	}
-	return n + si.def.maxRecords*UploadRecordOverhead
+	n += int64(si.def.maxRecords) * UploadRecordOverhead
+	if n > UploadMaxBytesLimit {
+		n = UploadMaxBytesLimit
+	}
+	return int(n)
 }
 
 // clampUpload holds a derived bound under the ceiling Max accepts.

@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
+	"strconv"
+	"strings"
 )
 
 // Default and ceiling caps. A record is re-serialised on every write
@@ -27,9 +30,9 @@ const (
 	MirrorMaxRecordBytes        = 1 << 10
 	MirrorMaxRecords            = 16
 
-	// MirrorStoreMaxBytes bounds what ALL of a store's mirrored
-	// collections may declare together: the sum of MaxRecords ×
-	// MaxRecordBytes over them. The per-collection ceilings bound one
+	// MirrorStoreMaxBytes bounds what the mirrored collections of EVERY
+	// store in the process may declare together: the sum of MaxRecords
+	// × MaxRecordBytes over them. The per-collection ceilings bound one
 	// cookie; nothing bounded the Cookie HEADER, and that is the one
 	// the world has an opinion about — most proxies and servers refuse
 	// a request header block over 8–16 KiB, and the answer is a 431
@@ -38,7 +41,9 @@ const (
 	// the old ceilings were 64 KiB of declaration. 4 KiB leaves room
 	// for the session cookie, the CSRF cookie and everything else the
 	// app puts on the origin, and the browser measures the same bound
-	// on what it actually holds (encoding is not free).
+	// on what it actually holds (encoding is not free). The budget is
+	// per process and not per store because the Cookie header is per
+	// origin: two stores an app declares ride the same header.
 	MirrorStoreMaxBytes = 4 << 10
 )
 
@@ -211,6 +216,11 @@ func Define[T any](s *Store, name string, cfg CollectionConfig) *Collection[T] {
 		panic(fmt.Sprintf("local: collection %q: MaxRecordBytes %d exceeds MaxBytes %d", name, def.maxRecord, def.maxBytes))
 	}
 
+	// Lock order: appsMu, then a store's mu. The mirror budget reads
+	// every store, so the registry lock comes first and holds for the
+	// whole declaration; nothing takes appsMu under a store's mu.
+	appsMu.Lock()
+	defer appsMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.frozen {
@@ -220,18 +230,46 @@ func Define[T any](s *Store, name string, cfg CollectionConfig) *Collection[T] {
 		panic(fmt.Sprintf("local: collection %q is already declared on store %q", name, s.app))
 	}
 	if def.mirror {
-		total := def.maxRecords * def.maxRecord
-		for _, d := range s.colls {
-			if d.mirror {
-				total += d.maxRecords * d.maxRecord
-			}
-		}
+		total, sharing := mirrorDeclaredLocked(s)
+		total += def.maxRecords * def.maxRecord
 		if total > MirrorStoreMaxBytes {
-			panic(fmt.Sprintf("local: store %q: the mirrored collections declare %d bytes together, over the %d-byte budget — every one of them rides the Cookie header on EVERY request, and a header block past 8-16 KiB is a 431 the browser cannot recover from; lower MaxRecords or MaxRecordBytes, or stop mirroring a collection the server does not need at first paint", s.app, total, MirrorStoreMaxBytes))
+			panic(fmt.Sprintf("local: store %q: the mirrored collections of stores %s declare %d bytes together, over the %d-byte budget; the Cookie header is per origin, so every store's mirrored collection rides it on EVERY request, and a header block past 8-16 KiB is a 431 the browser cannot recover from; lower MaxRecords or MaxRecordBytes, or stop mirroring a collection the server does not need at first paint", s.app, strings.Join(sharing, ", "), total, MirrorStoreMaxBytes))
 		}
 	}
 	s.colls[name] = def
 	return &Collection[T]{def: def}
+}
+
+// mirrorDeclaredLocked sums MaxRecords × MaxRecordBytes over every
+// mirrored collection of every declared store, and names the stores
+// that hold one, plus s. Called with appsMu and s.mu held; it takes
+// each other store's mu in turn.
+func mirrorDeclaredLocked(s *Store) (total int, sharing []string) {
+	names := make([]string, 0, len(apps))
+	for name := range apps {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		st := apps[name]
+		if st != s {
+			st.mu.Lock()
+		}
+		mirrored := false
+		for _, d := range st.colls {
+			if d.mirror {
+				mirrored = true
+				total += d.maxRecords * d.maxRecord
+			}
+		}
+		if st != s {
+			st.mu.Unlock()
+		}
+		if mirrored || st == s {
+			sharing = append(sharing, strconv.Quote(name))
+		}
+	}
+	return total, sharing
 }
 
 func capOrDefault(what, coll string, v, def, limit int) int {
