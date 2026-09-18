@@ -81,22 +81,12 @@ func Send(items ...Sendable) *Upload {
 	}
 	u := &Upload{}
 	declared := 0
-	anyOf := ""
 	for _, it := range items {
 		si := it.sendItem()
 		if u.store == nil {
 			u.store = si.def.store
 		} else if u.store != si.def.store {
 			panic(fmt.Sprintf("local: Send mixes stores %q and %q — one store per upload", u.store.app, si.def.store.app))
-		}
-		// One AnyKey per trigger: the key rides on ONE attribute
-		// (data-local-key), so a second one would have nowhere to be
-		// written and would silently send nothing.
-		if si.anyKey {
-			if anyOf != "" {
-				panic(fmt.Sprintf("local: Send names AnyKey twice (%q and %q) — one trigger carries one data-local-key", anyOf, si.def.name))
-			}
-			anyOf = si.def.name
 		}
 		u.items = append(u.items, si)
 		declared += si.bound()
@@ -111,7 +101,7 @@ func Send(items ...Sendable) *Upload {
 // to, and summing MaxBytes alone is how the derived bound came out 200
 // times the size the declaration allows.
 func (si sendItem) bound() int {
-	if si.key != "" || si.anyKey {
+	if si.key != "" {
 		return si.def.maxRecord + UploadRecordOverhead
 	}
 	n := si.def.maxRecords * si.def.maxRecord
@@ -153,35 +143,19 @@ func (u *Upload) Max(bytes int) *Upload {
 // sending it and reading a bare 413 the page cannot see.
 func (u *Upload) Attrs() map[string]string {
 	parts := make([]string, 0, len(u.items))
-	anyOf := ""
 	for _, it := range u.items {
-		switch {
-		case it.anyKey:
-			anyOf = it.def.name
-		case it.key == "":
+		if it.key == "" {
 			parts = append(parts, it.def.name)
-		default:
+		} else {
 			parts = append(parts, it.def.name+":"+it.key)
 		}
 	}
-	out := map[string]string{
+	return map[string]string{
 		"data-local-store":  u.store.app,
 		"data-local-send":   strings.Join(parts, ","),
 		"data-local-max":    strconv.Itoa(u.max),
 		"data-fui-rpc-with": BridgeName,
 	}
-	// An AnyKey collection is NOT in data-local-send: that attribute
-	// names what travels whole or by a key the server chose, and the
-	// browser would read a collection there as "send all of it".
-	// data-local-any says "one record of this, whichever
-	// data-local-key names at click time", and the page script writes
-	// that attribute. A trigger with data-local-any and no
-	// data-local-key sends nothing and says so
-	// (gofastr:local-error{reason:"key"}): the upload fails closed.
-	if anyOf != "" {
-		out["data-local-any"] = anyOf
-	}
-	return out
 }
 
 // Merge returns attrs plus Attrs, panicking when attrs names a GET
@@ -206,7 +180,7 @@ func (u *Upload) allowed(coll, key string) *collectionDef {
 		if it.def.name != coll {
 			continue
 		}
-		if it.key == "" || it.key == key || it.anyKey {
+		if it.key == "" || it.key == key {
 			return it.def
 		}
 	}
@@ -214,16 +188,15 @@ func (u *Upload) allowed(coll, key string) *collectionDef {
 }
 
 // limitFor is the most records the DECLARATION lets this collection
-// deliver, which is not always its cap: an AnyKey item is one record,
-// whichever one the page named, so a body carrying two under it is not
-// the request the markup promised.
+// deliver, which is not always its cap: a Send that names two keys of
+// a collection lets two records through, not the collection's cap.
 func (u *Upload) limitFor(coll string, def *collectionDef) int {
 	n := 0
 	for _, it := range u.items {
 		if it.def.name != coll {
 			continue
 		}
-		if it.key == "" && !it.anyKey {
+		if it.key == "" {
 			return def.maxRecords
 		}
 		n++

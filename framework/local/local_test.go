@@ -211,30 +211,6 @@ func TestSeedSignalBindsWithMarkersAndGoesGlobal(t *testing.T) {
 	mustPanic(t, "one owner", func() { SeedSignal(d, "k", persisted) })
 }
 
-func TestSeedCountBindsTheCollectionNotARecord(t *testing.T) {
-	s := fresh(t, "site")
-	d := Define[draft](s, "drafts", CollectionConfig{Version: 1})
-	sl := store.New("counttest").Int("drafts", 0)
-	c := SeedCount(d, sl)
-	if sl.Scope() != store.ScopeGlobal {
-		t.Fatal("SeedCount must imply Global, like SeedSignal")
-	}
-	if c.Name() != "counttest.drafts" {
-		t.Fatalf("Name() = %q", c.Name())
-	}
-	html := string(c.Bind(context.Background(), "span", map[string]string{"id": "n"}))
-	for _, want := range []string{`data-local-store="site"`, `data-local-count="drafts"`, `data-fui-signal="counttest.drafts"`, `id="n"`} {
-		if !strings.Contains(html, want) {
-			t.Fatalf("Bind lacks %s:\n%s", want, html)
-		}
-	}
-	if strings.Contains(html, "data-local-seed") {
-		t.Fatalf("a count is not a record seed:\n%s", html)
-	}
-	persisted := store.New("counttest").Int("persisted", 0).Persist()
-	mustPanic(t, "one owner", func() { SeedCount(d, persisted) })
-}
-
 // ─── send / upload ──────────────────────────────────────────────
 
 func TestSendAttrsNameOnlyTheDeclaration(t *testing.T) {
@@ -692,40 +668,6 @@ func TestStripJSONLeavesNoStaleContentLength(t *testing.T) {
 // x 10 records — the POC's declaration, 5 KiB of records — render
 // data-local-max="1114112": the browser's fail-closed pre-flight could
 // never fire and the server accepted a megabyte for a 5 KiB collection.
-// AnyKey: one record, the key chosen at click time. It is not in
-// data-local-send (which would mean the whole collection), the bound is
-// one record, and the server takes exactly one.
-func TestAnyKeySendsOneRecordTheTriggerNames(t *testing.T) {
-	s := fresh(t, "site")
-	d := Define[draft](s, "drafts", CollectionConfig{
-		Version: 1, KeyField: "id", MaxRecordBytes: 512, MaxRecords: 200,
-	})
-	u := Send(d.AnyKey())
-	a := u.Attrs()
-	if a["data-local-any"] != "drafts" || a["data-local-send"] != "" {
-		t.Fatalf("Attrs = %v: an AnyKey collection is not in data-local-send", a)
-	}
-	if want := 512 + UploadRecordOverhead + UploadBodySlack; u.max != want {
-		t.Fatalf("bound = %d, want one record's %d — not the whole collection's", u.max, want)
-	}
-
-	// Any valid key is inside the declaration: the page picked it.
-	recs, err := u.parse([]byte(`{"drafts":[{"k":"b","v":{"id":"b"}}]}`))
-	if err != nil || len(recs["drafts"]) != 1 {
-		t.Fatalf("one record under AnyKey = %v, %v", recs, err)
-	}
-	// Two is not "one record the page named".
-	if _, err := u.parse([]byte(`{"drafts":[{"k":"a","v":{"id":"a"}},{"k":"b","v":{"id":"b"}}]}`)); !errors.Is(err, ErrTooLarge) {
-		t.Fatalf("two records under AnyKey = %v, want ErrTooLarge", err)
-	}
-	// A whole-collection item alongside it still delivers the collection.
-	if _, err := Send(d, d.AnyKey()).parse([]byte(`{"drafts":[{"k":"a","v":{"id":"a"}},{"k":"b","v":{"id":"b"}}]}`)); err != nil {
-		t.Fatalf("two records under a whole-collection Send = %v", err)
-	}
-	other := Define[draft](s, "notes", CollectionConfig{Version: 1})
-	mustPanic(t, "AnyKey twice", func() { Send(d.AnyKey(), other.AnyKey()) })
-}
-
 func TestTheUploadBoundFollowsTheCapsItNames(t *testing.T) {
 	s := fresh(t, "site")
 	small := Define[draft](s, "notes", CollectionConfig{
@@ -927,37 +869,5 @@ func TestAReadOutsideWrapIsSilentWithoutTheDevFlag(t *testing.T) {
 	_, _, _ = Get(context.Background(), d, "current")
 	if logs.Len() != 0 {
 		t.Fatalf("warned outside the dev loop: %s", logs.String())
-	}
-}
-
-// Adopt is a version step like any other on the wire: the foreign key
-// it reads and the parse function that turns its text into records.
-func TestAdoptCarriesTheForeignKeyAndTheParse(t *testing.T) {
-	raw, err := json.Marshal(Adopt("showdown_teams", "adopt-teams"))
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	var step map[string]any
-	if err := json.Unmarshal(raw, &step); err != nil {
-		t.Fatal(err)
-	}
-	if step["op"] != "adopt" || step["from"] != "showdown_teams" || step["name"] != "adopt-teams" {
-		t.Fatalf("adopt step = %v", step)
-	}
-	for _, c := range []struct {
-		what    string
-		key, fn string
-	}{
-		{"no storage key", "", "adopt-teams"},
-		{"no parse function", "showdown_teams", ""},
-	} {
-		func() {
-			defer func() {
-				if recover() == nil {
-					t.Fatalf("Adopt with %s must panic", c.what)
-				}
-			}()
-			Adopt(c.key, c.fn)
-		}()
 	}
 }

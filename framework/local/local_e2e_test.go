@@ -51,15 +51,11 @@ var (
 	e2eDrafts *Collection[e2eDraft]
 	e2ePref   *Collection[e2ePrefs]
 	e2eSeed   *SeededSignal[e2eDraft]
-	e2eNum    *SeededCount[e2eDraft]
 	// Collections no marker on the page touches, so a test can plant a
 	// stored version and watch the FIRST migration of a collection run
 	// — the page's own markers migrate drafts and prefs at scan time.
 	e2eNotes  *Collection[e2eDraft]
 	e2eTagged *Collection[e2eTag]
-	// A collection seeded from a key this package does not own, the way
-	// an app that already stores something adopts it.
-	e2eAdopted *Collection[e2eDraft]
 )
 
 type e2eTag struct {
@@ -85,11 +81,6 @@ func e2eDeclare(t *testing.T) {
 			Version: 2, Mirror: true,
 			Migrations: []Migration{{Version: 2, Steps: []Step{Rename("colour", "theme")}}},
 		})
-		e2eAdopted = Define[e2eDraft](e2eSite, "adopted", CollectionConfig{
-			Version: 2, KeyField: "id", MaxRecordBytes: 512, MaxRecords: 8, MaxBytes: 4096,
-			Migrations: []Migration{{Version: 2, Steps: []Step{Adopt("legacy-notes", "adopt-notes")}}},
-		})
-		e2eNum = SeedCount(e2eDrafts, store.New("e2elocal").Int("ndrafts", 0))
 		e2eSeed = SeedSignal(e2eDrafts, "current", store.JSON[e2eDraft](store.New("e2elocal"), "current", e2eDraft{Title: "server default"}))
 	})
 }
@@ -124,8 +115,6 @@ func startE2E(t *testing.T, tls ...bool) *e2eServer {
 	block := uiruntime.BehaviorsJSON()
 	e := &e2eServer{}
 	up := Send(e2eDrafts.Key("current"), e2ePref)
-	// One record, whichever the page names on the trigger at click time.
-	any := Send(e2eDrafts.AnyKey())
 	mux := http.NewServeMux()
 	mux.HandleFunc("/__gofastr/runtime.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/javascript")
@@ -147,10 +136,6 @@ func startE2E(t *testing.T, tls ...bool) *e2eServer {
 		w.Header().Set("Content-Type", "application/javascript")
 		_, _ = w.Write([]byte(`window.__migrated = 0;
 (window.__gofastr._localMigrations = window.__gofastr._localMigrations || {})['drafts-v2'] = (rec) => { window.__migrated++; rec.title = (rec.title || '') + ' (v2)'; return rec; };
-(window.__gofastr._localAdopters = window.__gofastr._localAdopters || {})['adopt-notes'] = (text) => text.split('\n').filter((l) => l).map((line) => {
-  const bar = line.indexOf('|');
-  return { k: line.slice(0, bar), v: { id: line.slice(0, bar), title: line.slice(bar + 1) } };
-});
 window.__errors = []; window.addEventListener('gofastr:local-error', (e) => window.__errors.push(e.detail));
 window.__migrations = []; window.addEventListener('gofastr:local-migrated', (e) => window.__migrations.push(e.detail));`))
 	})
@@ -171,15 +156,6 @@ window.__migrations = []; window.addEventListener('gofastr:local-migrated', (e) 
 			_ = Put(w, e2eDrafts, "current", e2eDraft{ID: "current", Title: s.Current.Title + " (server)"})
 			_ = Put(w, e2eDrafts, "from-server", e2eDraft{ID: "from-server", Title: "pushed"})
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}))
-	mux.Handle("/upload-any", any.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var s e2eSeen
-		s.Drafts, s.Err = List(r.Context(), e2eDrafts)
-		e.mu.Lock()
-		e.seen = append(e.seen, s)
-		e.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
@@ -208,15 +184,13 @@ window.__migrations = []; window.addEventListener('gofastr:local-migrated', (e) 
 		w.Header().Set("Content-Type", "text/html")
 		ctx := context.Background()
 		seedEl := e2eSeed.Bind(ctx, "p", map[string]string{"id": "seeded"})
-		countEl := e2eNum.Bind(ctx, "span", map[string]string{"id": "ndrafts"})
-		anyBtn := `<button id="send-any" data-fui-rpc="/upload-any" data-fui-rpc-method="POST" data-fui-rpc-signal="any-result"` + attrString(any.Attrs()) + `>one</button>`
 		form := `<form id="up" data-fui-rpc="/upload" data-fui-rpc-signal="up-result"` + attrString(up.Attrs()) + `><input name="note" value="hi"><button id="send" type="submit">send</button></form>`
 		fmt.Fprintf(w, `<!doctype html><html><head><title>local</title>`+
 			`<script type="application/json" id="gofastr-behaviors">%s</script></head><body>`+
-			`<main role="main"><span id="ready">ready</span>%s%s%s<span id="result" data-fui-signal="up-result"></span>`+
+			`<main role="main"><span id="ready">ready</span>%s%s<span id="result" data-fui-signal="up-result"></span>`+
 			`<a id="away" href="/other">other</a></main>`+
 			`<script src="/__gofastr/runtime.js"></script><script src="%s"></script><script src="/app.js"></script></body></html>`,
-			block, seedEl, countEl, form+anyBtn, e2eSite.ScriptURL())
+			block, seedEl, form, e2eSite.ScriptURL())
 	})
 	if len(tls) > 0 && tls[0] {
 		e.srv = httptest.NewTLSServer(mux)
@@ -431,92 +405,6 @@ func TestE2E_MigrationRunsOnce(t *testing.T) {
 	}
 }
 
-// Adopt: a foreign localStorage key the app already wrote becomes
-// records, once, under the same lock and the same stamp as any other
-// version step — and the foreign key survives it, because the
-// framework does not own it.
-func TestE2E_AdoptSeedsFromAForeignKeyOnceAndKeepsIt(t *testing.T) {
-	e := startE2E(t)
-	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
-	// The legacy write, from a page with no store marker: the store's
-	// migration must not race the plant.
-	if err := chromedp.Run(ctx,
-		chromedp.Navigate(e.srv.URL+"/plain"),
-		chromedp.WaitVisible(`#ready`, chromedp.ByID),
-		chromedp.Evaluate(`window.localStorage.setItem('legacy-notes', 'a|Alpha\nb|Beta\nc|Gamma')`, nil),
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	openPage(t, ctx, e.srv.URL+"/")
-	const adoptedJS = `window.__gofastr.localStore('e2e').collection('adopted')`
-	var list []map[string]any
-	evalJSON(t, ctx, adoptedJS+`.list()`, &list)
-	if len(list) != 3 {
-		t.Fatalf("adopted %d records from three lines: %v", len(list), list)
-	}
-	for i, want := range []string{"Alpha", "Beta", "Gamma"} {
-		v, _ := list[i]["value"].(map[string]any)
-		if v["title"] != want {
-			t.Fatalf("record %d = %v, want title %q — the app's parse assigns the key and the value", i, list[i], want)
-		}
-	}
-	var meta map[string]any
-	evalJSON(t, ctx, `window.__gofastr.local.get('local.e2e.adopted')`, &meta)
-	if v, _ := meta["v"].(float64); int(v) != 2 {
-		t.Fatalf("stored version = %v, want 2: an adoption stamps like any other step", meta)
-	}
-	var kept string
-	evalJSON(t, ctx, `Promise.resolve(window.localStorage.getItem('legacy-notes'))`, &kept)
-	if !strings.Contains(kept, "Alpha") {
-		t.Fatalf("the foreign key = %q: Adopt reads it and never deletes it", kept)
-	}
-
-	// A fourth line, then a reload: the step is stamped, so it does not
-	// run again and the collection is not re-seeded.
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`window.localStorage.setItem('legacy-notes', 'a|Alpha\nb|Beta\nc|Gamma\nd|Delta')`, nil)); err != nil {
-		t.Fatal(err)
-	}
-	openPage(t, ctx, e.srv.URL+"/")
-	evalJSON(t, ctx, adoptedJS+`.list()`, &list)
-	if len(list) != 3 {
-		t.Fatalf("after reload the collection holds %d records — an adoption runs ONCE per browser", len(list))
-	}
-}
-
-// A seeded COUNT is the collection's size, not a record: the screen
-// says "N drafts" without the app keeping a summary record beside the
-// records, and it follows every write.
-func TestE2E_SeededCountFollowsTheCollection(t *testing.T) {
-	e := startE2E(t)
-	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
-	openPage(t, ctx, e.srv.URL+"/")
-
-	if !pollTrue(ctx, `Promise.resolve(document.getElementById('ndrafts').textContent === '0')`) {
-		t.Fatal("an empty collection must seed the count to 0")
-	}
-	var ok bool
-	evalJSON(t, ctx, `Promise.all([`+draftsJS+`.put({id:'a',title:'one'}),`+draftsJS+`.put({id:'b',title:'two'})]).then(rs => rs.every(r => r.ok))`, &ok)
-	if !ok {
-		t.Fatal("two records within the caps were refused")
-	}
-	if !pollTrue(ctx, `Promise.resolve(document.getElementById('ndrafts').textContent === '2')`) {
-		var txt string
-		evalJSON(t, ctx, `Promise.resolve(document.getElementById('ndrafts').textContent)`, &txt)
-		t.Fatalf("after two puts the count binding says %q, want \"2\"", txt)
-	}
-	evalJSON(t, ctx, draftsJS+`.delete('a').then(r => r.ok)`, &ok)
-	if !pollTrue(ctx, `Promise.resolve(document.getElementById('ndrafts').textContent === '1')`) {
-		t.Fatal("a delete must move the count too")
-	}
-	// Reload: the count is the records, so it comes back without anyone
-	// storing it.
-	openPage(t, ctx, e.srv.URL+"/")
-	if !pollTrue(ctx, `Promise.resolve(document.getElementById('ndrafts').textContent === '1')`) {
-		t.Fatal("after a reload the count must be read from the collection again")
-	}
-}
-
 // The seed bridge: SSR paints the server's default, the runtime
 // patches the record in after hydration, a change to the signal
 // writes back, and the value survives a client-side navigation away
@@ -627,51 +515,6 @@ func TestE2E_UploadDeliversOnlyTheDeclaredAndDownloadWritesBack(t *testing.T) {
 
 // Two real tabs: a subscriber in one hears the other's write with
 // source 'tab', and its own with source 'local'.
-// AnyKey: the page names the record on the trigger at click time, one
-// record travels, and a trigger with no key refuses rather than send a
-// request without the record its markup promised.
-func TestE2E_AnyKeySendsTheRecordThePagePicked(t *testing.T) {
-	e := startE2E(t)
-	ctx := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))
-	openPage(t, ctx, e.srv.URL+"/")
-	evalJSON(t, ctx, `Promise.all([
-        `+draftsJS+`.put({id: 'a', title: 'first'}),
-        `+draftsJS+`.put({id: 'b', title: 'second'}),
-    ])`, nil)
-
-	// No data-local-key yet: the upload fails closed and says why.
-	if err := chromedp.Run(ctx, chromedp.Click(`#send-any`, chromedp.ByID)); err != nil {
-		t.Fatal(err)
-	}
-	if !pollTrue(ctx, `Promise.resolve(window.__errors.some((d) => d.reason === 'key'))`) {
-		t.Fatal("a trigger that declared AnyKey and carries no key must refuse, not send")
-	}
-
-	// The page picks one, the way a list row would.
-	if err := chromedp.Run(ctx,
-		chromedp.Evaluate(`document.getElementById('send-any').setAttribute('data-local-key', 'b')`, nil),
-		chromedp.Click(`#send-any`, chromedp.ByID),
-	); err != nil {
-		t.Fatal(err)
-	}
-	// The endpoint answers a signal this button does not paint, so wait
-	// on the server having been reached.
-	deadline := time.Now().Add(20 * time.Second)
-	for {
-		e.mu.Lock()
-		n := len(e.seen)
-		e.mu.Unlock()
-		if n > 0 || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	seen := e.last(t)
-	if len(seen.Drafts) != 1 || seen.Drafts[0].Key != "b" || seen.Drafts[0].Value.Title != "second" {
-		t.Fatalf("the handler read %+v, want only the record the page named", seen.Drafts)
-	}
-}
-
 func TestE2E_SecondTabSeesTheWrite(t *testing.T) {
 	e := startE2E(t)
 	tabA := chromedptest.Context(t, chromedptest.Timeout(120*time.Second))

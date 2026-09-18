@@ -66,25 +66,6 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   body the fail-closed pre-flight can never refuse; and a `Get` or `List`
   on an unwrapped request warns under `GOFASTR_DEV` instead of answering
   an empty result in silence.
-  Sharpened again by a second consumer — a port of a real client that
-  already stored its data in `localStorage`: `local.Adopt("<key>",
-  "<fn>")` is a version step over a key the package does not own, so
-  adopting an existing store is the framework's once-only, all-or-
-  nothing, locked, stamped migration with the app supplying only the
-  parse (and the keys a format with no id of its own lacks) — and the
-  foreign key is read, never deleted; `local.SeedCount(collection,
-  slice)` seeds a signal with the collection's `count()`, kept live by
-  `subscribe`, so "N teams" is no longer a denormalised summary record
-  that drifts; `Collection.AnyKey()` declares ONE record whose key the
-  page writes on the trigger as `data-local-key` at click time, bounded
-  at one record instead of the whole collection and accepted as exactly
-  one by the server, for "upload the one the user just picked" out of a
-  library; and `Store.Script()` returns the rail URL and the mount step
-  so an app whose host is built before its router can take the two
-  halves in either order (`Store.Serve` is unchanged). The doc says
-  plainly what the bridges are not: HTTP-shaped, so a WebSocket app
-  uploads through an action; and the mirror is a few small preferences,
-  because the Cookie header is the only first-paint channel there is.
 - **`data-fui-rpc-with="<module>"`** (`rpc.js`): the trigger names the
   modules the runtime loads before dispatching, and the request hooks
   on `__gofastr._rpcHooks.request` decorate the request the fetch is

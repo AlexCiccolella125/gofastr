@@ -104,42 +104,6 @@ func Default(field string, value any) Step { return Step{op: "default", field: f
 // Remove deletes field from every record.
 func Remove(field string) Step { return Step{op: "remove", field: field} }
 
-// Adopt is a version step over a FOREIGN key: the browser reads
-// localStorage[storageKey], hands its text to the function registered
-// as window.__gofastr._localAdopters[fn], and writes the records that
-// function returns into the collection — under the same lock, in the
-// same all-or-nothing transaction and behind the same version stamp
-// as every other step, so the adoption happens exactly ONCE per
-// browser and a half-failed one neither stamps nor answers.
-//
-// The app supplies only the parse. fn is (text, storageKey) =>
-// [{k, v}, …]: the key of each record and its value, so a format with
-// no identity of its own (the usual case for something an app already
-// stores) gets its key where the parse is, not in a rule the framework
-// guesses. A returned key the validator refuses, a value that does not
-// encode, and anything over the collection's caps all fail the
-// migration rather than landing half a library.
-//
-// The foreign key is READ and never written or deleted: the framework
-// does not own it, the app decides when its own legacy write stops,
-// and until it does the browser holds two copies. An adopted key that
-// the collection already holds is overwritten — the step runs once,
-// before the collection is anyone's source of truth.
-//
-// Registered like Func, on the host's extra-script rail, never inline.
-// A name with no function registered when the migration runs leaves
-// the records and the stored version untouched and raises
-// gofastr:local-error with reason "migration".
-func Adopt(storageKey, fn string) Step {
-	if storageKey == "" {
-		panic("local: Adopt needs the localStorage key to read")
-	}
-	if fn == "" {
-		panic("local: Adopt needs the name of a registered parse function")
-	}
-	return Step{op: "adopt", from: storageKey, name: fn}
-}
-
 // Func runs the browser function registered as
 // window.__gofastr._localMigrations[name] over every record,
 // (record, key) => record, loaded from the host's extra-script rail
@@ -160,8 +124,6 @@ func (st Step) MarshalJSON() ([]byte, error) {
 		return json.Marshal(map[string]any{"op": st.op, "field": st.field})
 	case "func":
 		return json.Marshal(map[string]any{"op": st.op, "name": st.name})
-	case "adopt":
-		return json.Marshal(map[string]any{"op": st.op, "from": st.from, "name": st.name})
 	}
 	return nil, fmt.Errorf("local: unknown migration step %q", st.op)
 }
@@ -366,40 +328,18 @@ type Ref struct {
 	key string
 }
 
-// AnyKey names ONE record of the collection whose key the page chooses
-// at click time: the trigger carries data-local-any="<collection>" and
-// the page script writes the key on it as data-local-key before the
-// click. "The team the user just picked" out of a two-thousand-record
-// library is that, and the alternative was rewriting data-local-send
-// from a script — which works, and is a string Go owns, and leaves the
-// derived upload bound at the WHOLE collection's size.
-//
-// The bound is one record (MaxRecordBytes plus the wire overhead), the
-// server accepts exactly one record for the collection, and any key
-// the validator accepts is inside the declaration: what the page picks
-// is not something the server knew when it rendered.
-func (c *Collection[T]) AnyKey() AnyRef { return AnyRef{def: c.def} }
-
-// AnyRef is Collection.AnyKey's Sendable.
-type AnyRef struct {
-	def *collectionDef
-}
-
 // sendItem is what Send records: a collection, and a key, "" for the
-// whole collection, or anyKey for one record the trigger names.
+// whole collection.
 type sendItem struct {
-	def    *collectionDef
-	key    string
-	anyKey bool
+	def *collectionDef
+	key string
 }
 
-// Sendable is a whole Collection, a Ref to one of its records, or an
-// AnyRef to one record the page names at click time.
+// Sendable is a whole Collection or a Ref to one of its records.
 type Sendable interface{ sendItem() sendItem }
 
 func (c *Collection[T]) sendItem() sendItem { return sendItem{def: c.def} }
 func (r Ref) sendItem() sendItem            { return sendItem{def: r.def, key: r.key} }
-func (a AnyRef) sendItem() sendItem         { return sendItem{def: a.def, anyKey: true} }
 
 // manifestEntry is the per-collection block the browser reads.
 type manifestEntry struct {
