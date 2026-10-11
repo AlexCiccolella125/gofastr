@@ -7,6 +7,31 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
 
 ## [Unreleased]
 
+## [0.87.1] - 2026-10-11
+
+### Changed
+- **`gofastr init` writes the agent detail files to `.agents/`.** They
+  went to a visible `agents/` folder at the project root, beside
+  `entities/`, `migrations/` and the app's own packages. They now go to
+  a hidden `.agents/` folder, and `AGENTS.md`, `CLAUDE.md` and the
+  gofastr-host skill link there. Run `gofastr agents sync` (or
+  `gofastr init --reinit`) once in an existing project: it writes
+  `.agents/`, deletes the old generated files in `agents/` (only files
+  with the auto-generated header, so a hand-written file there stays)
+  and removes the folder once nothing else is in it. It also points the
+  generated `agents/` references in `AGENTS.md`'s intro at `.agents/`,
+  and `--reinit` refreshes a stock `CLAUDE.md` from the earlier release.
+  An `agents` symlink is left as it is.
+
+### Added
+- **A sidebar can stay pinned under a sticky page header.**
+  `ui.ContentRowConfig.BelowHeader`, with `Sticky`, sticks the nav
+  column and the toolbar below `--size-header-height` instead of behind
+  the header, and makes the column the rest of the viewport tall, so a
+  long menu scrolls on its own while the page scrolls beside it.
+  `interactive.SectionMenuConfig.FillColumn` makes a section menu fill
+  that column. The docs site's `/components` menu uses both.
+
 ## [0.87.0] - 2026-10-10
 
 **BREAKING.** v0.87.0 reskins the default theme, gives entities screen
