@@ -7,7 +7,17 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
 
 ## [Unreleased]
 
+## [0.87.2] - 2026-10-12
+
 ### Added
+- **`gofastr dev` answers while the app is down.** During the first
+  build, after a failed build, and after the app exits, the dev address
+  returns 503 with `Retry-After` and says which of the three it is, the
+  build or lint output included, instead of refusing connections. Open
+  tabs reload into that page when a build fails and back into the app
+  when it is up again. A second `gofastr dev` on a busy address now
+  stops at startup instead of after its first build, except in a linked
+  worktree, where isolation moves it to the next free port (#483).
 - **`entityui.UI.WithCreatePath` sets the create screen's route.** An app
   that mounts its create screen at `/deals/new` instead of
   `/deals/create` passes one path function, and New, Duplicate, Create
@@ -20,6 +30,13 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   runtime now sends `Content-Type: application/json` on writes that have
   no body, which the transition route requires. GET and HEAD send no
   content type, and multipart forms keep the browser's boundary (#500).
+- **Worktree isolation remaps a listen port once.** In a linked
+  worktree, `gofastr dev --addr localhost:8791` printed one port while
+  the app bound another: the child remapped the address it was handed,
+  and `App.Start` remapped the result of `isolation.ListenAddr` again.
+  `Runtime.Env` now passes every recorded mapping to the child, and
+  active runtimes in one process with the same project, isolation ID
+  and port config share their mappings, so the app binds the address `gofastr dev` names.
 
 ## [0.87.1] - 2026-10-11
 
