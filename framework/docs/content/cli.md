@@ -18,7 +18,15 @@ each command to the doc that covers it.
   `main.go` reads `DATABASE_URL` from the environment and fails closed
   pointing at `.env` when it is unset — no DSN literal in committed
   source (a sqlite `file:<app>.db` path stays inline; it is not a
-  credential). `init . --reinit` refreshes the
+  credential). With the sample entity, entity CRUD mounts under `/api`
+  (`WithAPIPrefix("/api")`) and `battery/auth` is wired with `/login` and
+  `/register` screens in `screens_auth.go`; `.env` also carries a
+  freshly minted `JWT_SECRET`, which `main.go` reads from the
+  environment. Auth dev mode (plain session cookie, relaxed login
+  limiter) follows `GOFASTR_DEV`, which `gofastr dev` sets, so a copied
+  `.env` never relaxes a deployment. `init .` refuses to run when git
+  already tracks `.env` (untrack it with `git rm --cached .env` first),
+  since the new secret would land in the next commit. `init . --reinit` refreshes the
   AI-agent onboarding files in place (`--force` overwrites your edits);
   no Go code or git changes. A released CLI pins the generated `go.mod` to its
   matching GoFastr version. A local development build prints the exact

@@ -7,6 +7,63 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
 
 ## [Unreleased]
 
+### Added
+- **entityui lists warn when their row links lead nowhere.** The first
+  time a list renders rows whose `<base>/<id>` matches no registered
+  screen, it logs one warning per base naming the route to register.
+  Until now every row link 404ed with nothing in the log. The check runs
+  through `App.EntityUI` with a mounted `uihost` (`UIHost.HasScreen`);
+  a custom host opts in through `entityui.ScreenHost`. `NoLinks()` lists
+  skip it, and it remembers at most 256 bases (#503).
+- **The startup banner says how to get past the 401s.** When an entity
+  requires auth and nothing on the app signs callers in, the banner
+  prints one line: wire `battery/auth`, or set `Exposure.Public`.
+  `battery/auth` calls the new `App.NoteAuthenticator()` once `Init` has
+  run and a middleware that resolves callers exists
+  (`SessionMiddleware(mgr)`, `mgr.Middleware()`, or
+  `RequireAuth(mgr.JWT())`), so an `Init` with no middleware keeps the
+  hint up. `battery/desktop` calls it when its window identity takes
+  effect; a custom auth layer or a `TokenMiddleware`-only app calls it
+  too, and `App.AuthenticatorNoted()` reads it back (#503).
+- **An unknown `?include=` names the relation it was close to.**
+  `?include=issue` on an entity whose relation is `issue_id` now answers
+  `did you mean "issue_id"?`. Only a near miss (the `_id` form, the
+  foreign key, or the target entity) gets a suggestion; the error never
+  lists an entity's relations (#503).
+- **`gofastr init` scaffolds sign-in.** The sample app shipped CRUD
+  that answered 401 with no way to sign in. It now wires `battery/auth`
+  (users and sessions in the app's database, `SessionMiddleware`) and
+  writes `screens_auth.go` with `/login` and `/register`; the login form
+  carries `?next=` through to the redirect. Registering
+  lands on `/login?registered=1` with a notice rather than a session,
+  because the register endpoint answers a new and a taken address alike.
+  Entity CRUD mounts under `/api`, so a screen can own `/posts`. `.env`
+  gains a per-checkout `JWT_SECRET`. Auth dev mode follows `GOFASTR_DEV`
+  (set by `gofastr dev`), never `.env`, so outside the dev loop auth
+  issues Secure cookies and refuses to boot without a secret. `init .`
+  refuses a directory whose `.env` git already tracks (#503).
+- **`ui.AuthCard` has a `Notice` slot.** It renders a `role="status"`
+  message in the success color between the alert and the body, for
+  outcomes like "account created" that the danger-styled `Alert` would
+  misreport (#503).
+
+### Fixed
+- **`/api/llm.md` links honor `WithAPIPrefix`.** Under
+  `WithAPIPrefix("/api")` the index linked each resource to
+  `/<table>/llm.md` and showed unprefixed base paths, so every link
+  404ed, and each entity's own page listed `GET /<table>`. The index and
+  the per-entity pages now name the path the routes are mounted at, read-
+  only views included (#503).
+- **Active-link highlighting works outside a `<nav>`.** A link carrying
+  `data-cui-match-prefix` or `data-cui-activelink` in a header with no
+  `<nav>` landmark was never marked. The `activelink` module now sweeps
+  opt-in links wherever they sit; plain links outside a nav stay
+  untouched (#503).
+- **`gofastr version` names the release a `go install` built.** A binary
+  from `go install …/cmd/gofastr@v0.87.0` printed `GoFastr dev`. It now
+  reads the module version from the build info, and a build from a
+  checkout shows its VCS commit and commit time (#503).
+
 ## [0.87.2] - 2026-10-12
 
 ### Added
