@@ -48,6 +48,34 @@ stabilises). Breaking changes are clearly marked with **BREAKING**.
   misreport (#503).
 
 ### Fixed
+- **`core/static` answers `Range` requests.** `Range: bytes=0-99` got
+  `200` and the whole file with no `Accept-Ranges`, so a video served by
+  `static.Handler` could not seek, Safari would not play an mp4 from it,
+  and an interrupted download restarted from zero. A seekable file now
+  goes through `http.ServeContent`: `206` with `Content-Range`,
+  multi-range, `416` for a range past the end, and `If-Range`. A file
+  that cannot seek, or can only rewind, keeps the full-body answer and
+  advertises no ranges. A `HEAD` ignores `Range`, which RFC 9110
+  defines for `GET` only. The `NotFoundFile` page ignores `Range` and
+  preconditions, which name the missing URL, not the page (#507).
+- **`core/static` evaluates preconditions in RFC 9110 order.** A failed
+  `If-Match` or `If-Unmodified-Since` now answers `412`, ahead of the
+  `304` an `If-None-Match` match gives, on every filesystem.
+  `If-None-Match` compares weakly, so `W/"<etag>"` revalidates.
+  `If-Modified-Since` compares at the one-second precision
+  `Last-Modified` is sent with, so a disk file with a sub-second modtime
+  answers `304` to its own `Last-Modified` (#507).
+- **`core/static` no longer hashes a large file before serving it.**
+  The first request for a multi-GB video read the whole file through
+  SHA-256 before sending a byte. A file over 16 MiB is now hashed in the
+  background, at most two at a time per handler, and served without an
+  `ETag` until the digest lands; `Last-Modified` still revalidates it.
+  The `ETag` stays a content hash: one built from size and modtime
+  repeats across releases with pinned build timestamps, which would let
+  `If-Range` splice a resumed download from two versions. On Linux and
+  macOS the cached digest is also keyed on the file's inode and change
+  time, so an in-place rewrite of the same size with its modtime put back
+  (`cp -p`, `rsync -t`) gets a fresh ETag instead of the old one (#507).
 - **`/api/llm.md` links honor `WithAPIPrefix`.** Under
   `WithAPIPrefix("/api")` the index linked each resource to
   `/<table>/llm.md` and showed unprefixed base paths, so every link
